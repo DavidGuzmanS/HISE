@@ -37,7 +37,7 @@ String MonolithFileReference::getFileExtensionPrefix()
 	// Change this for the ultimate HISE customization: Make your own file format!
 	// Just change it here and you have created your own personal file format that
 	// everybody will love! WOW. So much professional!
-	return String("ch");
+	return String("tribe");
 }
 
 String MonolithFileReference::getIdFromValueTree(const ValueTree& v)

@@ -126,6 +126,10 @@
  //#define DONT_CREATE_EXPANSIONS_FOLDER 0
 #endif
 
+#ifndef    HISE_BACKEND_AS_FX
+ //#define HISE_BACKEND_AS_FX 0
+#endif
+
 #ifndef    USE_COPY_PROTECTION
  #define   USE_COPY_PROTECTION 0
 #endif
@@ -151,7 +155,11 @@
 #endif
 
 #ifndef    FORCE_INPUT_CHANNELS
- //#define FORCE_INPUT_CHANNELS 0
+ //#define FORCE_INPUT_CHANNELS 1
+#endif
+
+#ifndef    HI_DONT_SEND_ATTRIBUTE_UPDATES
+ //#define HI_DONT_SEND_ATTRIBUTE_UPDATES 0
 #endif
 
 #ifndef    HISE_DEACTIVATE_OVERLAY
@@ -235,11 +243,15 @@
 #endif
 
 #ifndef    HISE_USE_OPENGL_FOR_PLUGIN
- //#define HISE_USE_OPENGL_FOR_PLUGIN 0
+ #define   HISE_USE_OPENGL_FOR_PLUGIN 1
 #endif
 
 #ifndef    HISE_DEFAULT_OPENGL_VALUE
- //#define HISE_DEFAULT_OPENGL_VALUE 1
+ #define   HISE_DEFAULT_OPENGL_VALUE 0
+#endif
+
+#ifndef    HISE_USE_SYSTEM_APP_DATA_FOLDER
+ //#define HISE_USE_SYSTEM_APP_DATA_FOLDER 0
 #endif
 
 #ifndef    ENABLE_STARTUP_LOGGER
@@ -302,6 +314,13 @@
 
 #ifndef    HISE_INCLUDE_FAUST_JIT
  //#define HISE_INCLUDE_FAUST_JIT 0
+#endif
+
+//==============================================================================
+// hi_faust_types flags:
+
+#ifndef    FAUST_NO_WARNING_MESSAGES
+ #define   FAUST_NO_WARNING_MESSAGES 1
 #endif
 
 //==============================================================================
@@ -380,6 +399,10 @@
 
 #ifndef    HISE_INCLUDE_PITCH_DETECTION
  //#define HISE_INCLUDE_PITCH_DETECTION 1
+#endif
+
+#ifndef    HISE_ENABLE_LORIS_ON_FRONTEND
+ //#define HISE_ENABLE_LORIS_ON_FRONTEND 0
 #endif
 
 #ifndef    HISE_USE_EXTENDED_TEMPO_VALUES
@@ -630,6 +653,13 @@
 
 #ifndef    JUCE_ENABLE_LIVE_CONSTANT_EDITOR
  //#define JUCE_ENABLE_LIVE_CONSTANT_EDITOR 0
+#endif
+
+//==============================================================================
+// juce_product_unlocking flags:
+
+#ifndef    JUCE_USE_BETTER_MACHINE_IDS
+ //#define JUCE_USE_BETTER_MACHINE_IDS 0
 #endif
 
 //==============================================================================

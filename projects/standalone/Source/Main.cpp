@@ -765,7 +765,7 @@ public:
     class MainWindow    : public DocumentWindow
     {
     public:
-        MainWindow(const String &commandLine)  : DocumentWindow ("HISE",
+        MainWindow(const String &commandLine)  : DocumentWindow ("TRIBE",
                                         Colours::lightgrey,
 										DocumentWindow::TitleBarButtons::closeButton | DocumentWindow::maximiseButton | DocumentWindow::TitleBarButtons::minimiseButton)
         {
