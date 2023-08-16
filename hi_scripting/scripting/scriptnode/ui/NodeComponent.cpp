@@ -181,6 +181,8 @@ void NodeComponent::Header::resized()
 
 void NodeComponent::Header::mouseDown(const MouseEvent& e)
 {
+	CHECK_MIDDLE_MOUSE_DOWN(e);
+
 	if (e.mods.isRightButtonDown())
 	{
 		parent.handlePopupMenuResult((int)MenuActions::EditProperties);
@@ -189,6 +191,8 @@ void NodeComponent::Header::mouseDown(const MouseEvent& e)
 
 void NodeComponent::Header::mouseUp(const MouseEvent& e)
 {
+	CHECK_MIDDLE_MOUSE_UP(e);
+
 	if (e.mods.isRightButtonDown())
 	{
 		return;
@@ -207,6 +211,8 @@ void NodeComponent::Header::mouseUp(const MouseEvent& e)
 
 void NodeComponent::Header::mouseDrag(const MouseEvent& e)
 {
+	CHECK_MIDDLE_MOUSE_DRAG(e);
+
 	if (isDragging)
 	{
 		d.dragComponent(&parent, e, nullptr);
@@ -308,7 +314,7 @@ void NodeComponent::Header::paint(Graphics& g)
 							 parent.node->findParentNodeOfType<NoMidiChainNode>() == nullptr;
 
 		Path p;
-		p.loadPathFromData(HiBinaryData::SpecialSymbols::midiData, sizeof(HiBinaryData::SpecialSymbols::midiData));
+		p.loadPathFromData(HiBinaryData::SpecialSymbols::midiData, SIZE_OF_PATH(HiBinaryData::SpecialSymbols::midiData));
 
 		PathFactory::scalePath(p, ar.removeFromRight(ar.getHeight()).reduced(4.0f));
 
@@ -424,7 +430,7 @@ void NodeComponent::paintOverChildren(Graphics& g)
 		}
 
 		Path fp;
-		fp.loadPathFromData(HnodeIcons::freezeIcon, sizeof(HnodeIcons::freezeIcon));
+		fp.loadPathFromData(HnodeIcons::freezeIcon, SIZE_OF_PATH(HnodeIcons::freezeIcon));
 		auto pSize = jmin(200, getWidth(), getHeight());
 		auto bl = b.withSizeKeepingCentre(pSize, pSize).toFloat();
 		PathFactory::scalePath(fp, bl);
@@ -874,7 +880,15 @@ void DeactivatedComponent::resized()
 }
 
 
-juce::Array<hise::PathFactory::Description> NodeComponent::Factory::getDescription() const
+Component* NodeComponentFactory::createComponent(NodeBase* node)
+{
+	return dynamic_cast<juce::Component*>(node->createComponent());
+}
+
+String NodeComponentFactory::getId() const
+{ return "Scriptnode"; }
+
+juce::Array<hise::PathFactory::Description> NodeComponentFactory::getDescription() const
 {
 	Array<Description> d;
 
@@ -904,43 +918,37 @@ juce::Array<hise::PathFactory::Description> NodeComponent::Factory::getDescripti
 	return d;
 }
 
-juce::Path NodeComponent::Factory::createPath(const String& id) const
+juce::Path NodeComponentFactory::createPath(const String& id) const
 {
 	Path p;
 	auto url = MarkdownLink::Helpers::getSanitizedFilename(id);
 
-	LOAD_PATH_IF_URL("on", HiBinaryData::ProcessorEditorHeaderIcons::bypassShape);
-	LOAD_PATH_IF_URL("fold", HiBinaryData::ProcessorEditorHeaderIcons::foldedIcon);
-	LOAD_PATH_IF_URL("delete", HiBinaryData::ProcessorEditorHeaderIcons::closeIcon);
+	LOAD_EPATH_IF_URL("on", HiBinaryData::ProcessorEditorHeaderIcons::bypassShape);
+	LOAD_EPATH_IF_URL("fold", HiBinaryData::ProcessorEditorHeaderIcons::foldedIcon);
+	LOAD_EPATH_IF_URL("delete", HiBinaryData::ProcessorEditorHeaderIcons::closeIcon);
 	LOAD_PATH_IF_URL("move", ColumnIcons::moveIcon);
 	LOAD_PATH_IF_URL("goto", ColumnIcons::targetIcon);
-	LOAD_PATH_IF_URL("parameter", HiBinaryData::SpecialSymbols::macros);
-	LOAD_PATH_IF_URL("split", ScriptnodeIcons::splitIcon);
-	LOAD_PATH_IF_URL("freeze", HnodeIcons::freezeIcon);
-	LOAD_PATH_IF_URL("chain", ScriptnodeIcons::chainIcon);
-	LOAD_PATH_IF_URL("multi", ScriptnodeIcons::multiIcon);
-	LOAD_PATH_IF_URL("modchain", ScriptnodeIcons::modIcon);
-	LOAD_PATH_IF_URL("midichain", HiBinaryData::SpecialSymbols::midiData);
-	LOAD_PATH_IF_URL("oversample2x", ScriptnodeIcons::os2Icon);
-	LOAD_PATH_IF_URL("oversample4x", ScriptnodeIcons::os4Icon);
-	LOAD_PATH_IF_URL("oversample8x", ScriptnodeIcons::os8Icon);
-	LOAD_PATH_IF_URL("clipboard", SampleMapIcons::pasteSamples);
-	LOAD_PATH_IF_URL("newnode", HiBinaryData::ProcessorEditorHeaderIcons::addIcon);
-	LOAD_PATH_IF_URL("oldnode", EditorIcons::swapIcon);
-	LOAD_PATH_IF_URL("clone", SampleMapIcons::copySamples);
+	LOAD_EPATH_IF_URL("parameter", HiBinaryData::SpecialSymbols::macros);
+	LOAD_EPATH_IF_URL("split", ScriptnodeIcons::splitIcon);
+	LOAD_EPATH_IF_URL("freeze", HnodeIcons::freezeIcon);
+	LOAD_EPATH_IF_URL("chain", ScriptnodeIcons::chainIcon);
+	LOAD_EPATH_IF_URL("multi", ScriptnodeIcons::multiIcon);
+	LOAD_EPATH_IF_URL("modchain", ScriptnodeIcons::modIcon);
+	LOAD_EPATH_IF_URL("midichain", HiBinaryData::SpecialSymbols::midiData);
+	LOAD_EPATH_IF_URL("oversample2x", ScriptnodeIcons::os2Icon);
+	LOAD_EPATH_IF_URL("oversample4x", ScriptnodeIcons::os4Icon);
+	LOAD_EPATH_IF_URL("oversample8x", ScriptnodeIcons::os8Icon);
+	LOAD_EPATH_IF_URL("clipboard", SampleMapIcons::pasteSamples);
+	LOAD_EPATH_IF_URL("newnode", HiBinaryData::ProcessorEditorHeaderIcons::addIcon);
+	LOAD_EPATH_IF_URL("oldnode", EditorIcons::swapIcon);
+	LOAD_EPATH_IF_URL("clone", SampleMapIcons::copySamples);
 
 	if (url.startsWith("fix"))
-	{
-		p.loadPathFromData(ScriptnodeIcons::fixIcon, sizeof(ScriptnodeIcons::fixIcon));
-	}
+		p.loadPathFromData(ScriptnodeIcons::fixIcon, ScriptnodeIcons::fixIcon_Size);
 	
 	if (url.contains("frame"))
-	{
-		p.loadPathFromData(ScriptnodeIcons::frameIcon, sizeof(ScriptnodeIcons::frameIcon));
-	}
-
-
-
+		p.loadPathFromData(ScriptnodeIcons::frameIcon, ScriptnodeIcons::frameIcon_Size);
+	
 	return p;
 }
 
@@ -949,9 +957,9 @@ juce::Path NodeComponent::Factory::createPath(const String& id) const
 juce::Path NodeComponent::EmbeddedNetworkBar::Factory::createPath(const String& url) const
 {
 	Path p;
-	LOAD_PATH_IF_URL("freeze", HnodeIcons::freezeIcon);
+	LOAD_EPATH_IF_URL("freeze", HnodeIcons::freezeIcon);
 	LOAD_PATH_IF_URL("goto", ColumnIcons::openWorkspaceIcon);
-	LOAD_PATH_IF_URL("warning", EditorIcons::warningIcon);
+	LOAD_EPATH_IF_URL("warning", EditorIcons::warningIcon);
 	return p;
 }
 

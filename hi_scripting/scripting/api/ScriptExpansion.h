@@ -49,22 +49,11 @@ public:
 
 	~ScriptUserPresetHandler();
 
-	Identifier getObjectName() const override { RETURN_STATIC_IDENTIFIER("UserPresetHandler"); }
+	Identifier getObjectName() const override;
 
-	int getNumChildElements() const override
-	{
-		return 2;
-	}
+	int getNumChildElements() const override;
 
-	DebugInformationBase* getChildElement(int index) override
-	{
-		if (index == 0)
-			return preCallback.createDebugObject("preCallback");
-		if (index == 1)
-			return postCallback.createDebugObject("postCallback");
-        
-        return nullptr;
-	}
+	DebugInformationBase* getChildElement(int index) override;
 
 	// =================================================================================== API Methods
 
@@ -77,12 +66,18 @@ public:
 	/** Sets a callback that will be executed after the preset has been loaded. */
 	void setPostCallback(var presetPostCallback);
 
+	/** Sets a callback that will be executed after a preset has been saved. */
+	void setPostSaveCallback(var presetPostSaveCallback);
+
 	/** Enables a preprocessing of every user preset that is being loaded. */
 	void setEnableUserPresetPreprocessing(bool processBeforeLoading, bool shouldUnpackComplexData);
 
     /** Returns true if the user preset that is about to be loaded is a DAW state (or initial state). This function is only useful during the pre / post load callbacks. */
     bool isInternalPresetLoad() const;
     
+	/** Returns true if this is called somewhere inside a preset load. This takes the thread ID into account to avoid false positives when calling this on another thread. */
+	bool isCurrentlyLoadingPreset() const;
+
 	/** Checks if the given version string is a older version than the current project version number. */
 	bool isOldVersion(const String& version);
 
@@ -92,8 +87,8 @@ public:
 	/** Enables host / MIDI automation with the custom user preset model. */
 	void setCustomAutomation(var automationData);
 
-	/** Attaches a callback to automation changes. Use empty string to attach to all callbacks. */
-	void attachAutomationCallback(String automationId, var updateCallback, bool isSynchronous);
+	/** Attaches a callback to automation changes. Pass a non-function as updateCallback to remove the callback for the given automation ID. */
+	void attachAutomationCallback(String automationId, var updateCallback, var isSynchronous);
 
 	/** Clears all attached callbacks. */
 	void clearAttachedCallbacks();
@@ -113,6 +108,12 @@ public:
 	/** Restores the values for all UI elements that are connected to a processor with the `processorID` / `parameterId` properties. */
 	void updateConnectedComponentsFromModuleState();
 	
+	/** Returns the automation index. */
+	int getAutomationIndex(String automationID);
+
+	/** Sends an automation value change for the given index. */
+	bool setAutomationValue(int automationIndex, float newValue);
+
 	/** Runs a few tests that catches data persistency issues. */
 	void runTest();
 
@@ -126,43 +127,14 @@ public:
 
 	void presetChanged(const File& newPreset) override;
 
-	void presetListUpdated() override
-	{
+	void presetSaved(const File& newPreset) override;
 
-	}
+	void presetListUpdated() override;
 
-	
 
-	void loadCustomUserPreset(const var& dataObject) override
-	{
-		if (customLoadCallback)
-		{
-			var args = dataObject;
-			auto ok = customLoadCallback.callSync(&args, 1, nullptr);
+	void loadCustomUserPreset(const var& dataObject) override;
 
-			if (!ok.wasOk())
-				debugError(getMainController()->getMainSynthChain(), ok.getErrorMessage());
-		}
-	}
-
-	var saveCustomUserPreset(const String& presetName) override
-	{
-		if (customSaveCallback)
-		{
-			var rv;
-			var args = presetName;
-			auto ok = customSaveCallback.callSync(&args, 1, &rv);
-
-			if (!ok.wasOk())
-				debugError(getMainController()->getMainSynthChain(), ok.getErrorMessage());
-
-			return rv;
-		}
-
-		return {};
-	}
-	
-	
+	var saveCustomUserPreset(const String& presetName) override;
 
 private:
 
@@ -193,6 +165,7 @@ private:
 	bool unpackComplexData = false;
 	WeakCallbackHolder preCallback;
 	WeakCallbackHolder postCallback;
+	WeakCallbackHolder postSaveCallback;
 
 	WeakCallbackHolder customLoadCallback;
 	WeakCallbackHolder customSaveCallback;
@@ -396,41 +369,11 @@ public:
 	struct DefaultHandler : public ControlledObject,
 		public ExpansionHandler::Listener
 	{
-		DefaultHandler(MainController* mc, ValueTree t) :
-			ControlledObject(mc),
-			defaultPreset(t),
-			defaultIsLoaded(true)
-		{
-			getMainController()->getExpansionHandler().addListener(this);
-		}
+		DefaultHandler(MainController* mc, ValueTree t);
 
-		~DefaultHandler()
-		{
-			getMainController()->getExpansionHandler().removeListener(this);
-		}
+		~DefaultHandler();
 
-		void expansionPackLoaded(Expansion* e) override
-		{
-			if (e != nullptr)
-			{
-				defaultIsLoaded = false;
-			}
-			else
-			{
-				if (!defaultIsLoaded)
-				{
-					auto copy = defaultPreset.createCopy();
-
-					getMainController()->getKillStateHandler().killVoicesAndCall(getMainController()->getMainSynthChain(), [copy, this](Processor* p)
-					{
-						defaultIsLoaded = true;
-						p->getMainController()->loadPresetFromValueTree(copy);
-
-						return SafeFunctionCall::OK;
-					}, MainController::KillStateHandler::SampleLoadingThread);
-				}
-			}
-		}
+		void expansionPackLoaded(Expansion* e) override;
 
 	private:
 
@@ -438,16 +381,9 @@ public:
 		bool defaultIsLoaded = true;
 	};
 
-	FullInstrumentExpansion(MainController* mc, const File& f) :
-		ScriptEncryptedExpansion(mc, f)
-	{
+	FullInstrumentExpansion(MainController* mc, const File& f);
 
-	}
-
-	~FullInstrumentExpansion()
-	{
-		getMainController()->getExpansionHandler().removeListener(this);
-	}
+	~FullInstrumentExpansion();
 
 	static void setNewDefault(MainController* mc, ValueTree t);
 
@@ -455,10 +391,7 @@ public:
 
 	static Expansion* getCurrentFullExpansion(const MainController* mc);
 
-	void setIsProjectExporter()
-	{
-		isProjectExport = true;
-	}
+	void setIsProjectExporter();
 
 	ValueTree getValueTreeFromFile(Expansion::ExpansionType type);
 
@@ -470,10 +403,7 @@ public:
 
 	Result encodeExpansion() override;
 
-	ValueTree getEmbeddedNetwork(const String& id) override
-	{
-		return networks.getChildWithProperty("ID", id);
-	}
+	ValueTree getEmbeddedNetwork(const String& id) override;
 
 	bool fullyLoaded = false;
 	ValueTree presetToLoad;
@@ -570,6 +500,14 @@ class ExpansionEncodingWindow : public DialogWindowWithBackgroundThread,
 {
 public:
 
+	enum class ExportMode
+	{
+		HXI,			// The default expansion format
+		Rhapsody,		// LWZ zip file
+		HiseProject,	// The default expansion with the file extension .hiseproject and the project setting XML file
+		numExportModes
+	};
+
 	static constexpr int AllExpansionId = 9000000;
 
 	ExpansionEncodingWindow(MainController* mc, Expansion* eToEncode, bool isProjectExport, bool isRhapsody=true);
@@ -580,7 +518,7 @@ public:
 		showStatusMessage(message);
 	}
 
-	Result performRhapsodyChecks();
+	Result performChecks();
 
 	void run() override;
 	void threadFinished();
@@ -588,7 +526,8 @@ public:
 	Result encodeResult;
 	
 	bool projectExport = false;
-	bool isRhapsody;
+	
+	ExportMode exportMode = ExportMode::HXI;
 
 	File rhapsodyOutput;
 

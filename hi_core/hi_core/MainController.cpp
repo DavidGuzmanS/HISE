@@ -52,7 +52,6 @@ MainController::MainController() :
 	temp_usage(0.0f),
 	uptime(0.0),
 	bpm(120.0),
-	bpmFromHost(120.0),
 	hostIsPlaying(false),
 	console(nullptr),
 	voiceAmount(0),
@@ -73,6 +72,7 @@ MainController::MainController() :
 	masterEventBuffer(),
 	eventIdHandler(masterEventBuffer),
 	lockfreeDispatcher(this),
+	moduleStateManager(this),
 	userPresetHandler(this),
 	codeHandler(this),
 	processorChangeHandler(this),
@@ -84,6 +84,10 @@ MainController::MainController() :
 	xyzPool(new MultiChannelAudioBuffer::XYZPool())
 {
 	PresetHandler::setCurrentMainController(this);
+
+	getUserPresetHandler().addStateManager(getMacroManager().getMidiControlAutomationHandler());
+	getUserPresetHandler().addStateManager(&getMacroManager().getMidiControlAutomationHandler()->getMPEData());
+	getUserPresetHandler().addStateManager(&moduleStateManager);
 
 	globalFont = GLOBAL_FONT();
 
@@ -102,6 +106,10 @@ MainController::MainController() :
 	hostInfo = new DynamicObject();
     
 	startTimer(500);
+    
+#if PERFETTO
+    MelatoninPerfetto::get().beginSession();
+#endif
 };
 
 
@@ -123,6 +131,10 @@ MainController::~MainController()
 
 	sampleManager = nullptr;
 	javascriptThreadPool = nullptr;
+    
+#if PERFETTO
+    MelatoninPerfetto::get().endSession();
+#endif
 }
 
 
@@ -236,6 +248,7 @@ void MainController::clearPreset()
         mc->getLocationUndoManager()->clearUndoHistory();
         mc->getMasterClock().reset();
         
+        mc->clearWebResources();
 		mc->setGlobalRoutingManager(nullptr);
 
 		BACKEND_ONLY(mc->getJavascriptThreadPool().getGlobalServer()->setInitialised());
@@ -385,7 +398,7 @@ void MainController::loadPresetInternal(const ValueTree& v)
             
 			allNotesOff(true);
             
-            
+			getUserPresetHandler().initDefaultPresetManager({});
 		}
 		catch (String& errorMessage)
 		{
@@ -439,6 +452,8 @@ void MainController::compileAllScripts()
 			sp->compileScript();
 		}
 	}
+
+	getUserPresetHandler().initDefaultPresetManager({});
 };
 
 void MainController::allNotesOff(bool resetSoftBypassState/*=false*/)
@@ -693,16 +708,16 @@ void MainController::stopBufferToPlay()
 	}
 }
 
-void MainController::setBufferToPlay(const AudioSampleBuffer& buffer, const std::function<void(int)>& pf)
+void MainController::setBufferToPlay(const AudioSampleBuffer& buffer, double bufferSampleRate, const std::function<void(int)>& pf)
 {
 	if (buffer.getNumSamples() > 400000 && getKillStateHandler().getCurrentThread() != KillStateHandler::SampleLoadingThread)
 	{
 		AudioSampleBuffer copy;
 		copy.makeCopyOf(buffer);
 
-		killAndCallOnLoadingThread([copy, pf](Processor* p)
+		killAndCallOnLoadingThread([copy, bufferSampleRate, pf](Processor* p)
 		{
-			p->getMainController()->setBufferToPlay(copy, pf);
+			p->getMainController()->setBufferToPlay(copy, bufferSampleRate, pf);
 			return SafeFunctionCall::OK;
 		});
 
@@ -710,13 +725,22 @@ void MainController::setBufferToPlay(const AudioSampleBuffer& buffer, const std:
 	}
 
 	{
-		LockHelpers::SafeLock sl(this, LockHelpers::AudioLock);
+        AudioSampleBuffer copy;
+        copy.makeCopyOf(buffer);
+        
+		{
+			LockHelpers::SafeLock sl(this, LockHelpers::AudioLock);
 
-		previewBufferIndex = 0;
-		previewBuffer = buffer;
-		previewFunction = pf;
-		fadeOutPreviewBuffer = false;
-		fadeOutPreviewBufferGain = 1.0f;
+			previewBufferIndex = 0;
+			std::swap(previewBuffer, copy);
+			previewFunction = pf;
+
+			if (originalSampleRate > 0)
+				previewBufferDelta = bufferSampleRate / originalSampleRate;
+
+			fadeOutPreviewBuffer = false;
+			fadeOutPreviewBufferGain = 1.0f;
+		}
 	}
 
 	for (auto pl : previewListeners)
@@ -728,6 +752,11 @@ void MainController::setBufferToPlay(const AudioSampleBuffer& buffer, const std:
 int MainController::getPreviewBufferPosition() const
 {
 	return previewBufferIndex;
+}
+
+int MainController::getPreviewBufferSize() const
+{
+	return previewBuffer.getNumSamples();
 }
 
 void MainController::setKeyboardCoulour(int keyNumber, Colour colour)
@@ -786,7 +815,7 @@ hise::RLottieManager::Ptr MainController::getRLottieManager()
 
 void MainController::processBlockCommon(AudioSampleBuffer &buffer, MidiBuffer &midiMessages)
 {
-	if (getKillStateHandler().getStateLoadFlag())
+    if (getKillStateHandler().getStateLoadFlag())
 		return;
 
 	AudioThreadGuard audioThreadGuard(&getKillStateHandler());
@@ -834,7 +863,13 @@ void MainController::processBlockCommon(AudioSampleBuffer &buffer, MidiBuffer &m
 		return;
 #endif
 
-    numSamplesThisBlock = buffer.getNumSamples();
+    if(numSamplesThisBlock != buffer.getNumSamples())
+    {
+        numSamplesThisBlock = buffer.getNumSamples();
+        blocksizeBroadcaster.sendMessage(sendNotificationSync, numSamplesThisBlock);
+    }
+    
+    
     
 #if USE_BACKEND || USE_SCRIPT_COPY_PROTECTION
 	if (auto ul = dynamic_cast<ScriptUnlocker*>(getLicenseUnlocker()))
@@ -872,7 +907,7 @@ void MainController::processBlockCommon(AudioSampleBuffer &buffer, MidiBuffer &m
 
 
 #if ENABLE_CPU_MEASUREMENT
-	startCpuBenchmark(numSamplesThisBlock);
+	startCpuBenchmark(getOriginalBufferSize());
 #endif
 
 	jassert(getOriginalBufferSize() >= numSamplesThisBlock);
@@ -916,6 +951,8 @@ void MainController::processBlockCommon(AudioSampleBuffer &buffer, MidiBuffer &m
 	AudioPlayHead::CurrentPositionInfo newTime;
 	MasterClock::GridInfo gridInfo;
 
+	double hostBpm = -1.0;
+
 	bool useTime = false;
 
     auto insideInternalExport = getKillStateHandler().isCurrentlyExporting();
@@ -930,11 +967,11 @@ void MainController::processBlockCommon(AudioSampleBuffer &buffer, MidiBuffer &m
 		// so we use the time info from the internal clock...
 		if (!useTime)
 			newTime = getMasterClock().createInternalPlayHead();
+		else
+			hostBpm = newTime.bpm;
 
 	}
 
-	
-	
 	if (getMasterClock().shouldCreateInternalInfo(newTime) || insideInternalExport)
 	{
 		auto externalTime = newTime;
@@ -963,28 +1000,25 @@ void MainController::processBlockCommon(AudioSampleBuffer &buffer, MidiBuffer &m
 
 	storePlayheadIntoDynamicObject(lastPosInfo);
 	
-	bpmFromHost = lastPosInfo.bpm;
-
 	if (hostIsPlaying != lastPosInfo.isPlaying)
 	{
 		hostIsPlaying = lastPosInfo.isPlaying;
-
-		FX_ONLY(masterEventBuffer.addEvent(HiseEvent(hostIsPlaying ? HiseEvent::Type::NoteOn :
-															 HiseEvent::Type::NoteOff, 
-											 60, 127, 1));)
 	}
 
-	if (bpmFromHost == 0.0)
-		bpmFromHost = 120.0;
-
-	auto otherBpm = *hostBpmPointer;
-
-	if (otherBpm > 0)
-		setBpm((double)otherBpm);
-	else
+	
+	if (hostBpm == -1.0)
 	{
-		setBpm(bpmFromHost);
+		// We need to get the host bpm again...
+		if (auto ph = thisAsProcessor->getPlayHead())
+		{
+			AudioPlayHead::CurrentPositionInfo bpmInfo;
+			ph->getCurrentPosition(bpmInfo);
+
+			hostBpm = bpmInfo.bpm;
+		}
 	}
+
+	setBpm(getMasterClock().getBpmToUse(hostBpm, *internalBpmPointer));
 	
 #endif
 
@@ -1018,9 +1052,11 @@ void MainController::processBlockCommon(AudioSampleBuffer &buffer, MidiBuffer &m
 		AudioSampleBuffer thisMultiChannelBuffer(multiChannelBuffer.getArrayOfWritePointers(), multiChannelBuffer.getNumChannels(), 0, numSamplesThisBlock);
 		thisMultiChannelBuffer.clear();
 
-		FloatVectorOperations::copy(thisMultiChannelBuffer.getWritePointer(0), buffer.getReadPointer(0), numSamplesThisBlock);
-		FloatVectorOperations::copy(thisMultiChannelBuffer.getWritePointer(1), buffer.getReadPointer(1), numSamplesThisBlock);
+		int numChannelsToCopy = jmin(thisMultiChannelBuffer.getNumChannels(), buffer.getNumChannels());
 
+		for(int i = 0; i < numChannelsToCopy; i++)
+			FloatVectorOperations::copy(thisMultiChannelBuffer.getWritePointer(i), buffer.getReadPointer(i), numSamplesThisBlock);
+		
 		if (oversampler == nullptr)
 		{
 			synthChain->renderNextBlockWithModulators(thisMultiChannelBuffer, masterEventBuffer);
@@ -1042,9 +1078,16 @@ void MainController::processBlockCommon(AudioSampleBuffer &buffer, MidiBuffer &m
 
 		buffer.clear();
 
-		// Just use the first two channels. You need to route back all your send channels to the first stereo pair.
-		FloatVectorOperations::copy(buffer.getWritePointer(0), thisMultiChannelBuffer.getReadPointer(0), numSamplesThisBlock);
-		FloatVectorOperations::copy(buffer.getWritePointer(1), thisMultiChannelBuffer.getReadPointer(1), numSamplesThisBlock);
+		auto& matrix = getMainSynthChain()->getMatrix();
+
+		for (int i = 0; i < numChannelsToCopy; i++)
+		{
+			auto c = matrix.getConnectionForSourceChannel(i);
+
+			if(c != -1)
+				FloatVectorOperations::add(buffer.getWritePointer(c), thisMultiChannelBuffer.getReadPointer(i), numSamplesThisBlock);
+		}
+			
     }
     else
     {
@@ -1114,22 +1157,28 @@ void MainController::processBlockCommon(AudioSampleBuffer &buffer, MidiBuffer &m
 
 	if (previewBufferIndex != -1)
 	{
-		int numToPlay = jmin<int>(numSamplesThisBlock, previewBuffer.getNumSamples() - previewBufferIndex);
+		int numChannels = jmin(multiChannelBuffer.getNumChannels(), previewBuffer.getNumChannels());
 
-		if (numToPlay > 0)
+		for (int i = 0; i < numSamplesThisBlock; i++)
 		{
-            for(int i = 0; i < multiChannelBuffer.getNumChannels(); i++)
-            {
-                if(isPositiveAndBelow(i, previewBuffer.getNumChannels()))
-                {
-                    FloatVectorOperations::copy(multiChannelBuffer.getWritePointer(i, 0), previewBuffer.getReadPointer(i, previewBufferIndex), numToPlay);
-                }
-            }
-            
-			if (previewFunction)
-				previewFunction(previewBufferIndex);
+			int loIndex = (int)previewBufferIndex;
+			int hiIndex = jmin(loIndex + 1, previewBuffer.getNumSamples() - 1);
+			float alpha = (float)previewBufferIndex - (float)loIndex;
 
-			previewBufferIndex += numToPlay;
+			for (int c = 0; c < numChannels; c++)
+			{
+				auto loSample = previewBuffer.getSample(c, loIndex);
+				auto hiSample = previewBuffer.getSample(c, hiIndex);
+				auto value = Interpolator::interpolateLinear(loSample, hiSample, alpha);
+				multiChannelBuffer.addSample(c, i, value);
+			}
+
+			previewBufferIndex += previewBufferDelta;
+
+			if (previewBufferIndex >= previewBuffer.getNumSamples())
+			{
+				break;
+			}
 		}
 
 		if (fadeOutPreviewBuffer)
@@ -1324,7 +1373,7 @@ void MainController::prepareToPlay(double sampleRate_, int samplesPerBlock)
 	processingBufferSize = jmin(maximumBlockSize, originalBufferSize) * currentOversampleFactor;
 	processingSampleRate = originalSampleRate * currentOversampleFactor;
  
-	hostBpmPointer = &dynamic_cast<GlobalSettingManager*>(this)->globalBPM;
+	internalBpmPointer = &dynamic_cast<GlobalSettingManager*>(this)->globalBPM;
 
 	// Prevent high buffer sizes from blowing up the 350MB limitation...
 	if (HiseDeviceSimulator::isAUv3())
@@ -1415,24 +1464,6 @@ void MainController::setBpm(double newTempo)
 		}
 	}
 };
-
-void MainController::setHostBpm(double newTempo)
-{
-	if (newTempo > 0.0)
-	{
-		auto nt = jlimit(32.0, 280.0, newTempo);
-
-		dynamic_cast<GlobalSettingManager*>(this)->globalBPM = nt;
-		
-		setBpm(newTempo);
-	}
-	else
-	{
-		dynamic_cast<GlobalSettingManager*>(this)->globalBPM = -1;
-		
-		setBpm(bpmFromHost);
-	}
-}
 
 bool MainController::isSyncedToHost() const
 {
@@ -1943,132 +1974,196 @@ hise::MainController::UserPresetHandler::CustomAutomationData::Ptr MainControlle
 	return nullptr;
 }
 
-void removePropertyRecursive(NamedValueSet& removedProperties, String currentPath, ValueTree v, const Identifier& id)
+void MainController::UserPresetHandler::addStateManager(UserPresetStateManager* newManager)
 {
-	if (!currentPath.isEmpty())
-		currentPath << ":";
+	stateManagers.addIfNotAlreadyThere(newManager);
+}
 
-	currentPath << v.getType();
+void MainController::UserPresetHandler::removeStateManager(UserPresetStateManager* managerToRemove)
+{
+	stateManagers.removeAllInstancesOf(managerToRemove);
+}
 
-	if (v.hasProperty(id))
+bool MainController::UserPresetHandler::restoreStateManager(const ValueTree& newPreset, const Identifier& id)
+{
+	auto unconst = const_cast<ValueTree*>(&newPreset);
+	return processStateManager(false, *unconst, id);
+}
+
+bool MainController::UserPresetHandler::saveStateManager(ValueTree& newPreset, const Identifier& id)
+{
+	return processStateManager(true, newPreset, id);
+}
+
+bool MainController::UserPresetHandler::processStateManager(bool shouldSave, ValueTree& presetRoot, const Identifier& stateId)
+{
+	for (int i = 0; i < stateManagers.size(); i++)
 	{
-		auto value = v.getProperty(id);
-		v.removeProperty(id, nullptr);
-		removedProperties.set(Identifier(currentPath + ":" + id.toString()), value);
+		if (stateManagers[i] == nullptr)
+			stateManagers.remove(i--);
+	}
+
+	jassert(presetRoot.getType() == Identifier("Preset") || presetRoot.getType() == Identifier("ControlData"));
+
+	static const Array<Identifier> specialStates =
+	{
+		UserPresetIds::MidiAutomation,
+		UserPresetIds::MPEData,
+		UserPresetIds::CustomJSON,
+		UserPresetIds::Modules
+	};
+
+	auto wantsSpecialState = stateId != UserPresetIds::AdditionalStates;
+
+	for (auto s : stateManagers)
+	{
+		auto shouldProcess = wantsSpecialState ? 
+			s->getUserPresetStateId() == stateId :
+			!specialStates.contains(s->getUserPresetStateId());
+
+		if (shouldProcess)
+		{
+			if (shouldSave)
+				s->saveUserPresetState(presetRoot);
+			else
+				s->restoreUserPresetState(presetRoot);
+		}
 	}
 	
-	for (auto c : v)
-		removePropertyRecursive(removedProperties, currentPath, c, id);
+
+	return true;
 }
 
-MainController::UserPresetHandler::StoredModuleData::StoredModuleData(var moduleId, Processor* pToRestore) :
-	p(pToRestore)
+void MainController::UserPresetHandler::initDefaultPresetManager(const ValueTree& defaultState)
 {
-	if (moduleId.isString())
-		id = moduleId.toString();
-	else
+	if (defaultPresetManager == nullptr)
+		defaultPresetManager = new DefaultPresetManager(*this);
+
+	defaultPresetManager->init(defaultState);
+}
+
+
+
+
+MainController::UserPresetHandler::DefaultPresetManager::DefaultPresetManager(UserPresetHandler& parent):
+	ControlledObject(parent.mc)
+{
+
+}
+
+void MainController::UserPresetHandler::DefaultPresetManager::init(const ValueTree& v)
+{
+	auto mc = getMainController();
+	auto defaultValue = mc->getCurrentFileHandler().getDefaultUserPreset();
+
+	if (defaultValue.isEmpty())
+		return;
+
+	interfaceProcessor = JavascriptMidiProcessor::getFirstInterfaceScriptProcessor(getMainController());
+
+#if USE_BACKEND
+
+	auto userPresetRoot = mc->getCurrentFileHandler().getSubDirectory(FileHandlerBase::UserPresets);
+	auto f = userPresetRoot.getChildFile(defaultValue).withFileExtension(".preset");
+
+	if (f.existsAsFile())
 	{
-		id = moduleId["ID"].toString();
+		// only set the default file if it's a child of the user preset directory
+		// (in order to allow a "hidden" default user preset)
+		if (f.isAChildOf(userPresetRoot)) 
+			defaultFile = f;
 
-		auto rp = moduleId["RemovedProperties"];
-		auto rc = moduleId["RemovedChildElements"];
+		if (auto xml = XmlDocument::parse(f))
+			defaultPreset = ValueTree::fromXml(*xml);
+	}
 
-		if (rp.isArray() || rc.isArray())
+	
+#else
+	
+	if (v.isValid())
+		defaultPreset = v;
+
+#endif
+
+	resetToDefault();
+}
+
+void MainController::UserPresetHandler::DefaultPresetManager::resetToDefault()
+{
+	if (defaultPreset.isValid())
+	{
+		auto& up = getMainController()->getUserPresetHandler();
+		
+		if (defaultFile.existsAsFile())
+			up.setCurrentlyLoadedFile(defaultFile);
+		
+		MainController::ScopedBadBabysitter sbs(getMainController());
+
+		up.loadUserPreset(defaultPreset, false);
+	}
+		
+}
+
+juce::var MainController::UserPresetHandler::DefaultPresetManager::getDefaultValue(const String& componentId) const
+{
+	if (defaultPreset.isValid())
+	{
+		auto t = defaultPreset.getChild(0).getChildWithProperty("id", componentId);
+
+		if (t.isValid())
+			return t["value"];
+	}
+
+	return {};
+}
+
+juce::var MainController::UserPresetHandler::DefaultPresetManager::getDefaultValue(int componentIndex) const
+{
+	if (auto sp = dynamic_cast<ProcessorWithScriptingContent*>(interfaceProcessor.get()))
+	{
+		if (auto sc = sp->getScriptingContent()->getComponent(componentIndex))
 		{
-			auto v = p->exportAsValueTree();
+			return getDefaultValue(sc->getName().toString());
+		}
 
-			if (rp.isArray())
-			{
-				for (auto propertyToRemove : *rp.getArray())
-				{
-					auto pid_ = propertyToRemove.toString();
-					if (pid_.isNotEmpty())
-					{
-						Identifier pid(pid_);
-						removePropertyRecursive(removedProperties, {}, v, pid);
-					}
-				}
-			}
-			
-			if (rc.isArray())
-			{
-				for (auto childToRemove : *rc.getArray())
-				{
-					auto pid_ = childToRemove.toString();
+		jassertfalse;
+	}
 
-					if (pid_.isNotEmpty())
-					{
-						Identifier pid(pid_);
-						removedChildElements.add(v.getChildWithName(pid).createCopy());
-					}
-				}
-			}
+	return {};
+}
 
-			removedProperties.remove(Identifier("Processor:ID"));
+MainController::UserPresetHandler::CustomStateManager::CustomStateManager(UserPresetHandler& parent_) :
+	parent(parent_)
+{
+	parent.addStateManager(this);
+}
+
+void MainController::UserPresetHandler::CustomStateManager::restoreFromValueTree(const ValueTree &v)
+{
+	auto obj = ValueTreeConverters::convertValueTreeToDynamicObject(v);
+
+	if (obj.isObject() || obj.isArray())
+	{
+		for (auto l : parent.listeners)
+		{
+			l->loadCustomUserPreset(obj);
 		}
 	}
 }
 
-void restorePropertiesRecursive(ValueTree v, StringArray path, const var& value, bool restore)
+juce::ValueTree MainController::UserPresetHandler::CustomStateManager::exportAsValueTree() const
 {
-	if (path.size() == 2)
+	for (auto l : parent.listeners)
 	{
-		if (Identifier(path[0]) == v.getType())
-		{
-			auto id = Identifier(path[1]);
+		auto obj = l->saveCustomUserPreset("Unused");
 
-			if (restore)
-				v.setProperty(id, value, nullptr);
-			else
-				v.removeProperty(id, nullptr);
-		}
+		if (obj.isObject())
+			return ValueTreeConverters::convertDynamicObjectToValueTree(obj, getUserPresetStateId());
 	}
-	else
-	{
-		path.remove(0);
 
-		for (auto c : v)
-			restorePropertiesRecursive(c, path, value, restore);
-	}
+	return ValueTree(getUserPresetStateId());
+
+
 }
-
-void MainController::UserPresetHandler::StoredModuleData::stripValueTree(ValueTree& v)
-{
-	for (const auto& rp : removedProperties)
-	{
-		auto path = StringArray::fromTokens(rp.name.toString(), ":", "\"");
-		
-		restorePropertiesRecursive(v, path, {}, false);
-	}
-		
-
-	for (const auto& rc : removedChildElements)
-	{
-		auto cToRemove = v.getChildWithName(rc.getType());
-
-		if (cToRemove.isValid())
-			v.removeChild(cToRemove, nullptr);
-	}
-}
-
-
-
-void MainController::UserPresetHandler::StoredModuleData::restoreValueTree(ValueTree& v)
-{
-	stripValueTree(v);
-
-	for (const auto& rp : removedProperties)
-	{
-		auto path = StringArray::fromTokens(rp.name.toString(), ":", "\"");
-		auto value = rp.value;
-		restorePropertiesRecursive(v, path, value, true);
-	}
-		
-
-	for (const auto& rc : removedChildElements)
-		v.addChild(rc.createCopy(), -1, nullptr);
-}
-
-
 
 } // namespace hise

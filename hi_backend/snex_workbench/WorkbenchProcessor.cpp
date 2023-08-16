@@ -252,17 +252,6 @@ bool SnexWorkbenchEditor::perform(const InvocationInfo &info)
 
 		return true;
 	}
-	case ToolsSetBPM:
-	{
-		auto bpm = PresetHandler::getCustomName(String(getProcessor()->getBpm()), "Enter the BPM value");
-
-		auto nBpm = bpm.getDoubleValue();
-
-		if(nBpm != 0.0)
-			getProcessor()->setHostBpm(nBpm);
-
-		return true;
-	}
 	case ToolsClearDlls:
 	{
 		if (dllManager->projectDll != nullptr)
@@ -738,9 +727,9 @@ struct IncludeSorter
 				return false;
 			};
 
-			auto firstIsReferencedInSecond = ValueTreeIterator::forEach(v1, ValueTreeIterator::ChildrenFirst, f2);
+			auto firstIsReferencedInSecond = valuetree::Helpers::forEach(v1, f2, valuetree::Helpers::IterationType::ChildrenFirst);
 
-			auto secondIsReferencedInFirst = ValueTreeIterator::forEach(v1, ValueTreeIterator::ChildrenFirst, f2);
+			auto secondIsReferencedInFirst = valuetree::Helpers::forEach(v1, f2, valuetree::Helpers::IterationType::ChildrenFirst);
 
 			String e;
 			e << "Cyclic reference: ";
@@ -1183,56 +1172,7 @@ void DspNetworkCompileExporter::run()
 		for (auto tpf : thirdPartyFiles)
 		{
 			includedThirdPartyFiles.insert(0, tpf);
-
-#if 0
-			auto target = sourceDir.getChildFile(tpf.getFileName());
-
-			if (target.existsAsFile())
-			{
-				auto sourceContent = tpf.loadFileAsString();
-				auto targetContent = target.loadFileAsString();
-
-				if (sourceContent.compare(targetContent) != 0)
-				{
-					auto sourceTime = tpf.getLastModificationTime();
-					auto targetTime = target.getLastModificationTime();
-
-					if (targetTime > sourceTime)
-					{
-						errorMessage << "A newer version of the file " << tpf.getFileName() << " is already in the target folder.  \n> This file will get overriden by the ";
-						ok = ErrorCodes::SanityCheckFailed;
-						return;
-
-					}
-
-					
-				}
-			}
-
-			tpf.copyFileTo(target);
-			includedThirdPartyFiles.insert(0, target);
-#endif
-
-			
 		}
-
-#if 0
-		auto srcDir = BackendDllManager::getThirdPartyFiles(getMainController(), true).getFirst();
-
-		if (srcDir.isDirectory())
-		{
-			showStatusMessage("Copying /src folder");
-
-			auto targetSrc = sourceDir.getChildFile(srcDir.getFileName());
-			auto additionalSrc = BackendDllManager::getSubFolder(getMainController(), BackendDllManager::FolderSubType::AdditionalCode);
-
-			targetSrc.deleteRecursively();
-			additionalSrc.deleteRecursively();
-
-			srcDir.copyDirectoryTo(targetSrc);
-			srcDir.copyDirectoryTo(additionalSrc);
-		}	
-#endif
 	}
 
 	if (!externalSamples.isEmpty())
@@ -1385,6 +1325,10 @@ void DspNetworkCompileExporter::threadFinished()
 
 	if (ok == ErrorCodes::OK)
 	{
+		if (isUsingCIMode()) {
+			return;
+		}
+
 #if JUCE_DEBUG
 		writeDebugFileAndShowSolution();
 #endif
@@ -1863,7 +1807,7 @@ void DspNetworkCompileExporter::createMainCppFile(bool isDllMainFile)
 		}
 
 		{
-			b << "DLL_EXPORT scriptnode::Error getError()";
+			b << "DLL_EXPORT ErrorC getError()";
 			StatementBlock bk(b);
 			b << "return f.getError();";
 		}
@@ -1882,7 +1826,7 @@ void DspNetworkCompileExporter::createMainCppFile(bool isDllMainFile)
 	}
 	else
 	{
-		b << "scriptnode::dll::FactoryBase* hise::FrontendHostFactory::createStaticFactory()";
+		b << "scriptnode::dll::FactoryBase* scriptnode::DspNetwork::createStaticFactory()";
 		{
 			StatementBlock sb(b);
 			b << "return new project::Factory();";

@@ -44,6 +44,7 @@ namespace InterfaceDesignerShortcuts
 	DECLARE_ID(id_rebuild);
 	DECLARE_ID(id_lock_selection);
 	DECLARE_ID(id_show_json);
+    DECLARE_ID(id_show_panel_data_json);
 	DECLARE_ID(id_duplicate);
 }
 #undef DECLARE_ID
@@ -222,6 +223,8 @@ public:
 			static bool zoomIn(Editor& e);
 			static bool zoomOut(Editor& e);
 			static bool toggleEditMode(Editor& e);
+
+			static bool move(Editor& e);
 
 			static bool lockSelection(Editor& e);
 
@@ -547,6 +550,26 @@ private:
 	ScopedPointer<Console> console;
 
 };
+
+// Forward declare a few floating tiles so that we can move the header to the implementation files
+
+namespace ScriptingObjects {
+
+struct ScriptBroadcasterPanel : public PanelWithProcessorConnection
+{
+	ScriptBroadcasterPanel(FloatingTile* parent);;
+
+	SET_PANEL_NAME("ScriptBroadcasterMap");
+
+	Identifier getProcessorTypeId() const override;
+
+	Component* createContentComponent(int) override;
+
+	void fillModuleList(StringArray& moduleList) override;
+};
+
+}
+
 
 struct BackendCommandIcons
 {

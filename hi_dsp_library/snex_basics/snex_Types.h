@@ -185,7 +185,7 @@ template <typename T> ID getTypeFromTypeId()
 		return ID::Integer;
 	if (std::is_same<T, void*>())
 		return ID::Pointer;
-
+	
 	return ID::Void;
 }
 
@@ -651,17 +651,20 @@ struct PolyHandler
 
 		jassert(ph->enabled != 0);
 
-		return ph->getVoiceIndex();
+		auto voiceIndex = ph->getVoiceIndex();
+
+		if (voiceIndex == -1)
+			return 0;
+
+		return voiceIndex;
 	}
 
 	static int getSizeStatic(PolyHandler* ph)
-	{
-		if (ph == nullptr)
-			return 0;
-
-		jassert(ph->enabled != 0);
-
-		if (ph->getVoiceIndex() == -1)
+    {
+        if (ph == nullptr)
+            return 0;
+        
+        if (!ph->enabled || ph->getVoiceIndex() == -1)
 			return 1;
 
 		return 0;
@@ -701,6 +704,108 @@ private:
 	DllBoundaryTempoSyncer* tempoSyncer = nullptr;
 };
 
+
+struct VoiceDataStack
+{
+	struct VoiceData
+	{
+		bool operator==(const VoiceData& other) const
+		{
+			return other.voiceIndex == voiceIndex && noteOn == other.noteOn;
+		}
+
+		int voiceIndex;
+		HiseEvent noteOn;
+	};
+
+	void reset(int voiceIndex)
+	{
+		for (int i = 0; i < voiceNoteOns.size(); i++)
+		{
+			if (voiceNoteOns[i].voiceIndex == voiceIndex)
+			{
+				voiceNoteOns.removeElement(i--);
+				break;
+			}
+		}
+	}
+
+	bool containsVoiceIndex(int voiceIndex) const
+	{
+		for (const auto& vd : voiceNoteOns)
+		{
+			if (voiceIndex == vd.voiceIndex)
+				return true;
+		}
+
+		return false;
+	}
+
+	template <typename T> void handleHiseEvent(T& n, PolyHandler& ph, const HiseEvent& m)
+	{
+		if (m.isNoteOff())
+		{
+			for (auto vd : voiceNoteOns)
+			{
+				if (vd.noteOn.getEventId() == m.getEventId())
+				{
+					HiseEvent c(m);
+					PolyHandler::ScopedVoiceSetter vs(ph, vd.voiceIndex);
+					n.handleHiseEvent(c);
+				}
+			}
+		}
+		else if (m.isPitchWheel() || m.isAftertouch() || m.isController())
+		{
+			if (voiceNoteOns.isEmpty())
+			{
+				HiseEvent c(m);
+				n.handleHiseEvent(c);
+			}
+			else
+			{
+				for (auto vd : voiceNoteOns)
+				{
+					if (vd.noteOn.getChannel() == m.getChannel())
+					{
+						HiseEvent c(m);
+						PolyHandler::ScopedVoiceSetter vs(ph, vd.voiceIndex);
+						n.handleHiseEvent(c);
+					}
+				}
+			}
+		}
+		else if (!m.isNoteOn())
+		{
+			for (auto vd : voiceNoteOns)
+			{
+				HiseEvent c(m);
+				PolyHandler::ScopedVoiceSetter vs(ph, vd.voiceIndex);
+				n.handleHiseEvent(c);
+			}
+		}
+	}
+
+	template <typename T> void startVoice(T& n, PolyHandler& ph, int voiceIndex, const HiseEvent& e)
+	{
+		voiceNoteOns.insertWithoutSearch({ voiceIndex, e });
+		HiseEvent c(e);
+
+		PolyHandler::ScopedVoiceSetter vs(ph, voiceIndex);
+
+		HiseEvent copy(e);
+
+		{
+			// Deactivate reset calls of envelopes killing the voice before it begins...
+			PolyHandler::ScopedNoReset vs(ph, voiceIndex);
+			n.reset();
+		}
+
+		n.handleHiseEvent(copy);
+	}
+
+	UnorderedStack<VoiceData, NUM_POLYPHONIC_VOICES> voiceNoteOns;
+};
 
 /** A data structure containing the processing details for the context.
     @ingroup snex_data_structures
@@ -964,7 +1069,7 @@ template <typename T, int NumVoices> struct PolyData
 #if JUCE_DEBUG
 		String s;
 		s << "VoiceIndex: ";
-		s << (voicePtr != nullptr ? String(*voicePtr) : "inactive");
+		s << (voicePtr != nullptr ? String(voicePtr->getVoiceIndex()) : "inactive");
 		return s;
 #else
 		return {};

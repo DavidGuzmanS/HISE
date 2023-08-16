@@ -41,21 +41,34 @@ namespace valuetree
 
 struct Helpers
 {
+	enum class IterationType
+	{
+		Forward,
+		Backwards,
+		ChildrenFirst,
+		ChildrenFirstBackwards,
+		OnlyChildren,
+		OnlyChildrenBackwards
+	};
+	
+	static bool isBetween(IterationType l, IterationType u, IterationType v);
+	static bool isBackwards(IterationType t);
+	static bool isRecursive(IterationType t);
+
 	using Function = std::function<bool(ValueTree&)>;
 
-	static bool foreach(ValueTree v, const Function& f)
-	{
-		if (f(v))
-			return true;
+	static bool forEach(ValueTree v, const Function& f, IterationType type=IterationType::Forward);
 
-		for (auto c : v)
-		{
-			if (foreach(c, f))
-				return true;
-		}
+	static void dump(const ValueTree& v);
 
-		return false;
-	}
+	static var valueTreeToJSON(const ValueTree& v);
+	static juce::ValueTree jsonToValueTree(var data, const Identifier& typeId, bool isParentData=true);
+	static ValueTree findParentWithType(const ValueTree& v, const Identifier& id);
+	static bool isLast(const ValueTree& v);
+	static bool isParent(const ValueTree& v, const ValueTree& possibleParent);
+	static int getIndexInParent(const ValueTree& v);
+	static ValueTree getRoot(const ValueTree& v);
+	static bool forEachParent(ValueTree& v, const Function& f);
 };
 
 enum class AsyncMode
@@ -119,41 +132,17 @@ struct AnyListener : private Base,
 
 	AnyListener(AsyncMode mode_ = AsyncMode::Asynchronously);
 
-	void setMillisecondsBetweenUpdate(int milliSeconds)
-	{
-		if (milliSeconds == 0)
-			mode = AsyncMode::Asynchronously;
-		else
-		{
-			mode = AsyncMode::Coallescated;
-			milliSecondsBetweenUpdate = milliSeconds;
-		}
-	}
+	void setMillisecondsBetweenUpdate(int milliSeconds);
 
-	void setEnableLogging(bool shouldLog)
-	{
-		loggingEnabled = shouldLog;
-	}
+	void setEnableLogging(bool shouldLog);
 
-	void setRootValueTree(const ValueTree& d)
-	{
-		data = d;
-		data.addListener(this);
+	void setRootValueTree(const ValueTree& d);
 
-		anythingChanged(lastCallbackType);
-	}
-
-	void setForwardCallback(CallbackType c, bool shouldForward)
-	{
-		forwardCallbacks[c] = shouldForward;
-	}
+	void setForwardCallback(CallbackType c, bool shouldForward);
 
 protected:	
 
-	void setPropertyCondition(const PropertyConditionFunc& f)
-	{
-		pcf = f;
-	}
+	void setPropertyCondition(const PropertyConditionFunc& f);
 
 	virtual void anythingChanged(CallbackType cb) = 0;
 

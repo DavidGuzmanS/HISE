@@ -79,6 +79,7 @@ DECLARE_ID(ExtraDefinitionsLinux);
 DECLARE_ID(AppGroupID);
 DECLARE_ID(RedirectSampleFolder);
 DECLARE_ID(AAXCategoryFX);
+DECLARE_ID(VST3Category);
 DECLARE_ID(SupportMonoFX);
 DECLARE_ID(EnableSoundGeneratorsFX);
 DECLARE_ID(EnableMidiInputFX);
@@ -93,8 +94,10 @@ DECLARE_ID(ReadOnlyFactoryPresets);
 DECLARE_ID(ForceStereoOutput);
 DECLARE_ID(AdminPermissions);
 DECLARE_ID(EmbedUserPresets);
+DECLARE_ID(OverwriteOldUserPresets);
 DECLARE_ID(UseGlobalAppDataFolderWindows);
 DECLARE_ID(UseGlobalAppDataFolderMacOS);
+DECLARE_ID(DefaultUserPreset);
 
 Array<Identifier> getAllIds();
 
@@ -147,6 +150,7 @@ DECLARE_ID(CodeFontSize);
 DECLARE_ID(EnableOptimizations);
 DECLARE_ID(EnableDebugMode);
 DECLARE_ID(SaveConnectedFilesOnCompile);
+DECLARE_ID(EnableMousePositioning);
 
 Array<Identifier> getAllIds();
 
@@ -157,7 +161,6 @@ namespace Other
 DECLARE_ID(GlobalSamplePath);
 DECLARE_ID(UseOpenGL);
 DECLARE_ID(EnableShaderLineNumbers);
-DECLARE_ID(GlassEffect);
 DECLARE_ID(EnableAutosave);
 DECLARE_ID(AutosaveInterval);
 DECLARE_ID(AudioThreadGuardEnabled);

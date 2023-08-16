@@ -40,6 +40,91 @@ GlobalScriptCompileBroadcaster::GlobalScriptCompileBroadcaster() :
 	createDummyLoader();
 }
 
+GlobalScriptCompileBroadcaster::~GlobalScriptCompileBroadcaster()
+{
+	dummyLibraryLoader = nullptr;
+	globalEditBroadcaster = nullptr;
+    
+	clearIncludedFiles();
+}
+
+void GlobalScriptCompileBroadcaster::addScriptListener(GlobalScriptCompileListener* listener, bool insertAtBeginning)
+{
+	if (insertAtBeginning)
+	{
+		listenerListStart.addIfNotAlreadyThere(listener);
+	}
+	else
+	{
+		listenerListEnd.addIfNotAlreadyThere(listener);
+	}
+
+}
+
+void GlobalScriptCompileBroadcaster::removeScriptListener(GlobalScriptCompileListener* listener)
+{
+	listenerListStart.removeAllInstancesOf(listener);
+	listenerListEnd.removeAllInstancesOf(listener);
+}
+
+void GlobalScriptCompileBroadcaster::setShouldUseBackgroundThreadForCompiling(bool shouldBeEnabled) noexcept
+{ useBackgroundCompiling = shouldBeEnabled; }
+
+bool GlobalScriptCompileBroadcaster::isUsingBackgroundThreadForCompiling() const noexcept
+{ return useBackgroundCompiling; }
+
+void GlobalScriptCompileBroadcaster::setEnableCompileAllScriptsOnPresetLoad(bool shouldBeEnabled) noexcept
+{ enableGlobalRecompile = shouldBeEnabled; }
+
+bool GlobalScriptCompileBroadcaster::isCompilingAllScriptsOnPresetLoad() const noexcept
+{ return enableGlobalRecompile; }
+
+int GlobalScriptCompileBroadcaster::getNumExternalScriptFiles() const
+{ return includedFiles.size(); }
+
+ExternalScriptFile::Ptr GlobalScriptCompileBroadcaster::getExternalScriptFile(int index) const
+{
+	return includedFiles[index];
+}
+
+void GlobalScriptCompileBroadcaster::clearIncludedFiles()
+{
+	includedFiles.clear();
+}
+
+ScriptComponentEditBroadcaster* GlobalScriptCompileBroadcaster::getScriptComponentEditBroadcaster()
+{
+	return globalEditBroadcaster;
+}
+
+const ScriptComponentEditBroadcaster* GlobalScriptCompileBroadcaster::getScriptComponentEditBroadcaster() const
+{
+	return globalEditBroadcaster;
+}
+
+ReferenceCountedObject* GlobalScriptCompileBroadcaster::getCurrentScriptLookAndFeel()
+{ return currentScriptLaf.get(); }
+
+void GlobalScriptCompileBroadcaster::setCurrentScriptLookAndFeel(ReferenceCountedObject* newLaf)
+{
+	currentScriptLaf = newLaf;
+}
+
+ReferenceCountedObject* GlobalScriptCompileBroadcaster::getGlobalRoutingManager()
+{ return routingManager.get(); }
+
+void GlobalScriptCompileBroadcaster::setGlobalRoutingManager(ReferenceCountedObject* newManager)
+{ routingManager = newManager; }
+
+void GlobalScriptCompileBroadcaster::clearWebResources()
+{
+	webviews.clear();
+}
+
+void GlobalScriptCompileBroadcaster::setWebViewRoot(File newRoot)
+{
+	webViewRoot = newRoot;
+}
 
 
 void GlobalScriptCompileBroadcaster::sendScriptCompileMessage(JavascriptProcessor *processorThatWasCompiled)
@@ -162,6 +247,65 @@ ExternalScriptFile::Ptr GlobalScriptCompileBroadcaster::getExternalScriptFile(co
 	return includedFiles.getLast();
 }
 
+juce::ValueTree GlobalScriptCompileBroadcaster::exportWebViewResources()
+{
+	ValueTree v("WebViewResources");
+
+	for (const auto& wv : webviews)
+	{
+		auto data = std::get<1>(wv);
+
+		auto projectRoot = dynamic_cast<MainController*>(this)->getCurrentFileHandler().getRootFolder();
+
+		// We only embed file resources that are in the project directory (because then we'll assume
+		// that they are not likely to be installed on the end user's computer).
+		auto shouldEmbedResource = data->getRootDirectory().isAChildOf(projectRoot);
+
+		if (shouldEmbedResource)
+		{
+			auto id = std::get<0>(wv).toString();
+			auto c = data->exportAsValueTree();
+			c.setProperty("ID", id, nullptr);
+			v.addChild(c, -1, nullptr);
+		}
+	}
+
+	return v;
+}
+
+void GlobalScriptCompileBroadcaster::restoreWebResources(const ValueTree& v)
+{
+    clearWebResources();
+
+	for (auto c : v)
+	{
+		auto d = getOrCreateWebView(c["ID"].toString());
+		d->restoreFromValueTree(c);
+	}
+}
+
+hise::WebViewData::Ptr GlobalScriptCompileBroadcaster::getOrCreateWebView(const Identifier& id)
+{
+	for (const auto& wv : webviews)
+	{
+		if (std::get<0>(wv) == id)
+			return std::get<1>(wv);
+	}
+
+	webviews.add({ id, new WebViewData(webViewRoot) });
+	return std::get<1>(webviews.getLast());
+}
+
+Array<juce::Identifier> GlobalScriptCompileBroadcaster::getAllWebViewIds() const
+{
+	Array<Identifier> ids;
+
+	for (const auto& wv : webviews)
+		ids.add(std::get<0>(wv));
+
+	return ids;
+}
+
 void ExternalScriptFile::setRuntimeErrors(const Result& r)
 {
 	runtimeErrors.clearQuick();
@@ -215,4 +359,38 @@ String ExternalScriptFile::RuntimeError::toString() const
 	return e;
 }
 
+ExternalScriptFile::RuntimeError::RuntimeError() = default;
+
+ExternalScriptFile::ExternalScriptFile(const File& file):
+	file(file),
+	currentResult(Result::ok())
+{
+#if USE_BACKEND
+	content.replaceAllContent(file.loadFileAsString());
+	content.setSavePoint();
+	content.clearUndoHistory();
+#endif
+}
+
+ExternalScriptFile::~ExternalScriptFile()
+{
+
+}
+
+void ExternalScriptFile::setResult(Result r)
+{
+	currentResult = r;
+}
+
+CodeDocument& ExternalScriptFile::getFileDocument()
+{ return content; }
+
+Result ExternalScriptFile::getResult() const
+{ return currentResult; }
+
+File ExternalScriptFile::getFile() const
+{ return file; }
+
+ExternalScriptFile::RuntimeError::Broadcaster& ExternalScriptFile::getRuntimeErrorBroadcaster()
+{ return runtimeErrorBroadcaster; }
 } // namespace hise

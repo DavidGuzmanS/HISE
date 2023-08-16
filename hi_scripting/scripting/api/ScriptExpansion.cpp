@@ -37,14 +37,18 @@ struct ScriptUserPresetHandler::Wrapper
 {
 	API_VOID_METHOD_WRAPPER_1(ScriptUserPresetHandler, setPreCallback);
 	API_VOID_METHOD_WRAPPER_1(ScriptUserPresetHandler, setPostCallback);
+	API_VOID_METHOD_WRAPPER_1(ScriptUserPresetHandler, setPostSaveCallback);
 	API_VOID_METHOD_WRAPPER_2(ScriptUserPresetHandler, setEnableUserPresetPreprocessing);
 	API_VOID_METHOD_WRAPPER_1(ScriptUserPresetHandler, setCustomAutomation);
 	API_VOID_METHOD_WRAPPER_3(ScriptUserPresetHandler, setUseCustomUserPresetModel);
 	API_METHOD_WRAPPER_1(ScriptUserPresetHandler, isOldVersion);
     API_METHOD_WRAPPER_0(ScriptUserPresetHandler, isInternalPresetLoad);
+	API_METHOD_WRAPPER_0(ScriptUserPresetHandler, isCurrentlyLoadingPreset);
 	API_VOID_METHOD_WRAPPER_0(ScriptUserPresetHandler, clearAttachedCallbacks);
 	API_VOID_METHOD_WRAPPER_3(ScriptUserPresetHandler, attachAutomationCallback);
 	API_VOID_METHOD_WRAPPER_3(ScriptUserPresetHandler, updateAutomationValues);
+	API_METHOD_WRAPPER_1(ScriptUserPresetHandler, getAutomationIndex);
+	API_METHOD_WRAPPER_2(ScriptUserPresetHandler, setAutomationValue);
 	API_VOID_METHOD_WRAPPER_1(ScriptUserPresetHandler, updateSaveInPresetComponents);
 	API_VOID_METHOD_WRAPPER_0(ScriptUserPresetHandler, updateConnectedComponentsFromModuleState);
 	API_VOID_METHOD_WRAPPER_1(ScriptUserPresetHandler, setUseUndoForPresetLoading);
@@ -58,6 +62,7 @@ ScriptUserPresetHandler::ScriptUserPresetHandler(ProcessorWithScriptingContent* 
 	ControlledObject(pwsc->getMainController_()),
 	preCallback(pwsc, nullptr, var(), 1),
 	postCallback(pwsc, nullptr, var(), 1),
+	postSaveCallback(pwsc, nullptr, var(), 1),
 	customLoadCallback(pwsc, nullptr, var(), 1),
 	customSaveCallback(pwsc, nullptr, var(), 1)
 {
@@ -65,13 +70,17 @@ ScriptUserPresetHandler::ScriptUserPresetHandler(ProcessorWithScriptingContent* 
 
 	ADD_API_METHOD_1(isOldVersion);
     ADD_API_METHOD_0(isInternalPresetLoad);
+	ADD_API_METHOD_0(isCurrentlyLoadingPreset);
 	ADD_API_METHOD_1(setPostCallback);
+	ADD_API_METHOD_1(setPostSaveCallback);
 	ADD_API_METHOD_1(setPreCallback);
 	ADD_API_METHOD_2(setEnableUserPresetPreprocessing);
 	ADD_API_METHOD_1(setCustomAutomation);
 	ADD_API_METHOD_3(setUseCustomUserPresetModel);
 	ADD_API_METHOD_3(attachAutomationCallback);
 	ADD_API_METHOD_0(clearAttachedCallbacks);
+	ADD_API_METHOD_1(getAutomationIndex);
+	ADD_API_METHOD_2(setAutomationValue);
 	ADD_API_METHOD_3(updateAutomationValues);
 	ADD_API_METHOD_1(updateSaveInPresetComponents);
 	ADD_API_METHOD_0(updateConnectedComponentsFromModuleState);
@@ -88,6 +97,58 @@ ScriptUserPresetHandler::~ScriptUserPresetHandler()
 	
 
 	getMainController()->getUserPresetHandler().removeListener(this);
+}
+
+Identifier ScriptUserPresetHandler::getObjectName() const
+{ RETURN_STATIC_IDENTIFIER("UserPresetHandler"); }
+
+int ScriptUserPresetHandler::getNumChildElements() const
+{
+	return 2;
+}
+
+DebugInformationBase* ScriptUserPresetHandler::getChildElement(int index)
+{
+	if (index == 0)
+		return preCallback.createDebugObject("preCallback");
+	if (index == 1)
+		return postCallback.createDebugObject("postCallback");
+        
+	return nullptr;
+}
+
+void ScriptUserPresetHandler::presetListUpdated()
+{
+
+}
+
+void ScriptUserPresetHandler::loadCustomUserPreset(const var& dataObject)
+{
+	if (customLoadCallback)
+	{
+		var args = dataObject;
+		auto ok = customLoadCallback.callSync(&args, 1, nullptr);
+
+		if (!ok.wasOk())
+			debugError(getMainController()->getMainSynthChain(), ok.getErrorMessage());
+	}
+}
+
+var ScriptUserPresetHandler::saveCustomUserPreset(const String& presetName)
+{
+	if (customSaveCallback)
+	{
+		var rv;
+		var args = presetName;
+		auto ok = customSaveCallback.callSync(&args, 1, &rv);
+
+		if (!ok.wasOk())
+			debugError(getMainController()->getMainSynthChain(), ok.getErrorMessage());
+
+		return rv;
+	}
+
+	return {};
 }
 
 void ScriptUserPresetHandler::setUseUndoForPresetLoading(bool shouldUseUndoManager)
@@ -112,6 +173,14 @@ void ScriptUserPresetHandler::setPostCallback(var presetPostCallback)
 
 }
 
+void ScriptUserPresetHandler::setPostSaveCallback(var presetPostSaveCallback)
+{
+	postSaveCallback = WeakCallbackHolder(getScriptProcessor(), this, presetPostSaveCallback, 1);
+	postSaveCallback.incRefCount();
+	postSaveCallback.addAsSource(this, "postCallback");
+	postSaveCallback.setThisObject(this);
+}
+
 void ScriptUserPresetHandler::setEnableUserPresetPreprocessing(bool processBeforeLoading, bool shouldUnpackComplexData)
 {
 	enablePreprocessing = processBeforeLoading;
@@ -123,6 +192,13 @@ bool ScriptUserPresetHandler::isInternalPresetLoad() const
     auto& uph = getScriptProcessor()->getMainController_()->getUserPresetHandler();
     
     return uph.isInternalPresetLoad();
+}
+
+bool ScriptUserPresetHandler::isCurrentlyLoadingPreset() const
+{
+	auto& uph = getScriptProcessor()->getMainController_()->getUserPresetHandler();
+
+	return uph.isCurrentlyInsidePresetLoad();
 }
 
 bool ScriptUserPresetHandler::isOldVersion(const String& version)
@@ -233,31 +309,32 @@ void ScriptUserPresetHandler::AttachedCallback::onCallbackAsync(AttachedCallback
 	}
 }
 
-void ScriptUserPresetHandler::attachAutomationCallback(String automationId, var updateCallback, bool isSynchronous)
+void ScriptUserPresetHandler::attachAutomationCallback(String automationId, var updateCallback, var isSynchronous)
 {
-	if (HiseJavascriptEngine::isJavascriptFunction(updateCallback))
+	auto realSync = ApiHelpers::isSynchronous(isSynchronous);
+
+	if (auto cData = getMainController()->getUserPresetHandler().getCustomAutomationData(Identifier(automationId)))
 	{
-		if (auto cData = getMainController()->getUserPresetHandler().getCustomAutomationData(Identifier(automationId)))
+		for (auto& c : attachedCallbacks)
 		{
-			for (auto& c : attachedCallbacks)
+			if (automationId == c->id)
 			{
-				if (automationId == c->id)
-				{
-					attachedCallbacks.removeObject(c);
-					debugToConsole(dynamic_cast<Processor*>(getScriptProcessor()), "removing old attached callback for " + automationId);
-					break;
-				}
+				attachedCallbacks.removeObject(c);
+				debugToConsole(dynamic_cast<Processor*>(getScriptProcessor()), "removing old attached callback for " + automationId);
+				break;
 			}
-
-			attachedCallbacks.add(new AttachedCallback(this, cData, updateCallback, isSynchronous));
-
-
-			return;
 		}
-		else
+
+		if (HiseJavascriptEngine::isJavascriptFunction(updateCallback))
 		{
-			reportScriptError(automationId + " not found");
+			attachedCallbacks.add(new AttachedCallback(this, cData, updateCallback, realSync));
 		}
+
+		return;
+	}
+	else
+	{
+		reportScriptError(automationId + " not found");
 	}
 }
 
@@ -319,6 +396,35 @@ struct AutomationValueUndoAction: public UndoableAction
     WeakReference<ScriptUserPresetHandler> suph;
 };
 
+int ScriptUserPresetHandler::getAutomationIndex(String automationID)
+{
+	auto& uph = getMainController()->getUserPresetHandler();
+
+	if (uph.isUsingCustomDataModel())
+	{
+		for (int i = 0; i < uph.getNumCustomAutomationData(); i++)
+		{
+			if (uph.getCustomAutomationData(i)->id == automationID)
+				return i;
+		}
+	}
+
+	return -1;
+}
+
+bool ScriptUserPresetHandler::setAutomationValue(int automationIndex, float newValue)
+{
+	auto& uph = getMainController()->getUserPresetHandler();
+
+	if (uph.isUsingCustomDataModel() && isPositiveAndBelow(automationIndex, uph.getNumCustomAutomationData()))
+	{
+		uph.getCustomAutomationData(automationIndex)->call(newValue);
+		return true;
+	}
+
+	return false;
+}
+
 void ScriptUserPresetHandler::updateAutomationValues(var data, bool sendMessage, bool useUndoManager)
 {
 	auto& uph = getMainController()->getUserPresetHandler();
@@ -356,9 +462,15 @@ void ScriptUserPresetHandler::updateAutomationValues(var data, bool sendMessage,
 					Identifier i1(first["id"].toString());
 					Identifier i2(first["id"].toString());
 
-					auto firstIndex = uph.getCustomAutomationData(i1)->index;
-					auto secondIndex = uph.getCustomAutomationData(i2)->index;
+                    auto firstIndex = 0;
+                    auto secondIndex = 0;
 
+                    if(auto fi = uph.getCustomAutomationData(i1))
+                        firstIndex = fi->index;
+                    
+                    if(auto si = uph.getCustomAutomationData(i2))
+                        secondIndex = si->index;
+                    
 					if (firstIndex < secondIndex)
 						return -1;
 					if (firstIndex > secondIndex)
@@ -453,6 +565,8 @@ void ScriptUserPresetHandler::updateConnectedComponentsFromModuleState()
 	}
 }
 
+
+
 void ScriptUserPresetHandler::runTest()
 {
 	auto content = getScriptProcessor()->getScriptingContent();
@@ -507,7 +621,7 @@ void ScriptUserPresetHandler::runTest()
 		}
 		if (type == "moduleStates")
 		{
-			return String(uph.getStoredModuleData().size());
+			return String(getScriptProcessor()->getMainController_()->getModuleStateManager().modules.size());
 		}
         
         return String("unknown");
@@ -536,7 +650,7 @@ void ScriptUserPresetHandler::runTest()
 				addWarning(id + " is connected to a processor but does not have saveInPreset enabled");
 			}
 
-			for (auto l : uph.getStoredModuleData())
+			for (auto l : getScriptProcessor()->getMainController_()->getModuleStateManager().modules)
 			{
 				if (l->p == cp)
 				{
@@ -560,10 +674,12 @@ void ScriptUserPresetHandler::runTest()
 		addLine("...OK");
 	}
 
-	if (!uph.getStoredModuleData().isEmpty())
+	auto& moduleData = getScriptProcessor()->getMainController_()->getModuleStateManager().modules;
+
+	if (!moduleData.isEmpty())
 	{
 		addLine("| ============== Module State Information ================== |");
-		for (auto l : uph.getStoredModuleData())
+		for (auto l : moduleData)
 		{
 			addLineFromTokens({ "Module State for ", l->p->getId() });
 			auto v = l->p->exportAsValueTree();
@@ -741,6 +857,19 @@ void ScriptUserPresetHandler::presetChanged(const File& newPreset)
 	}
 }
 
+
+void ScriptUserPresetHandler::presetSaved(const File& newPreset)
+{
+	if (postSaveCallback)
+	{
+		var f;
+
+		if (newPreset.existsAsFile())
+			f = var(new ScriptingObjects::ScriptFile(getScriptProcessor(), newPreset));
+
+		postSaveCallback.call(&f, 1);
+	}
+}
 
 struct ScriptExpansionHandler::Wrapper
 {
@@ -2241,6 +2370,13 @@ Result FullInstrumentExpansion::lazyLoad()
 
 	auto r = initialiseFromValueTree(allData);
 
+	auto webResources = allData.getChildWithName("WebViewResources");
+
+	if (webResources.isValid())
+	{
+		getMainController()->restoreWebResources(webResources);
+	}
+
 	if (r.wasOk())
 	{
 		fullyLoaded = true;
@@ -2256,6 +2392,62 @@ juce::Result ScriptEncryptedExpansion::returnFail(const String& errorMessage)
 	return Result::fail(errorMessage);
 }
 
+FullInstrumentExpansion::DefaultHandler::DefaultHandler(MainController* mc, ValueTree t):
+	ControlledObject(mc),
+	defaultPreset(t),
+	defaultIsLoaded(true)
+{
+	getMainController()->getExpansionHandler().addListener(this);
+}
+
+FullInstrumentExpansion::DefaultHandler::~DefaultHandler()
+{
+	getMainController()->getExpansionHandler().removeListener(this);
+}
+
+void FullInstrumentExpansion::DefaultHandler::expansionPackLoaded(Expansion* e)
+{
+	if (e != nullptr)
+	{
+		defaultIsLoaded = false;
+	}
+	else
+	{
+		if (!defaultIsLoaded)
+		{
+			auto copy = defaultPreset.createCopy();
+
+			getMainController()->getKillStateHandler().killVoicesAndCall(getMainController()->getMainSynthChain(), [copy, this](Processor* p)
+			{
+				defaultIsLoaded = true;
+				p->getMainController()->loadPresetFromValueTree(copy);
+
+				return SafeFunctionCall::OK;
+			}, MainController::KillStateHandler::SampleLoadingThread);
+		}
+	}
+}
+
+FullInstrumentExpansion::FullInstrumentExpansion(MainController* mc, const File& f):
+	ScriptEncryptedExpansion(mc, f)
+{
+
+}
+
+FullInstrumentExpansion::~FullInstrumentExpansion()
+{
+	getMainController()->getExpansionHandler().removeListener(this);
+}
+
+void FullInstrumentExpansion::setIsProjectExporter()
+{
+	isProjectExport = true;
+}
+
+ValueTree FullInstrumentExpansion::getEmbeddedNetwork(const String& id)
+{
+	return networks.getChildWithProperty("ID", id);
+}
 
 
 Result FullInstrumentExpansion::encodeExpansion()
@@ -2393,6 +2585,8 @@ Result FullInstrumentExpansion::encodeExpansion()
 
 	encodePoolAndUserPresets(allData, isProjectExport);
 	
+	allData.addChild(getMainController()->exportWebViewResources(), -1, nullptr);
+
 	h.setErrorMessage("Writing file", false);
 
 #if HISE_USE_XML_FOR_HXI
@@ -2413,10 +2607,10 @@ Result FullInstrumentExpansion::encodeExpansion()
 }
 
 ExpansionEncodingWindow::ExpansionEncodingWindow(MainController* mc, Expansion* eToEncode, bool isProjectExport, bool isRhapsody_) :
-	DialogWindowWithBackgroundThread(isProjectExport ? "Encode project as Full Expansion" : "Encode Expansion"),
+	DialogWindowWithBackgroundThread(isProjectExport ? "Export HISE project" : "Encode Expansion"),
 	ControlledObject(mc),
 	e(eToEncode),
-	isRhapsody(isRhapsody_),
+	exportMode(isRhapsody_ ? ExportMode::Rhapsody : ExportMode::HXI),
 	encodeResult(Result::ok()),
 	projectExport(isProjectExport)
 {
@@ -2425,8 +2619,8 @@ ExpansionEncodingWindow::ExpansionEncodingWindow(MainController* mc, Expansion* 
 #if USE_BACKEND
 		auto& h = GET_PROJECT_HANDLER(mc->getMainSynthChain());
 
-		addComboBox("rhapsody", { "No", "Yes" }, "Use Rhapsody format");
-		getComboBoxComponent("rhapsody")->setSelectedItemIndex((int)isRhapsody, dontSendNotification);
+		addComboBox("rhapsody", { "HXI Full Instrument Expansion", "Rhapsody Player Library", "HISE Project Archive" }, "Export Format");
+		getComboBoxComponent("rhapsody")->setSelectedItemIndex((int)exportMode, dontSendNotification);
 
 		if (mc->getExpansionHandler().getEncryptionKey().isEmpty())
 		{
@@ -2471,38 +2665,44 @@ ExpansionEncodingWindow::~ExpansionEncodingWindow()
 	getMainController()->getExpansionHandler().removeListener(this);
 }
 
-juce::Result ExpansionEncodingWindow::performRhapsodyChecks()
+juce::Result ExpansionEncodingWindow::performChecks()
 {
 #if USE_BACKEND
-	if (getComboBoxComponent("rhapsody")->getSelectedItemIndex() == 0)
+
+	exportMode = (ExportMode)getComboBoxComponent("rhapsody")->getSelectedItemIndex();
+
+	if (exportMode == ExportMode::HXI)
 		return Result::ok();
 
 	if (getMainController()->getExpansionHandler().getEncryptionKey() != "1234")
 	{
-		return Result::fail("The encryption key must be `1234` in order to be loaded into Rhapsody");
+		return Result::fail("The encryption key must be `1234` for the open export to work");
 	}
 
 	// check that there is an icon image
 
-	auto thumb = getMainController()->getCurrentFileHandler().getSubDirectory(FileHandlerBase::Images).getChildFile("Icon.png");
-	auto hasIcon = thumb.existsAsFile();
+	if (exportMode == ExportMode::Rhapsody)
+	{
+		auto thumb = getMainController()->getCurrentFileHandler().getSubDirectory(FileHandlerBase::Images).getChildFile("Icon.png");
+		auto hasIcon = thumb.existsAsFile();
 
-	if (!hasIcon)
-		return Result::fail("The project needs a Icon.png image (with the dimensions 300x50)");
+		if (!hasIcon)
+			return Result::fail("The project needs a Icon.png image (with the dimensions 300x50)");
 
-	auto dllManager = dynamic_cast<BackendProcessor*>(getMainController())->dllManager;
+		auto dllManager = dynamic_cast<BackendProcessor*>(getMainController())->dllManager;
 
-	auto compileNetworks = dllManager->getNetworkFiles(getMainController(), false);
+		auto compileNetworks = dllManager->getNetworkFiles(getMainController(), false);
 
-	if (!compileNetworks.isEmpty())
-		return Result::fail("The project must not use compiled DSP Networks");
+		if (!compileNetworks.isEmpty())
+			return Result::fail("The project must not use compiled DSP Networks");
 
-	auto userPresetFolder = getMainController()->getCurrentFileHandler().getSubDirectory(FileHandlerBase::UserPresets);
+		auto userPresetFolder = getMainController()->getCurrentFileHandler().getSubDirectory(FileHandlerBase::UserPresets);
 
-	auto presetList = userPresetFolder.findChildFiles(File::findFiles, true, "*.preset");
+		auto presetList = userPresetFolder.findChildFiles(File::findFiles, true, "*.preset");
 
-	if (presetList[0].getParentDirectory().getParentDirectory().getParentDirectory() != userPresetFolder)
-		return Result::fail("The project needs to have at least one user preset and must use the default three level folder hierarchy (Bank/Category/Preset)");
+		if (presetList[0].getParentDirectory().getParentDirectory().getParentDirectory() != userPresetFolder)
+			return Result::fail("The project needs to have at least one user preset and must use the default three level folder hierarchy (Bank/Category/Preset)");
+	}
 
 #endif
 
@@ -2517,7 +2717,7 @@ void ExpansionEncodingWindow::run()
 		if (encodeResult.failed())
 			return;
 
-		encodeResult = performRhapsodyChecks();
+		encodeResult = performChecks();
 
 		if (encodeResult.failed())
 			return;
@@ -2527,15 +2727,38 @@ void ExpansionEncodingWindow::run()
 
 		ValueTree mData(ExpansionIds::ExpansionInfo);
 
-		mData.setProperty(ExpansionIds::Name, GET_HISE_SETTING(getMainController()->getMainSynthChain(), HiseSettings::Project::Name), nullptr);
+		auto projectName = GET_HISE_SETTING(getMainController()->getMainSynthChain(), HiseSettings::Project::Name).toString();
+
+		mData.setProperty(ExpansionIds::Name, projectName, nullptr);
 		mData.setProperty(ExpansionIds::Version, GET_HISE_SETTING(getMainController()->getMainSynthChain(), HiseSettings::Project::Version), nullptr);
 		mData.setProperty(ExpansionIds::Company, GET_HISE_SETTING(getMainController()->getMainSynthChain(), HiseSettings::User::Company), nullptr);
 		mData.setProperty(ExpansionIds::CompanyURL, GET_HISE_SETTING(getMainController()->getMainSynthChain(), HiseSettings::User::CompanyURL), nullptr);
 		mData.setProperty(ExpansionIds::Description, GET_HISE_SETTING(getMainController()->getMainSynthChain(), HiseSettings::ExpansionSettings::Description), nullptr);
 		mData.setProperty(ExpansionIds::Tags, GET_HISE_SETTING(getMainController()->getMainSynthChain(), HiseSettings::ExpansionSettings::Tags), nullptr);
 		mData.setProperty(ExpansionIds::UUID, GET_HISE_SETTING(getMainController()->getMainSynthChain(), HiseSettings::ExpansionSettings::UUID), nullptr);
-		mData.setProperty(ExpansionIds::HiseVersion, ProjectInfo::versionString, nullptr);
+		mData.setProperty(ExpansionIds::HiseVersion, PresetHandler::getVersionString(), nullptr);
 
+		if (exportMode == ExportMode::HiseProject)
+		{
+			auto projectFile = h.getRootFolder().getChildFile("project_info.xml");
+			auto userFile = h.getRootFolder().getChildFile("user_info.xml");
+
+			auto projectXML = XmlDocument::parse(projectFile);
+			auto userXML = XmlDocument::parse(userFile);
+
+			if (projectXML != nullptr)
+				mData.addChild(ValueTree::fromXml(*projectXML), -1, nullptr);
+
+			if (userXML != nullptr)
+				mData.addChild(ValueTree::fromXml(*userXML), -1, nullptr);
+		}
+
+        String prevContent;
+        
+        if(f.existsAsFile())
+            prevContent = f.loadFileAsString();
+        
+        
 		auto xml = mData.createXml();
 		f.replaceWithText(xml->createDocument(""));
 		ScopedPointer<FullInstrumentExpansion> e = new FullInstrumentExpansion(getMainController(), h.getWorkDirectory());
@@ -2543,36 +2766,67 @@ void ExpansionEncodingWindow::run()
 		e->setIsProjectExporter();
 		encodeResult = e->encodeExpansion();
 
-		
+		// This file is used by the FullInstrument Expansion so
+        // we have to restore it to not lose the original file data
+        if(prevContent.isNotEmpty())
+            f.replaceWithText(prevContent);
+        else
+            f.deleteFile();
 
-		f.deleteFile();
-
-		if (getComboBoxComponent("rhapsody")->getSelectedItemIndex() == 1)
+		if (exportMode > ExportMode::HXI)
 		{
 			auto hxiFile = Expansion::Helpers::getExpansionInfoFile(h.getWorkDirectory(), Expansion::Intermediate);
 			jassert(hxiFile.existsAsFile());
 
-			ZipFile::Builder b;
+			if (exportMode == ExportMode::Rhapsody)
+			{
+				ZipFile::Builder b;
 
-			b.addFile(hxiFile, 0);
+				b.addFile(hxiFile, 0);
 
-			String zipName;
-			zipName << mData[ExpansionIds::Name].toString().toLowerCase().replaceCharacter(' ', '_');
-			zipName << "_data";
-			zipName << "_" << mData[ExpansionIds::Version].toString().replaceCharacter('.', '_');
+				String zipName;
+				zipName << mData[ExpansionIds::Name].toString().toLowerCase().replaceCharacter(' ', '_');
+				zipName << "_data";
+				zipName << "_" << mData[ExpansionIds::Version].toString().replaceCharacter('.', '_');
 
-			auto zipFile = hxiFile.getSiblingFile(zipName + ".lwz");
-			zipFile.deleteFile();
-			FileOutputStream fos(zipFile);
+				auto zipFile = hxiFile.getSiblingFile(zipName + ".lwz");
+				zipFile.deleteFile();
+				FileOutputStream fos(zipFile);
 
-			auto ok = b.writeToStream(fos, &getProgressCounter());
+				auto ok = b.writeToStream(fos, &getProgressCounter());
 
-			if (ok)
-				hxiFile.deleteFile();
+				if (ok)
+					hxiFile.deleteFile();
 
-			rhapsodyOutput = zipFile;
+				rhapsodyOutput = zipFile;
 
-			jassert(ok);
+				jassert(ok);
+			}
+			else
+			{
+				rhapsodyOutput = hxiFile.getParentDirectory().getChildFile(projectName).withFileExtension(".hiseproject");
+
+				auto sampleArchives = hxiFile.getParentDirectory().findChildFiles(File::findFiles, false, "*.hr1");
+
+				rhapsodyOutput.deleteFile();
+
+				FileOutputStream fos(rhapsodyOutput);
+
+				FileInputStream hxiInput(hxiFile);
+
+				fos.writeInt64(hxiInput.getTotalLength());
+				fos.writeFromInputStream(hxiInput, hxiInput.getTotalLength());
+
+				for (auto s : sampleArchives)
+				{
+					FileInputStream si(s);
+
+					fos.writeInt64(si.getTotalLength());
+					fos.writeFromInputStream(si, si.getTotalLength());
+				}
+
+				fos.flush();
+			}
 		}
 	}
 	else

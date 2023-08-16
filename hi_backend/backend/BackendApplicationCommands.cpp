@@ -117,11 +117,12 @@ void BackendCommandTarget::getAllCommands(Array<CommandID>& commands)
 		MenuExportFileAsEffectPlugin,
 		MenuExportFileAsMidiFXPlugin,
 		MenuExportFileAsStandaloneApp,
-		MenuExportFileAsPlayerLibrary,
+		MenuExportProject,
 		MenuExportFileAsSnippet,
 		MenuExportSampleDataForInstaller,
 		MenuExportCompileFilesInPool,
 		MenuExportCompileNetworksAsDll,
+		MenuExportWavetablesToMonolith,
 		MenuFileQuit,
 		MenuEditUndo,
 		MenuEditRedo,
@@ -143,11 +144,11 @@ void BackendCommandTarget::getAllCommands(Array<CommandID>& commands)
 		MenuToolsRecompileScriptsOnReload,
 		MenuToolsEnableCallStack,
 		MenuToolsCheckCyclicReferences,
+        MenuToolsCheckPluginParameterSanity,
 		MenuToolsConvertSVGToPathData,
 		MenuToolsCreateToolbarPropertyDefinition,
 		MenuToolsCreateExternalScriptFile,
-		MenuToolsCreateUIDataFromDesktop,
-		MenuToolsCheckDeviceSanity,
+		MenuToolsRestoreToDefault,
 		MenuToolsValidateUserPresets,
 		MenuToolsResolveMissingSamples,
 		MenuToolsDeleteMissingSamples,
@@ -189,10 +190,8 @@ void BackendCommandTarget::getAllCommands(Array<CommandID>& commands)
         MenuToolsSanityCheck,
 		MenuHelpShowAboutPage,
         MenuHelpCheckVersion,
-		MenuHelpShowDocumentation,
-		MenuHelpShowHelpForComponents
+		MenuHelpShowDocumentation
 	};
-
 	commands.addArray(id, numElementsInArray(id));
 }
 
@@ -323,8 +322,8 @@ void BackendCommandTarget::getCommandInfo(CommandID commandID, ApplicationComman
 		setCommandTarget(result, "Export as Standalone Application", true, false, 'X', false);
 		result.categoryName = "Export";
 		break;
-	case MenuExportFileAsPlayerLibrary:
-		setCommandTarget(result, "Export as Full Instrument Expansion", true, false, 'X', false);
+	case MenuExportProject:
+		setCommandTarget(result, "Export Project", true, false, 'X', false);
 		result.categoryName = "Export";
 		break;
 	case MenuExportFileAsMidiFXPlugin:
@@ -345,6 +344,10 @@ void BackendCommandTarget::getCommandInfo(CommandID commandID, ApplicationComman
 		break;
 	case MenuExportSampleDataForInstaller:
 		setCommandTarget(result, "Export Samples as archive", true, false, 'X', false);
+		result.categoryName = "Export";
+		break;
+	case MenuExportWavetablesToMonolith:
+		setCommandTarget(result, "Export Wavetables to monolith", true, false, 'X', false);
 		result.categoryName = "Export";
 		break;
 	case MenuExportCompileFilesInPool:
@@ -487,14 +490,6 @@ void BackendCommandTarget::getCommandInfo(CommandID commandID, ApplicationComman
 		setCommandTarget(result, "Create external script file", true, false, 'X', false);
 		result.categoryName = "Tools";
 		break;
-	case MenuToolsCreateUIDataFromDesktop:
-		setCommandTarget(result, "Copy UI Data from Desktop", Helpers::canCopyDeviceType(bpe), Helpers::deviceTypeHasUIData(bpe), 'X', false);
-		result.categoryName = "Tools";
-		break;
-	case MenuToolsCheckDeviceSanity:
-		setCommandTarget(result, "Check Sanity for defined Devices", true, false, 'X', false);
-		result.categoryName = "Tools";
-		break;
 	case MenuToolsValidateUserPresets:
 		setCommandTarget(result, "Validate User Presets", true, false, 'X', false);
 		result.categoryName = "Tools";
@@ -515,6 +510,11 @@ void BackendCommandTarget::getCommandInfo(CommandID commandID, ApplicationComman
 		setCommandTarget(result, "Check all sample maps", GET_PROJECT_HANDLER(bpe->getMainSynthChain()).isActive(), false, 'X', false);
 		result.categoryName = "Tools";
 		break;
+     case MenuToolsCheckPluginParameterSanity:
+         setCommandTarget(result, "Check plugin parameters", GET_PROJECT_HANDLER(bpe->getMainSynthChain()).isActive(), false, 'X', false);
+         result.categoryName = "Tools";
+         break;
+                         
 	case MenuToolsImportArchivedSamples:
 		setCommandTarget(result, "Import archived samples", true, false, 'X', false);
 		result.categoryName = "Tools";
@@ -582,6 +582,10 @@ void BackendCommandTarget::getCommandInfo(CommandID commandID, ApplicationComman
 		break;
 	case MenuToolsConvertSVGToPathData:
 		setCommandTarget(result, "Convert SVG to Path data", true, false, 'X', false);
+		result.categoryName = "Tools";
+		break;
+	case MenuToolsRestoreToDefault:
+		setCommandTarget(result, "Restore interface to default values", true, false, 'X', false);
 		result.categoryName = "Tools";
 		break;
 	case MenuToolsCreateDummyLicenseFile:
@@ -679,11 +683,6 @@ void BackendCommandTarget::getCommandInfo(CommandID commandID, ApplicationComman
 		result.addDefaultKeypress(KeyPress::F1Key, ModifierKeys::noModifiers);
 		result.categoryName = "Help";
 		break;
-	case MenuHelpShowHelpForComponents:
-		setCommandTarget(result, "Show Live Help", true, bpe->isHelpEnabled(), 'X', false);
-		result.addDefaultKeypress(KeyPress::F1Key, ModifierKeys::commandModifier);
-		result.categoryName = "Help";
-		break;
     case MenuHelpCheckVersion:
         setCommandTarget(result, "Check for newer version", true, false, 'X', false);
 		result.categoryName = "Help";
@@ -749,10 +748,9 @@ bool BackendCommandTarget::perform(const InvocationInfo &info)
 	case MenuToolsCreateExternalScriptFile:	Actions::createExternalScriptFile(bpe); updateCommands(); return true;
     case MenuToolsSanityCheck:			Actions::validatePluginParameters(bpe); return true;
 	case MenuToolsValidateUserPresets:	Actions::validateUserPresets(bpe); return true;
+	case MenuToolsRestoreToDefault:		Actions::restoreToDefault(bpe); return true;
 	case MenuToolsResolveMissingSamples:Actions::resolveMissingSamples(bpe); return true;
 	case MenuToolsGetMissingSampleList:	Actions::copyMissingSampleListToClipboard(bpe); return true;
-	case MenuToolsCreateUIDataFromDesktop: Actions::createUIDataFromDesktop(bpe); updateCommands(); return true;
-	case MenuToolsCheckDeviceSanity:	Actions::checkDeviceSanity(bpe); return true;
 	case MenuToolsCheckUnusedImages:	Actions::checkUnusedImages(bpe); return true;
 	case MenuToolsShowDspNetworkDllInfo: Actions::showNetworkDllInfo(bpe); return true;
 	case MenuToolsRedirectScriptFolder: Actions::redirectScriptFolder(bpe); updateCommands(); return true;
@@ -767,6 +765,7 @@ bool BackendCommandTarget::perform(const InvocationInfo &info)
 	case MenuToolsCreateRSAKeys:		Actions::createRSAKeys(bpe); return true;
 	case MenuToolsCreateDummyLicenseFile: Actions::createDummyLicenseFile(bpe); return true;
 	case MenuToolsCheckAllSampleMaps:	Actions::checkAllSamplemaps(bpe); return true;
+    case MenuToolsCheckPluginParameterSanity:    Actions::checkPluginParameterSanity(bpe); return true;
     case MenuToolsCreateRnboTemplate:   Actions::createRnboTemplate(bpe); return true;
 	case MenuToolsImportArchivedSamples: Actions::importArchivedSamples(bpe); return true;
 	case MenuToolsRecordOneSecond:		bpe->owner->getDebugLogger().startRecording(); return true;
@@ -814,8 +813,9 @@ bool BackendCommandTarget::perform(const InvocationInfo &info)
     }
 	case MenuExportCompileNetworksAsDll: Actions::compileNetworksToDll(bpe); return true;
     case MenuExportFileAsSnippet:       Actions::exportFileAsSnippet(bpe->getBackendProcessor()); return true;
-	case MenuExportFileAsPlayerLibrary: Actions::exportMainSynthChainAsPlayerLibrary(bpe); return true;
+	case MenuExportProject:				Actions::exportHiseProject(bpe); return true;
 	case MenuExportSampleDataForInstaller: Actions::exportSampleDataForInstaller(bpe); return true;
+	case MenuExportWavetablesToMonolith: Actions::exportWavetablesToMonolith(bpe); return true;
 	case MenuExportCompileFilesInPool:	Actions::exportCompileFilesInPool(bpe); return true;
 	case MenuViewResetLookAndFeel:		Actions::resetLookAndFeel(bpe); return true;
     case MenuToolsClearConsole:         owner->getConsoleHandler().clearConsole(); return true;
@@ -825,7 +825,6 @@ bool BackendCommandTarget::perform(const InvocationInfo &info)
 	case MenuTwoColumns:				Actions::setColumns(bpe, this, TwoColumns);  updateCommands(); return true;
 	case MenuThreeColumns:				Actions::setColumns(bpe, this, ThreeColumns);  updateCommands(); return true;
 	case MenuHelpShowDocumentation:		Actions::showDocWindow(bpe); return true;
-	case MenuHelpShowHelpForComponents: bpe->toggleHelp(); updateCommands(); return true;
 	}
 
 	return false;
@@ -983,8 +982,9 @@ PopupMenu BackendCommandTarget::getMenuForIndex(int topLevelMenuIndex, const Str
 		p.addSeparator();
 
 		ADD_DESKTOP_ONLY(MenuExportFileAsSnippet);
-		ADD_DESKTOP_ONLY(MenuExportFileAsPlayerLibrary);
+		ADD_DESKTOP_ONLY(MenuExportProject);
 		ADD_DESKTOP_ONLY(MenuExportSampleDataForInstaller);
+		ADD_DESKTOP_ONLY(MenuExportWavetablesToMonolith);
 
 		p.addSectionHeader("Export Tools");
 		
@@ -999,29 +999,15 @@ PopupMenu BackendCommandTarget::getMenuForIndex(int topLevelMenuIndex, const Str
 		
 		ADD_ALL_PLATFORMS(MenuToolsRecompile);
 		ADD_ALL_PLATFORMS(MenuToolsSanityCheck);
+        ADD_ALL_PLATFORMS(MenuToolsCheckPluginParameterSanity);
 		ADD_ALL_PLATFORMS(MenuToolsClearConsole);
 		ADD_DESKTOP_ONLY(MenuToolsCheckCyclicReferences);
 		
 		ADD_DESKTOP_ONLY(MenuToolsCreateExternalScriptFile);
 		ADD_DESKTOP_ONLY(MenuToolsValidateUserPresets);
+		ADD_DESKTOP_ONLY(MenuToolsRestoreToDefault);
 		ADD_DESKTOP_ONLY(MenuToolsConvertSVGToPathData);
 		
-
-		p.addSeparator();
-
-		PopupMenu sub;
-
-		
-		for (int i = 0; i < (int)HiseDeviceSimulator::DeviceType::numDeviceTypes; i++)
-		{
-			sub.addItem(MenuToolsDeviceSimulatorOffset + i, "Simulate " + HiseDeviceSimulator::getDeviceName(i), true, i == (int)HiseDeviceSimulator::getDeviceType());
-		}
-
-		p.addSubMenu("Device simulator", sub);
-
-		ADD_DESKTOP_ONLY(MenuToolsCreateUIDataFromDesktop);
-		ADD_DESKTOP_ONLY(MenuToolsCheckDeviceSanity);
-
 		p.addSeparator();
 		p.addSectionHeader("Sample Management");
 		
@@ -1083,7 +1069,6 @@ PopupMenu BackendCommandTarget::getMenuForIndex(int topLevelMenuIndex, const Str
 			ADD_ALL_PLATFORMS(MenuHelpShowAboutPage);
 			ADD_DESKTOP_ONLY(MenuHelpCheckVersion);
 			ADD_ALL_PLATFORMS(MenuHelpShowDocumentation);
-			ADD_ALL_PLATFORMS(MenuHelpShowHelpForComponents);
 		break;
 	default:
 		break;
@@ -1190,103 +1175,6 @@ void BackendCommandTarget::menuItemSelected(int menuItemID, int topLevelMenuInde
             
         Actions::openFileFromXml(bpe, presetToLoad);
     }
-    else if (menuItemID >= MenuToolsDeviceSimulatorOffset && menuItemID < (MenuToolsDeviceSimulatorOffset + 50))
-	{
-		HiseDeviceSimulator::DeviceType newDevice = (HiseDeviceSimulator::DeviceType)(menuItemID - (int)MenuToolsDeviceSimulatorOffset);
-
-		bool copyMissing = HiseDeviceSimulator::getDeviceType() == HiseDeviceSimulator::DeviceType::Desktop &&
-						   newDevice != HiseDeviceSimulator::DeviceType::Desktop;
-
-		HiseDeviceSimulator::setDeviceType(newDevice);
-
-		auto mp = JavascriptMidiProcessor::getFirstInterfaceScriptProcessor(owner);
-
-		
-
-		if (mp != nullptr)
-		{
-			auto c = mp->getContent();
-
-
-			ValueTree oldContent;
-			Array<Identifier> idList;
-
-			if (copyMissing)
-			{
-				
-
-				oldContent = c->getContentProperties();
-				
-				for (int i = 0; i < c->getNumComponents(); i++)
-				{
-					auto cmp = c->getComponent(i);
-
-					//bool x = ScriptingApi::Content::Helpers::hasLocation(cmp);
-
-					if (cmp->getScriptObjectProperty(ScriptComponent::Properties::saveInPreset))
-					{
-						idList.add(cmp->getName());
-					}
-				}
-			}
-
-			auto contentData = c->exportAsValueTree();
-			mp->setDeviceTypeForInterface((int)newDevice);
-			mp->compileScript();
-			mp->getContent()->restoreFromValueTree(contentData);
-
-			if (copyMissing)
-			{
-				auto newContentProperties = c->getContentProperties();
-
-				Array<Identifier> missingIds;
-
-				for (const auto& id : idList)
-				{
-					if (c->getComponentWithName(id) == nullptr)
-					{
-						missingIds.add(id);
-					}
-				}
-				
-				if (!missingIds.isEmpty() && PresetHandler::showYesNoWindow("Missing components found", "There are some components in the desktop UI that are not available in the new UI. Press OK to query which components should be transferred."))
-				{
-					{
-						ValueTreeUpdateWatcher::ScopedDelayer sd(c->getUpdateWatcher());
-
-						for (const auto& id : missingIds)
-						{
-							if (PresetHandler::showYesNoWindow("Copy " + id.toString(), "Do you want to transfer this component?"))
-							{
-								auto v = getChildWithPropertyRecursive(oldContent, "id", id.toString());
-
-								if (v.isValid())
-								{
-									v = v.createCopy();
-									v.removeAllChildren(nullptr);
-
-									v.removeProperty("parentComponent", nullptr);
-
-									newContentProperties.addChild(v, -1, nullptr);
-									debugToConsole(mp, "Added " + id.toString() + " to " + HiseDeviceSimulator::getDeviceName());
-								}
-							}
-						}
-					}
-
-					mp->compileScript();
-				}
-
-				
-			}
-
-			
-
-
-
-		}
-
-	}
 }
 
 
@@ -1874,6 +1762,8 @@ void BackendCommandTarget::Actions::saveFileXml(BackendRootWindow * bpe)
 {
 	if (PresetHandler::showYesNoWindow("Save XML", "This will save the current XML file"))
 	{
+		bpe->owner->getUserPresetHandler().initDefaultPresetManager({});
+
 		const String mainSynthChainId = bpe->owner->getMainSynthChain()->getId();
 		const bool hasDefaultName = mainSynthChainId == "Master Chain";
 
@@ -2160,10 +2050,27 @@ void BackendCommandTarget::Actions::loadProject(BackendRootWindow *bpe)
 #endif
 }
 
-void BackendCommandTarget::Actions::importProject(BackendRootWindow* bpe)
+DialogWindowWithBackgroundThread* BackendCommandTarget::Actions::importProject(BackendRootWindow* bpe)
 {
 	auto importWindow = new ProjectImporter(bpe);
 	importWindow->setModalBaseWindowComponent(bpe);
+
+	return importWindow;
+}
+
+void BackendCommandTarget::Actions::extractProject(BackendRootWindow* bpe, const File& newProjectRoot, const File& sourceFile)
+{
+	auto importWindow = new ProjectImporter(bpe);
+	importWindow->setModalBaseWindowComponent(bpe);
+
+	jassert(newProjectRoot.isDirectory());
+	jassert(sourceFile.existsAsFile());
+
+	importWindow->newProjectFolder = newProjectRoot;
+	importWindow->sourceType = ProjectImporter::SourceType::Import;
+	importWindow->header->importFile = sourceFile;
+
+	importWindow->runThread();
 }
 
 void BackendCommandTarget::Actions::convertSVGToPathData(BackendRootWindow* bpe)
@@ -2280,7 +2187,162 @@ void BackendCommandTarget::Actions::createRSAKeys(BackendRootWindow * bpe)
 	GET_PROJECT_HANDLER(bpe->getMainSynthChain()).createRSAKey();
 }
 
+Result checkPluginParameterComponent(ScriptingApi::Content* c, ScriptComponent* sc)
+{
+	auto name = sc->getScriptObjectProperty(ScriptComponent::pluginParameterName).toString();
 
+	if (!sc->getScriptObjectProperty(ScriptComponent::isPluginParameter))
+	{
+		if (name.isEmpty())
+			return Result::ok();
+		else
+			return Result::fail(sc->getName() + " has an non-empty plugin parameter ID but is not set as plugin parameter");
+	}
+		
+    if(name.isEmpty())
+        return Result::fail(sc->getName() + " has an empty plugin parameter ID");
+    
+    for(int i = 0; i < c->getNumComponents(); i++)
+    {
+        auto other = c->getComponent(i);
+        
+        if(sc == other)
+            continue;
+        
+        if(other->getScriptObjectProperty(ScriptComponent::isPluginParameter))
+        {
+            auto otherName = other->getScriptObjectProperty(ScriptComponent::pluginParameterName).toString();
+            auto thisName = sc->getScriptObjectProperty(ScriptComponent::pluginParameterName).toString();
+            
+            if(otherName == thisName)
+            {
+                String e;
+                e << sc->getName() << " has the same plugin parameter name as " << other->getName();
+                return Result::fail(e);
+            }
+        }
+    }
+            
+    if(!sc->getScriptObjectProperty(ScriptComponent::isMetaParameter))
+    {
+        auto state = c->exportAsValueTree();
+        
+        std::map<ScriptComponent*, double> values;
+        
+        for(int i = 0; i < c->getNumComponents(); i++)
+        {
+            auto other = c->getComponent(i);
+            
+            if(other == sc)
+                continue;
+            
+            if(other->getScriptObjectProperty(ScriptComponent::isPluginParameter))
+                values.emplace(other, (double)other->getValue());
+        }
+        
+        auto v = sc->getPropertyValueTree();
+        
+        NormalisableRange<double> nr;
+        
+        nr.start = (double)v["min"];
+        nr.end = (double)v["max"];
+        
+        if(v.hasProperty("stepSize"))
+        {
+            nr.interval = (double)v["stepSize"];
+        }
+        
+        if(v.hasProperty("middlePosition"))
+        {
+            auto midPoint = (double)v["middlePosition"];
+            
+            if(nr.getRange().contains(midPoint))
+                nr.setSkewForCentre(midPoint);
+        }
+        
+        auto newValue = (double)Random::getSystemRandom().nextFloat();
+        
+        MainController::ScopedBadBabysitter bb(c->getScriptProcessor()->getMainController_());
+        
+        sc->setValue(newValue);
+        
+        c->getScriptProcessor()->controlCallback(sc, newValue);
+        
+        for(const auto& pp: values)
+        {
+            auto prevValue = pp.second;
+            auto currentValue = (double)pp.first->getValue();
+            
+            if(prevValue != currentValue)
+            {
+                String e;
+                e << "`" << sc->getName() << "` changed another plugin parameter `" << pp.first->getName() << "` without having the `isMetaParameter` flag set";
+                
+                c->restoreFromValueTree(state);
+                return Result::fail(e);
+            }
+        }
+        
+        c->restoreFromValueTree(state);
+    }
+            
+    return Result::ok();
+}
+                         
+void BackendCommandTarget::Actions::checkPluginParameterSanity(BackendRootWindow* bpe)
+{
+	auto chain = bpe->getMainController()->getMainSynthChain();
+
+    auto list = ProcessorHelpers::getListOfAllProcessors<JavascriptMidiProcessor>(chain);
+    
+    String report;
+    String nl = "\n";
+
+	int numPluginParameters = 0;
+            
+    for(auto jp: list)
+    {
+        if(!jp->isFront())
+            continue;
+        
+        auto content = jp->getContent();
+        
+        report << "Plugin parameters from " << jp->getId() << nl;
+        
+        for(int i = 0; i < content->getNumComponents(); i++)
+        {
+            auto sc = content->getComponent(i);
+            
+            auto r = checkPluginParameterComponent(content, sc);
+            
+            if(!r.wasOk())
+            {
+                PresetHandler::showMessageWindow("Plugin Parameter validation failed", r.getErrorMessage(), PresetHandler::IconType::Error);
+                return;
+            }
+            
+			if (!sc->getScriptObjectProperty(ScriptComponent::isPluginParameter))
+				continue;
+
+			report << "ID: " << sc->getName();
+			report << " (" << sc->getObjectName() << ") ";
+			report << "Parameter ID: " << sc->getScriptObjectProperty(ScriptComponent::pluginParameterName).toString();
+
+			if (sc->getScriptObjectProperty(ScriptComponent::isMetaParameter))
+				report << " (meta parameter)";
+				
+			report << nl;
+
+			numPluginParameters++;
+        }
+    }
+
+	report << String(numPluginParameters) << " plugin parameters found";
+
+	debugToConsole(chain, report);
+	PresetHandler::showMessageWindow("Plugin Parameters OK", "No issues were found. Check the console for a report", PresetHandler::IconType::Info);
+}
+                         
 void BackendCommandTarget::Actions::createDummyLicenseFile(BackendRootWindow * bpe)
 {
 	ProjectHandler *handler = &GET_PROJECT_HANDLER(bpe->getMainSynthChain());
@@ -2449,7 +2511,13 @@ void BackendCommandTarget::Actions::exportSampleDataForInstaller(BackendRootWind
     exporter->setModalBaseWindowComponent(bpe->mainEditor);
 }
                          
-void BackendCommandTarget::Actions::exportMainSynthChainAsPlayerLibrary(BackendRootWindow * bpe)
+void BackendCommandTarget::Actions::exportWavetablesToMonolith(BackendRootWindow* bpe)
+{
+	auto exporter = new WavetableMonolithExporter(bpe->getMainController());
+	exporter->setModalBaseWindowComponent(bpe->mainEditor);
+}
+
+void BackendCommandTarget::Actions::exportHiseProject(BackendRootWindow * bpe)
 {
 	auto e = new ExpansionEncodingWindow(bpe->owner, nullptr, true);
 
@@ -2458,7 +2526,6 @@ void BackendCommandTarget::Actions::exportMainSynthChainAsPlayerLibrary(BackendR
 		PresetHandler::showMessageWindow("Encoding Error", e->encodeResult.getErrorMessage(), PresetHandler::IconType::Error);
 		return;
 	}
-
 
 	e->setModalBaseWindowComponent(bpe);
 }
@@ -2662,16 +2729,6 @@ void BackendCommandTarget::Actions::unloadAllAudioFiles(BackendRootWindow * bpe)
 }
 
 
-void BackendCommandTarget::Actions::createUIDataFromDesktop(BackendRootWindow * bpe)
-{
-	auto mp = JavascriptMidiProcessor::getFirstInterfaceScriptProcessor(bpe->getBackendProcessor());
-
-	if (mp != nullptr)
-	{
-		mp->createUICopyFromDesktop();
-	}
-}
-
 #define REPLACE_WILDCARD(wildcard, x) templateProject = templateProject.replace(wildcard, data.getSetting(x).toString())
 #define REPLACE_WILDCARD_WITH_STRING(wildcard, s) (templateProject = templateProject.replace(wildcard, s))
 
@@ -2718,12 +2775,6 @@ void BackendCommandTarget::Actions::exportCompileFilesInPool(BackendRootWindow* 
 {
 	auto pet = new PoolExporter(bpe->getBackendProcessor());
 	pet->setModalBaseWindowComponent(bpe);
-}
-
-void BackendCommandTarget::Actions::checkDeviceSanity(BackendRootWindow * bpe)
-{
-	auto window = new DeviceTypeSanityCheck(bpe->getBackendProcessor());
-	window->setModalBaseWindowComponent(bpe);
 }
 
 void BackendCommandTarget::Actions::copyMissingSampleListToClipboard(BackendRootWindow * bpe)
@@ -3018,6 +3069,36 @@ void BackendCommandTarget::Actions::createThirdPartyNode(BackendRootWindow* bpe)
 	}
 }
 
+void BackendCommandTarget::Actions::restoreToDefault(BackendRootWindow * bpe)
+{
+	auto mp = JavascriptMidiProcessor::getFirstInterfaceScriptProcessor(bpe->getBackendProcessor());
+
+	if (mp == nullptr)
+		return;
+
+	auto content = mp->getContent();
+
+	String message;
+
+	for (int i = 0; i < content->getNumComponents(); i++)
+	{
+		auto sc = content->getComponent(i);
+
+		if (sc->getScriptObjectProperty(ScriptComponent::saveInPreset))
+		{
+			auto v = sc->getScriptObjectProperty(ScriptComponent::defaultValue);
+			auto cv = sc->getValue().toString();
+			
+			message << sc->getName() << ": ";
+			message << cv << " -> " << v.toString() << "\n";
+
+			sc->resetValueToDefault();
+		}
+	}
+
+	debugToConsole(mp, message);
+}
+
 #undef REPLACE_WILDCARD
 #undef REPLACE_WILDCARD_WITH_STRING
 
@@ -3025,30 +3106,6 @@ void BackendCommandTarget::Actions::createThirdPartyNode(BackendRootWindow* bpe)
 #undef ADD_IOS_ONLY
 #undef ADD_DESKTOP_ONLY
 #undef toggleVisibility
-
-bool BackendCommandTarget::Helpers::deviceTypeHasUIData(BackendRootWindow* bpe)
-{
-	auto mp = JavascriptMidiProcessor::getFirstInterfaceScriptProcessor(bpe->getBackendProcessor());
-
-	if (mp == nullptr)
-		return false;
-
-	return mp->hasUIDataForDeviceType();
-}
-
-bool BackendCommandTarget::Helpers::canCopyDeviceType(BackendRootWindow* bpe)
-{
-	if (!HiseDeviceSimulator::isMobileDevice())
-		return false;
-
-	auto mp = JavascriptMidiProcessor::getFirstInterfaceScriptProcessor(bpe->getBackendProcessor());
-
-	if (mp == nullptr)
-		return false;
-
-	return !mp->hasUIDataForDeviceType();
-	
-}
 
 void XmlBackupFunctions::removeEditorStatesFromXml(XmlElement &xml)
 {

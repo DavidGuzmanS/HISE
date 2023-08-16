@@ -189,33 +189,33 @@ juce::Path DspNetworkPathFactory::createPath(const String& url) const
 	LOAD_PATH_IF_URL("cable", ScriptnodeIcons::cableIcon);
 	LOAD_PATH_IF_URL("fold", ScriptnodeIcons::foldIcon);
 	LOAD_PATH_IF_URL("foldunselected", ScriptnodeIcons::foldUnselected);
-	LOAD_PATH_IF_URL("deselect", EditorIcons::cancelIcon);
-	LOAD_PATH_IF_URL("undo", EditorIcons::undoIcon);
+	LOAD_EPATH_IF_URL("deselect", EditorIcons::cancelIcon);
+	LOAD_EPATH_IF_URL("undo", EditorIcons::undoIcon);
     LOAD_PATH_IF_URL("eject", ScriptnodeIcons::ejectIcon);
-	LOAD_PATH_IF_URL("redo", EditorIcons::redoIcon);
+	LOAD_EPATH_IF_URL("redo", EditorIcons::redoIcon);
 	LOAD_PATH_IF_URL("rebuild", ColumnIcons::moveIcon);
 	LOAD_PATH_IF_URL("goto", ScriptnodeIcons::gotoIcon);
 	LOAD_PATH_IF_URL("properties", ScriptnodeIcons::propertyIcon);
-	LOAD_PATH_IF_URL("bypass", HiBinaryData::ProcessorEditorHeaderIcons::bypassShape);
+	LOAD_EPATH_IF_URL("bypass", HiBinaryData::ProcessorEditorHeaderIcons::bypassShape);
 	LOAD_PATH_IF_URL("profile", ScriptnodeIcons::profileIcon);
 	LOAD_PATH_IF_URL("swap-orientation", ScriptnodeIcons::swapOrientationIcon);
-	LOAD_PATH_IF_URL("copy", SampleMapIcons::copySamples);
-	LOAD_PATH_IF_URL("delete", SampleMapIcons::deleteSamples);
-	LOAD_PATH_IF_URL("duplicate", SampleMapIcons::duplicateSamples);
-	LOAD_PATH_IF_URL("add", HiBinaryData::ProcessorEditorHeaderIcons::addIcon);
+	LOAD_EPATH_IF_URL("copy", SampleMapIcons::copySamples);
+	LOAD_EPATH_IF_URL("delete", SampleMapIcons::deleteSamples);
+	LOAD_EPATH_IF_URL("duplicate", SampleMapIcons::duplicateSamples);
+	LOAD_EPATH_IF_URL("add", HiBinaryData::ProcessorEditorHeaderIcons::addIcon);
 	LOAD_PATH_IF_URL("zoom", ScriptnodeIcons::zoomOriginal);
 	LOAD_PATH_IF_URL("zoom-in", ScriptnodeIcons::zoomIn);
 	LOAD_PATH_IF_URL("zoom-out", ScriptnodeIcons::zoomOut);
-	LOAD_PATH_IF_URL("zoom-fit", ::ScriptnodeIcons::zoomFit);
+	LOAD_EPATH_IF_URL("zoom-fit", ::ScriptnodeIcons::zoomFit);
 	LOAD_PATH_IF_URL("zoom-sel", ScriptnodeIcons::zoomSelection);
     LOAD_PATH_IF_URL("signal", ScriptnodeIcons::signalIcon);
-	LOAD_PATH_IF_URL("error", ::ScriptnodeIcons::errorIcon);
-	LOAD_PATH_IF_URL("export", HnodeIcons::freezeIcon);
-	LOAD_PATH_IF_URL("wrap", HnodeIcons::mapIcon);
-	LOAD_PATH_IF_URL("parameters", HiBinaryData::SpecialSymbols::macros);
-	LOAD_PATH_IF_URL("surround", HnodeIcons::injectNodeIcon);
-    LOAD_PATH_IF_URL("save", SampleMapIcons::saveSampleMap);
-    LOAD_PATH_IF_URL("export", SampleMapIcons::monolith);
+	LOAD_EPATH_IF_URL("error", ::ScriptnodeIcons::errorIcon);
+	LOAD_EPATH_IF_URL("export", HnodeIcons::freezeIcon);
+	LOAD_EPATH_IF_URL("wrap", HnodeIcons::mapIcon);
+	LOAD_EPATH_IF_URL("parameters", HiBinaryData::SpecialSymbols::macros);
+	LOAD_EPATH_IF_URL("surround", HnodeIcons::injectNodeIcon);
+    LOAD_EPATH_IF_URL("save", SampleMapIcons::saveSampleMap);
+    LOAD_EPATH_IF_URL("export", SampleMapIcons::monolith);
 	LOAD_PATH_IF_URL("debug", SnexIcons::bugIcon);
 #endif
 
@@ -1292,7 +1292,7 @@ bool DspNetworkGraph::Actions::save(DspNetworkGraph& g)
 
 	DspNetworkListeners::PatchAutosaver::removeDanglingConnections(saveCopy);
 
-    cppgen::ValueTreeIterator::forEach(saveCopy, snex::cppgen::ValueTreeIterator::IterationType::Forward, DspNetworkListeners::PatchAutosaver::stripValueTree);
+    valuetree::Helpers::forEach(saveCopy, DspNetworkListeners::PatchAutosaver::stripValueTree);
 
     auto xml = saveCopy.createXml();
 
@@ -1873,7 +1873,7 @@ struct DuplicateHelpers
         int index = 0;
         auto iptr = &index;
         
-        valuetree::Helpers::foreach(p, [&iptr, v](ValueTree& c)
+        valuetree::Helpers::forEach(p, [&iptr, v](ValueTree& c)
         {
             *iptr = *iptr + 1;
             return c == v;
@@ -2490,6 +2490,8 @@ KeyboardPopup::PopupList::Item::Item(const Entry& entry_, bool isSelected_) :
 	static const StringArray icons = { "clipboard", "oldnode", "newnode" };
 
 	p = f.createPath(icons[(int)entry.t]);
+    
+    setWantsKeyboardFocus(true);
 }
 
 void KeyboardPopup::PopupList::Item::buttonClicked(Button*)
@@ -2509,13 +2511,37 @@ void KeyboardPopup::PopupList::Item::mouseDown(const MouseEvent&)
 	findParentComponentOfClass<PopupList>()->setSelected(this, false);
 }
 
-void KeyboardPopup::PopupList::Item::mouseUp(const MouseEvent& event)
+void KeyboardPopup::PopupList::Item::mouseDoubleClick(const MouseEvent& event)
 {
 	if (!event.mouseWasDraggedSinceMouseDown())
 	{
 		findParentComponentOfClass<KeyboardPopup>()->addNodeAndClose(entry.insertString);
 	}
 }
+
+bool KeyboardPopup::PopupList::Item::keyPressed(const KeyPress& k)
+{
+    if(k == KeyPress::upKey)
+    {
+        findParentComponentOfClass<PopupList>()->selectNext(false);
+        return true;
+    }
+    if(k == KeyPress::downKey)
+    {
+        findParentComponentOfClass<PopupList>()->selectNext(true);
+        return true;
+    }
+    if(k == KeyPress::returnKey)
+    {
+        auto list = findParentComponentOfClass<PopupList>();
+        findParentComponentOfClass<KeyboardPopup>()->addNodeAndClose(list->getTextToInsert());
+        return true;
+    }
+    
+    return false;
+}
+
+
 
 void KeyboardPopup::PopupList::Item::paint(Graphics& g)
 {

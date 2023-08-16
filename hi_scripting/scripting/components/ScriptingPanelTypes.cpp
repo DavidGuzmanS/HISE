@@ -273,10 +273,7 @@ void CodeEditorPanel::fillIndexList(StringArray& indexList)
 #if HISE_INCLUDE_SNEX
 			if (auto network = h->getActiveOrDebuggedNetwork())
 			{
-				for (auto so : network->getSnexObjects())
-				{
-					indexList.add("SNEX Node: " + so->getId());
-				}
+				network->fillSnexObjects(indexList);
 			}
 #endif
 		}
@@ -480,6 +477,16 @@ struct ScriptContentPanel::Canvas : public ScriptEditHandler,
 	}
 #endif
 
+	void setEnablePositioningWithMouse(bool shouldBeEnabled)
+	{
+		overlay->setEnablePositioningWithMouse(shouldBeEnabled);
+	}
+	
+	bool isMousePositioningEnabled() const
+	{
+		return overlay->isMousePositioningEnabled();
+	}
+
 	void paint(Graphics& g) override;
 
 	void selectOnInitCallback() override
@@ -682,6 +689,7 @@ void ScriptContentPanel::Editor::rebuildAfterContentChange()
 	addSpacer(10);
 
 	addButton("lock");
+	addButton("move");
 
 	addSpacer(10);
 
@@ -721,6 +729,15 @@ void ScriptContentPanel::Editor::addButton(const String& name)
 		};
 
 		b->setTooltip("Zoom to fit");
+	}
+	if (name == "move")
+	{
+		b->actionFunction = Actions::move;
+		b->setTooltip("Allow dragging components by mouse");
+		b->stateFunction = [](Editor& e)
+		{
+			return e.canvas.getContent<Canvas>()->isMousePositioningEnabled();
+		};
 	}
 	if (name == "rebuild")
 	{
@@ -1017,7 +1034,7 @@ bool ScriptContentPanel::Editor::Actions::toggleEditMode(Editor& e)
 	auto shouldDrag = !e.canvas.getContent<Canvas>()->overlay->isEditModeEnabled();
 
 	e.canvas.setScrollOnDragEnabled(shouldDrag);
-	e.canvas.setMouseWheelScrollEnabled(!shouldDrag);
+	e.canvas.setMouseWheelScrollEnabled(true);// !shouldDrag);
 
 	return true;
 }
@@ -1116,6 +1133,17 @@ bool ScriptContentPanel::Editor::Actions::undo(Editor* e, bool shouldUndo)
 	return true;
 }
 
+bool ScriptContentPanel::Editor::Actions::move(Editor& e)
+{
+	auto c = e.canvas.getContent<Canvas>();
+
+	jassert(c != nullptr);
+
+	c->setEnablePositioningWithMouse(!c->isMousePositioningEnabled());
+
+	return true;
+}
+
 void ScriptContentPanel::initKeyPresses(Component* root)
 {
 	using namespace InterfaceDesignerShortcuts;
@@ -1133,6 +1161,7 @@ void ScriptContentPanel::initKeyPresses(Component* root)
 	TopLevelWindowWithKeyMappings::addShortcut(root, cat, id_duplicate, "Duplicate selection at cursor", KeyPress('d', ModifierKeys::commandModifier, 'd'));
 
 	TopLevelWindowWithKeyMappings::addShortcut(root, cat, id_show_json, "Show JSON properties", KeyPress('j'));
+    TopLevelWindowWithKeyMappings::addShortcut(root, cat, id_show_panel_data_json, "Show Panel.data as JSON", KeyPress('p'));
 }
 
 bool ScriptContentPanel::Editor::keyPressed(const KeyPress& key)
@@ -1281,17 +1310,17 @@ struct ServerController: public Component,
 		{
 			Path p;
 
-			LOAD_PATH_IF_URL("showall", ScriptnodeIcons::zoomFit);
-			LOAD_PATH_IF_URL("clear", SampleMapIcons::deleteSamples);
+			LOAD_EPATH_IF_URL("showall", ScriptnodeIcons::zoomFit);
+			LOAD_EPATH_IF_URL("clear", SampleMapIcons::deleteSamples);
 			LOAD_PATH_IF_URL("edit", ServerIcons::parameters);
-			LOAD_PATH_IF_URL("web", MainToolbarIcons::web);
+			LOAD_EPATH_IF_URL("web", MainToolbarIcons::web);
 			LOAD_PATH_IF_URL("response", ServerIcons::response);
 			LOAD_PATH_IF_URL("resend", ServerIcons::resend);
 			LOAD_PATH_IF_URL("downloads", ServerIcons::downloads);
 			LOAD_PATH_IF_URL("requests", ServerIcons::requests);
 			LOAD_PATH_IF_URL("start", ServerIcons::play);
 			LOAD_PATH_IF_URL("stop", ServerIcons::pause);
-			LOAD_PATH_IF_URL("file", SampleMapIcons::loadSampleMap);
+			LOAD_EPATH_IF_URL("file", SampleMapIcons::loadSampleMap);
 
 			return p;
 		}
@@ -2038,15 +2067,16 @@ juce::Path ScriptContentPanel::Factory::createPath(const String& id) const
 	auto url = MarkdownLink::Helpers::getSanitizedFilename(id);
 	Path p;
 
-	LOAD_PATH_IF_URL("showall", ScriptnodeIcons::zoomFit);
-	LOAD_PATH_IF_URL("edit", OverlayIcons::penShape);
-	LOAD_PATH_IF_URL("editoff", OverlayIcons::lockShape);
-	LOAD_PATH_IF_URL("lock", OverlayIcons::lockShape);
-	LOAD_PATH_IF_URL("cancel", EditorIcons::cancelIcon);
-	LOAD_PATH_IF_URL("undo", EditorIcons::undoIcon);
-	LOAD_PATH_IF_URL("redo", EditorIcons::redoIcon);
+	LOAD_EPATH_IF_URL("showall", ScriptnodeIcons::zoomFit);
+	LOAD_EPATH_IF_URL("edit", OverlayIcons::penShape);
+	LOAD_EPATH_IF_URL("editoff", OverlayIcons::lockShape);
+	LOAD_EPATH_IF_URL("lock", OverlayIcons::lockShape);
+	LOAD_EPATH_IF_URL("move", EditorIcons::resizeIcon);
+	LOAD_EPATH_IF_URL("cancel", EditorIcons::cancelIcon);
+	LOAD_EPATH_IF_URL("undo", EditorIcons::undoIcon);
+	LOAD_EPATH_IF_URL("redo", EditorIcons::redoIcon);
 	LOAD_PATH_IF_URL("rebuild", ColumnIcons::moveIcon);
-	LOAD_PATH_IF_URL("learn", EditorIcons::connectIcon);
+	LOAD_EPATH_IF_URL("learn", EditorIcons::connectIcon);
 	LOAD_PATH_IF_URL("vertical-align", ColumnIcons::verticalAlign);
 	LOAD_PATH_IF_URL("horizontal-align", ColumnIcons::horizontalAlign);
 	LOAD_PATH_IF_URL("vertical-distribute", ColumnIcons::verticalDistribute);
@@ -2181,10 +2211,10 @@ juce::Path OSCLogger::createPath(const String& url) const
 	Path p;
 
 	LOAD_PATH_IF_URL("filter", ColumnIcons::filterIcon);
-	LOAD_PATH_IF_URL("clear", SampleMapIcons::deleteSamples);
-	LOAD_PATH_IF_URL("pause", HiBinaryData::ProcessorEditorHeaderIcons::bypassShape);
-	LOAD_PATH_IF_URL("scale", ScriptnodeIcons::scaleIcon);
-	LOAD_PATH_IF_URL("script", HiBinaryData::SpecialSymbols::scriptProcessor);
+	LOAD_EPATH_IF_URL("clear", SampleMapIcons::deleteSamples);
+	LOAD_EPATH_IF_URL("pause", HiBinaryData::ProcessorEditorHeaderIcons::bypassShape);
+	LOAD_EPATH_IF_URL("scale", ScriptnodeIcons::scaleIcon);
+	LOAD_EPATH_IF_URL("script", HiBinaryData::SpecialSymbols::scriptProcessor);
 
 	return p;
 }

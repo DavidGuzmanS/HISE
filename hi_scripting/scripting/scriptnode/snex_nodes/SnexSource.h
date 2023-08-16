@@ -144,6 +144,7 @@ public:
 		void copyLastValuesFrom(ParameterHandlerLight& other)
 		{
 			memcpy(lastValues, other.lastValues, sizeof(double) *OpaqueNode::NumMaxParameters);
+			numParameters = other.numParameters;
 		}
 
 		Result recompiledOk(snex::jit::ComplexType::Ptr objectClass) override;
@@ -163,6 +164,7 @@ public:
 
 	protected:
 
+		int numParameters = 0;
 		span<snex::jit::FunctionData, OpaqueNode::NumMaxParameters> pFunctions;
 		double lastValues[OpaqueNode::NumMaxParameters];
 	};
@@ -229,7 +231,7 @@ public:
 		Result recompiledOk(snex::jit::ComplexType::Ptr objectClass) override
 		{
 			auto newFunction = getFunctionAsObjectCallback("setExternalData");
-			auto r = newFunction.validateWithArgs(Types::ID::Void, { Types::ID::Pointer, Types::ID::Integer });
+			auto r = newFunction.validateWithArgs(Types::ID::Void, { Types::ID::Pointer, Types::ID::Pointer, Types::ID::Integer });
 
 			if (r.wasOk())
 			{
@@ -781,7 +783,11 @@ protected:
 
 	Array<WeakReference<SnexSourceListener>> compileListeners;
 
-	void addDummyProcessFunctions(String& s);
+	void addDummyNodeCallbacks(String& s, bool addEvent=true, bool addReset=true);
+
+	void addDummyProcessFunctions(String& s, bool addFrame = true, const String& processDataType = {});
+
+	
 
 	static void addSnexNodeId(cppgen::Base& c, const Identifier& id)
 	{
@@ -820,6 +826,8 @@ private:
 	ParameterHandler parameterHandler;
 	ComplexDataHandler dataHandler;
 	CallbackHandlerBase* callbackHandler = nullptr;
+
+	int currentChannelCount = 0;
 
 	Result lastResult;
 
@@ -870,7 +878,7 @@ struct SnexComplexDataDisplay : public Component,
 	WeakReference<SnexSource> source;
 };
 
-struct SnexMenuBar : public Component,
+struct SnexMenuBar : public ComponentWithMiddleMouseDrag,
 	public ButtonListener,
 	public ComboBox::Listener,
 	public SnexSource::SnexSourceListener,

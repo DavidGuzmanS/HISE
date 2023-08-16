@@ -365,6 +365,8 @@ void ConvolutionEffectBase::prepareBase(double sampleRate, int samplesPerBlock)
 
 void ConvolutionEffectBase::processBase(ProcessDataDyn& d)
 {
+    TRACE_DSP();
+    
 	if (auto sp = SimpleReadWriteLock::ScopedTryReadLock(swapLock))
 	{
 		auto channels = d.getRawChannelPointers();
@@ -647,8 +649,14 @@ bool ConvolutionEffectBase::reloadInternal()
 	{
 		SimpleReadWriteLock::ScopedWriteLock sl(swapLock);
         
-        while(backgroundThread.isBusy())
-            Thread::getCurrentThread()->wait(10);
+		while (backgroundThread.isBusy())
+		{
+			auto currentThread = Thread::getCurrentThread();
+			
+			if(currentThread != nullptr)
+				currentThread->wait(10);
+		}
+            
         
         std::swap(fadeOutConvolverL, convolverL);
 		std::swap(fadeOutConvolverR, convolverR);

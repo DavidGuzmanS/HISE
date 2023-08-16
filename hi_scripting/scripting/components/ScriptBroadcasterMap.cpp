@@ -204,16 +204,7 @@ bool ScriptBroadcasterMap::MessageWatcher::LastTime::hasChanged()
 	return false;
 }
 
-ScriptBroadcaster::Panel::Panel(FloatingTile* parent) :
-	PanelWithProcessorConnection(parent)
-{
 
-}
-
-juce::Identifier ScriptBroadcaster::Panel::getProcessorTypeId() const
-{
-	return JavascriptProcessor::getConnectorId();
-}
 
 
 
@@ -596,7 +587,7 @@ struct ScriptBroadcasterMapViewport : public WrapperWithMenuBarBase
 				
 			int totalHeight = 24 * numRows + HeaderHeight;
 
-			setSize(totalWidth, totalHeight);
+			setSize(jmax(200, totalWidth), totalHeight);
 		}
 
 		Component::SafePointer<ScriptBroadcasterMap> map;
@@ -620,7 +611,7 @@ struct ScriptBroadcasterMapViewport : public WrapperWithMenuBarBase
 
 			Path p;
 
-			p.loadPathFromData(EditorIcons::searchIcon, sizeof(EditorIcons::searchIcon));
+			p.loadPathFromData(EditorIcons::searchIcon, SIZE_OF_PATH(EditorIcons::searchIcon));
 			p.applyTransform(AffineTransform::rotation(float_Pi));
 
 			PathFactory::scalePath(p, b.removeFromLeft(b.getHeight()).reduced(10).toFloat());
@@ -702,10 +693,10 @@ struct ScriptBroadcasterMapViewport : public WrapperWithMenuBarBase
 		{
 			Path p;
 
-			LOAD_PATH_IF_URL("watch", BackendBinaryData::ToolbarIcons::viewPanel);
+			LOAD_EPATH_IF_URL("watch", BackendBinaryData::ToolbarIcons::viewPanel);
 			LOAD_PATH_IF_URL("clear", ColumnIcons::moveIcon);
-			LOAD_PATH_IF_URL("error", ScriptnodeIcons::errorIcon);
-			LOAD_PATH_IF_URL("showall", ScriptnodeIcons::zoomFit);
+			LOAD_EPATH_IF_URL("error", ScriptnodeIcons::errorIcon);
+			LOAD_EPATH_IF_URL("showall", ScriptnodeIcons::zoomFit);
 			LOAD_PATH_IF_URL("filter", ColumnIcons::filterIcon);
 			LOAD_PATH_IF_URL("tags", ScriptBroadcasterMapIcons::tagIcon);
 			LOAD_PATH_IF_URL("dim", ScriptBroadcasterMapIcons::dimIcon);
@@ -952,7 +943,12 @@ struct ScriptBroadcasterMapViewport : public WrapperWithMenuBarBase
 	
 };
 
-Component* ScriptBroadcaster::Panel::createContentComponent(int)
+void ScriptBroadcasterPanel::fillModuleList(StringArray& moduleList)
+{
+	fillModuleListWithType<JavascriptProcessor>(moduleList);
+}
+
+Component* ScriptBroadcasterPanel::createContentComponent(int)
 {
 	if (auto jp = dynamic_cast<JavascriptProcessor*>(getConnectedProcessor()))
 	{
@@ -963,7 +959,16 @@ Component* ScriptBroadcaster::Panel::createContentComponent(int)
 	return nullptr;
 }
 
+ScriptBroadcasterPanel::ScriptBroadcasterPanel(FloatingTile* parent) :
+	PanelWithProcessorConnection(parent)
+{
 
+}
+
+juce::Identifier ScriptBroadcasterPanel::getProcessorTypeId() const
+{
+	return JavascriptProcessor::getConnectorId();
+}
 
 juce::Path ScriptBroadcasterMap::ListenerEntry::createPath(const String& url) const
 {
@@ -976,7 +981,7 @@ juce::Path ScriptBroadcasterMap::ListenerEntry::createPath(const String& url) co
 	LOAD_PATH_IF_URL("broadcastersource", ScriptBroadcasterMapIcons::otherBroadcasterIcon);
 	LOAD_PATH_IF_URL("componentvalue", ScriptBroadcasterMapIcons::valueIcon);
 	LOAD_PATH_IF_URL("componentproperties", ScriptBroadcasterMapIcons::propertyIcon);
-    LOAD_PATH_IF_URL("scriptfunctioncalls", HiBinaryData::SpecialSymbols::scriptProcessor);
+	LOAD_EPATH_IF_URL("scriptfunctioncalls", HiBinaryData::SpecialSymbols::scriptProcessor);
 
 	if (p.isEmpty())
 		p.loadPathFromData(ScriptBroadcasterMapIcons::complexDataIcon, sizeof(ScriptBroadcasterMapIcons::complexDataIcon));
@@ -988,11 +993,11 @@ juce::Path ScriptBroadcasterMapFactory::createPath(const String& url) const
 {
     Path p;
 
-    LOAD_PATH_IF_URL("bypass", HiBinaryData::ProcessorEditorHeaderIcons::bypassShape);
+	LOAD_EPATH_IF_URL("bypass", HiBinaryData::ProcessorEditorHeaderIcons::bypassShape);
     LOAD_PATH_IF_URL("goto", ColumnIcons::openWorkspaceIcon);
     LOAD_PATH_IF_URL("queue", ScriptBroadcasterMapIcons::queueIcon);
 	LOAD_PATH_IF_URL("error", ColumnIcons::errorIcon);
-    LOAD_PATH_IF_URL("realtime", HnodeIcons::jit);
+    LOAD_EPATH_IF_URL("realtime", HnodeIcons::jit);
 	LOAD_PATH_IF_URL("comment", ScriptBroadcasterMapIcons::commentIcon);
     return p;
 }

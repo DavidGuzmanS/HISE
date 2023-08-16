@@ -217,9 +217,9 @@ struct Selector : public Component,
 	Path createPath(const String& url) const override
 	{
 		Path p;
-		LOAD_PATH_IF_URL("new", SampleMapIcons::newSampleMap);
-		LOAD_PATH_IF_URL("embedded", HnodeIcons::mapIcon);
-		LOAD_PATH_IF_URL("import", SampleMapIcons::pasteSamples);
+		LOAD_EPATH_IF_URL("new", SampleMapIcons::newSampleMap);
+		LOAD_EPATH_IF_URL("embedded", HnodeIcons::mapIcon);
+		LOAD_EPATH_IF_URL("import", SampleMapIcons::pasteSamples);
 		return p;
 	}
 
@@ -540,7 +540,7 @@ SnexPopupEditor::SnexPopupEditor(const String& name, SnexSource* src, bool isPop
 	d.getCodeDocument().replaceAllContent(codeValue.getValue().toString());
 	d.getCodeDocument().clearUndoHistory();
 
-	for (auto& o : snex::OptimizationIds::getAllIds())
+	for (auto& o : snex::OptimizationIds::Helpers::getAllIds())
 		s.addOptimization(o);
 
 	s.addDebugHandler(this);
@@ -612,7 +612,7 @@ void SnexPopupEditor::buttonClicked(Button* b)
 	}
 	if (b == &optimiseButton)
 	{
-		auto allIds = snex::OptimizationIds::getAllIds();
+		auto allIds = snex::OptimizationIds::Helpers::getAllIds();
 
 		PopupLookAndFeel plaf;
 		PopupMenu m;
@@ -830,13 +830,13 @@ void WorkbenchTestPlayer::postPostCompile(WorkbenchData::Ptr wb)
 void WorkbenchTestPlayer::play()
 {
 	playButton.setToggleStateAndUpdateIcon(true);
-	getMainController()->setBufferToPlay(wb->getTestData().testOutputData);
+	getMainController()->setBufferToPlay(wb->getTestData().testOutputData, 44100.0);
 }
 
 void WorkbenchTestPlayer::stop()
 {
 	playButton.setToggleStateAndUpdateIcon(false);
-	getMainController()->setBufferToPlay({});
+	getMainController()->setBufferToPlay({}, 44100.0);
 }
 
 void WorkbenchTestPlayer::timerCallback()
@@ -874,7 +874,7 @@ juce::Path WorkbenchTestPlayer::Factory::createPath(const String& url) const
 	if (!p.isEmpty())
 		return p;
 
-	LOAD_PATH_IF_URL("midi", HiBinaryData::SpecialSymbols::midiData);
+	LOAD_EPATH_IF_URL("midi", HiBinaryData::SpecialSymbols::midiData);
 
 	return p;
 }

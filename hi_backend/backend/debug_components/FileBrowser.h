@@ -153,7 +153,7 @@ public:
 
 	void previewFile(const File& f);
 
-	void textEditorReturnKeyPressed(TextEditor& editor) override;
+	void textEditorTextChanged(TextEditor& editor) override;
 
 	~FileBrowser();
 
@@ -241,13 +241,14 @@ private:
 
 				if (additionalWildcard.contains("*"))
 				{
-					if (!file.getFullPathName().matchesWildcard(additionalWildcard, !File::areFileNamesCaseSensitive()))
-						return false;
+                    return file.getFullPathName().matchesWildcard(additionalWildcard, !File::areFileNamesCaseSensitive());
 				}
 				else
 				{
-					if (!file.getFileNameWithoutExtension().contains(additionalWildcard))
-						return false;
+                    auto st = additionalWildcard;
+                    auto sm = file.getFileNameWithoutExtension();
+                    
+                    return FuzzySearcher::fitsSearch(additionalWildcard, sm, 0.4);
 				}
 			}
 

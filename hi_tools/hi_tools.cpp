@@ -50,7 +50,9 @@
 
 #include "hi_tools.h"
 
+#if !HISE_NO_GUI_TOOLS
 #include "hi_binary_data/hi_binary_data.cpp"
+#endif
 
 #if USE_IPP
 #include "hi_tools/IppFFT.cpp"
@@ -76,15 +78,18 @@
 #include "gin_images/gin_imageutilities.cpp"
 #include "hi_tools/PostGraphicsRenderer.cpp"
 
+#include "hi_standalone_components/ChocWebView.cpp"
 #include "hi_standalone_components/CodeEditorApiBase.cpp"
 #include "hi_standalone_components/AdvancedCodeEditor.cpp"
 #include "hi_standalone_components/ScriptWatchTable.cpp"
 #include "hi_standalone_components/ComponentWithPreferredSize.cpp"
 
 #if USE_BACKEND // Only include this file in the GPL build configuration
+#include "hi_tools/FaustTokeniser.h"
 #include "hi_tools/FaustTokeniser.cpp"
 #endif
 
+#include "hi_tools/JavascriptTokeniserFunctions.h"
 #include "hi_tools/JavascriptTokeniser.cpp"
 #include "hi_markdown/MarkdownLink.cpp"
 #include "hi_markdown/MarkdownHeader.cpp"
@@ -99,6 +104,7 @@
 #include "hi_markdown/MarkdownParser.cpp"
 
 
+
 #include "mcl_editor/mcl_editor.cpp"
 #endif
 
@@ -108,6 +114,10 @@
 
 #if USE_BACKEND || HISE_ENABLE_LORIS_ON_FRONTEND
 #include "hi_tools/LorisManager.cpp"
+#endif
+
+#if !HISE_NO_GUI_TOOLS
+#include "hi_standalone_components/ZoomableViewport.cpp"
 #endif
 
 #include "hi_standalone_components/SampleDisplayComponent.cpp"

@@ -446,7 +446,7 @@ public:
         numCableLocations
     };
     
-	struct MacroToolbar : public Component,
+	struct MacroToolbar : public ComponentWithMiddleMouseDrag,
 						  public ButtonListener
 	{
 		MacroToolbar() :
@@ -499,7 +499,7 @@ public:
 				auto url = MarkdownLink::Helpers::getSanitizedFilename(id);
 				Path p;
 
-				LOAD_PATH_IF_URL("add", HiBinaryData::ProcessorEditorHeaderIcons::addIcon);
+				LOAD_EPATH_IF_URL("add", HiBinaryData::ProcessorEditorHeaderIcons::addIcon);
 				LOAD_PATH_IF_URL("drag", ColumnIcons::targetIcon);
 
 				return p;
@@ -514,7 +514,7 @@ public:
 		HiseShapeButton addButton;
 	};
 	
-	struct ParameterComponent : public Component,
+	struct ParameterComponent : public ComponentWithMiddleMouseDrag,
 								public ValueTree::Listener,
 								public AsyncUpdater
 	{

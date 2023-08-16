@@ -73,12 +73,7 @@ public:
 
 	Path getSpecialSymbol() const override;
 
-	void suspendStateChanged(bool shouldBeSuspended) override
-	{
-		ScriptBaseMidiProcessor::suspendStateChanged(shouldBeSuspended);
-
-		deferredExecutioner.suspend(shouldBeSuspended);
-	}
+	void suspendStateChanged(bool shouldBeSuspended) override;
 
 	ValueTree exportAsValueTree() const override;;
 	void restoreFromValueTree(const ValueTree &v) override;
@@ -86,12 +81,12 @@ public:
 
 	SnippetDocument *getSnippet(int c) override;
 	const SnippetDocument *getSnippet(int c) const override;
-	int getNumSnippets() const override { return numCallbacks; }
+	int getNumSnippets() const override;
 	void registerApiClasses() override;
 	
 
 	void addToFront(bool addToFront_) noexcept;;
-	bool isFront() const { return front; };
+	bool isFront() const;;
 
 	StringArray getImageFileNames() const;
 
@@ -100,81 +95,27 @@ public:
 	*	It stops all timers and clears any message queues.
 	*/
 	void deferCallbacks(bool addToFront_);
-	bool isDeferred() const { return deferred; };
+	bool isDeferred() const;;
 
-	void timerCallback() override
-	{
-		jassert(isDeferred());
-		runTimerCallback();
-	}
+	void timerCallback() override;
 
 	void processHiseEvent(HiseEvent &m) override;
 
-	static JavascriptMidiProcessor* getFirstInterfaceScriptProcessor(MainController* mc)
-	{
-		Processor::Iterator<JavascriptMidiProcessor> iter(mc->getMainSynthChain());
+	static JavascriptMidiProcessor* getFirstInterfaceScriptProcessor(MainController* mc);
 
-		while (auto jsp = iter.getNextProcessor())
-		{
-			if (jsp->isFront())
-			{
-				return jsp;
-			}
-		}
-
-		return nullptr;
-	}
-
-	MainController::UserPresetHandler::StoredModuleData::List& getListOfModuleIds() {
-		return getMainController()->getUserPresetHandler().getStoredModuleData();
-	}
-
-	ScriptingApi::Server::WeakPtr getServerObject() { return serverObject; }
+	ScriptingApi::Server::WeakPtr getServerObject();
 
 private:
 
 	struct DeferredExecutioner : public LockfreeAsyncUpdater
 	{
-		DeferredExecutioner(JavascriptMidiProcessor* jp) :
-			parent(*jp),
-			pendingEvents(512)
-		{};
+		DeferredExecutioner(JavascriptMidiProcessor* jp);;
 
-		void addPendingEvent(const HiseEvent& e)
-		{
-			pendingEvents.push(e);
-			triggerAsyncUpdate();
-		}
+		void addPendingEvent(const HiseEvent& e);
 
 	private:
 
-		void handleAsyncUpdate() override
-		{
-			jassert(parent.isDeferred());
-			
-			HiseEvent m;
-
-			while (pendingEvents.pop(m))
-			{
-				if (m.isIgnored() || m.isArtificial())
-					continue;
-
-				auto f = [m](JavascriptProcessor* p)
-				{
-					auto jmp = dynamic_cast<JavascriptMidiProcessor*>(p);
-
-					HiseEvent copy(m);
-
-					ScopedValueSetter<HiseEvent*> svs(jmp->currentEvent, &copy);
-					jmp->currentMidiMessage->setHiseEvent(m);
-					jmp->runScriptCallbacks();
-
-					return jmp->lastResult;
-				};
-
-				parent.getMainController()->getJavascriptThreadPool().addJob(JavascriptThreadPool::Task::HiPriorityCallbackExecution, &parent, f);
-			}
-		}
+		void handleAsyncUpdate() override;
 
 		LockfreeQueue<HiseEvent> pendingEvents;
 		JavascriptMidiProcessor& parent;
@@ -334,31 +275,13 @@ public:
 
 	Path getSpecialSymbol() const override;
 
-	float getAttribute(int index) const override
-	{
-		if (auto n = getActiveOrDebuggedNetwork())
-			return n->networkParameterHandler.getParameter(index);
-		else
-			return contentParameterHandler.getParameter(index);
-	}
+	float getAttribute(int index) const override;
 
-	void setInternalAttribute(int index, float newValue) override
-	{
-		if (auto n = getActiveOrDebuggedNetwork())
-			n->networkParameterHandler.setParameter(index, newValue);
-		else
-			contentParameterHandler.setParameter(index, newValue);
-	}
+	void setInternalAttribute(int index, float newValue) override;
 
-	Identifier getIdentifierForParameterIndex(int parameterIndex) const override
-	{
-		if (auto n = getActiveOrDebuggedNetwork())
-			return n->networkParameterHandler.getParameterId(parameterIndex);
-		else
-			return contentParameterHandler.getParameterId(parameterIndex);
-	}
-	ValueTree exportAsValueTree() const override { ValueTree v = TimeVariantModulator::exportAsValueTree(); saveContent(v); saveScript(v); return v; }
-	void restoreFromValueTree(const ValueTree &v) override { TimeVariantModulator::restoreFromValueTree(v); restoreScript(v); restoreContent(v); }
+	Identifier getIdentifierForParameterIndex(int parameterIndex) const override;
+	ValueTree exportAsValueTree() const override;
+	void restoreFromValueTree(const ValueTree &v) override;
 
 	ProcessorEditorBody *createEditor(ProcessorEditor *parentEditor)  override;
 
@@ -366,18 +289,18 @@ public:
 	void prepareToPlay(double sampleRate, int samplesPerBlock) override;
 	void calculateBlock(int startSample, int numSamples) override;;
 
-	Processor *getChildProcessor(int /*processorIndex*/) override final { return nullptr; };
-	const Processor *getChildProcessor(int /*processorIndex*/) const override final { return nullptr; };
-	int getNumChildProcessors() const override final { return 0; };
+	Processor *getChildProcessor(int /*processorIndex*/) override final;;
+	const Processor *getChildProcessor(int /*processorIndex*/) const override final;;
+	int getNumChildProcessors() const override final;;
 
 	
 
 	SnippetDocument *getSnippet(int c) override;
 	const SnippetDocument *getSnippet(int c) const override;
-	int getNumSnippets() const override { return Callback::numCallbacks; }
+	int getNumSnippets() const override;
 	void registerApiClasses() override;
 	
-	int getControlCallbackIndex() const override { return (int)Callback::onControl; };
+	int getControlCallbackIndex() const override;;
 
 	void postCompileCallback() override;
 
@@ -411,169 +334,51 @@ public:
 
 	SET_PROCESSOR_NAME("ScriptnodeVoiceKiller", "Scriptnode Voice Killer", "kills the voices from a scriptnode envelope's gate output")
 
-		ScriptnodeVoiceKiller(MainController* mc, const String& id, int numVoices) :
-		EnvelopeModulator(mc, id, numVoices, Modulation::GainMode),
-		Modulation(Modulation::GainMode)
-	{
-		for (int i = 0; i < polyManager.getVoiceAmount(); i++) states.add(createSubclassedState(i));
-
-		SafeAsyncCall::callWithDelay<ScriptnodeVoiceKiller>(*this, initialiseNetworks, 300);
-	};
+		ScriptnodeVoiceKiller(MainController* mc, const String& id, int numVoices);;
 
 	static void initialiseNetworks(ScriptnodeVoiceKiller& v);
 
-	void setInternalAttribute(int parameter_index, float newValue) override {}
-	float getDefaultValue(int parameterIndex) const override { return 0.0f; }
-	float getAttribute(int parameter_index) const { return 0.0f; }
+	void setInternalAttribute(int parameter_index, float newValue) override;
+	float getDefaultValue(int parameterIndex) const override;
+	float getAttribute(int parameter_index) const;
 
-	int getNumInternalChains() const override { return 0; };
-	int getNumChildProcessors() const override { return 0; };
-	Processor *getChildProcessor(int) override { return nullptr; };
-	const Processor *getChildProcessor(int) const override { return nullptr; };
+	int getNumInternalChains() const override;;
+	int getNumChildProcessors() const override;;
+	Processor *getChildProcessor(int) override;;
+	const Processor *getChildProcessor(int) const override;;
 
 	float startVoice(int voiceIndex) final override;
-	void stopVoice(int voiceIndex) override {}
-	void reset(int voiceIndex) final override { getState(voiceIndex)->active = false; }
-	bool isPlaying(int voiceIndex) const override { return getState(voiceIndex)->active; }
+	void stopVoice(int voiceIndex) override;
+	void reset(int voiceIndex) final override;
+	bool isPlaying(int voiceIndex) const override;
 
-	void calculateBlock(int startSample, int numSamples) override { FloatVectorOperations::fill(internalBuffer.getWritePointer(0, startSample), 1.0f, numSamples); }
-	void handleHiseEvent(const HiseEvent& m) override {}
+	void calculateBlock(int startSample, int numSamples) override;
+	void handleHiseEvent(const HiseEvent& m) override;
 
-	
 
 	struct State : public ModulatorState
 	{
-		State(int v) : ModulatorState(v) {};
+		State(int v);;
 		std::atomic<bool> active = { false };
 	};
 
-	int getNumActiveVoices() const
-	{
-		int counter = 0;
+	int getNumActiveVoices() const;
 
-		for (int i = 0; i < polyManager.getVoiceAmount(); i++)
-		{
-			if (getState(i)->active)
-				counter++;
-		}
-
-		return counter;
-	}
-
-	void onVoiceReset(bool allVoices, int voiceIndex) final override
-	{
-		if (allVoices)
-		{
-			for (int i = 0; i < polyManager.getVoiceAmount(); i++)
-				getState(i)->active.store(false);
-		}
-		else
-			reset(voiceIndex);
-	}
+	void onVoiceReset(bool allVoices, int voiceIndex) final override;
 
 	ProcessorEditorBody *createEditor(ProcessorEditor *parentEditor)  override;
 
-	State* getState(int i) { return  static_cast<State*>(states[i]); }
-	const State* getState(int i) const { return  static_cast<const State*>(states[i]); }
+	State* getState(int i);
+	const State* getState(int i) const;
 
-	ModulatorState *createSubclassedState(int voiceIndex) const override { return new State(voiceIndex); };
+	ModulatorState *createSubclassedState(int voiceIndex) const override;;
 
 	JUCE_DECLARE_WEAK_REFERENCEABLE(ScriptnodeVoiceKiller);
 
 	bool initialised = false;
 };
 
-struct VoiceDataStack
-{
-	struct VoiceData
-	{
-		bool operator==(const VoiceData& other) const
-		{
-			return other.voiceIndex == voiceIndex && noteOn == other.noteOn;
-		}
 
-		int voiceIndex;
-		HiseEvent noteOn;
-	};
-
-	void reset(int voiceIndex);
-
-	bool containsVoiceIndex(int voiceIndex) const
-	{
-		for (const auto& vd : voiceNoteOns)
-		{
-			if (voiceIndex == vd.voiceIndex)
-				return true;
-		}
-
-		return false;
-	}
-
-	template <typename T> void handleHiseEvent(T& n, PolyHandler& ph, const HiseEvent& m)
-	{
-		if (m.isNoteOff())
-		{
-			for (auto vd : voiceNoteOns)
-			{
-				if (vd.noteOn.getEventId() == m.getEventId())
-				{
-					HiseEvent c(m);
-					PolyHandler::ScopedVoiceSetter vs(ph, vd.voiceIndex);
-					n.handleHiseEvent(c);
-				}
-			}
-		}
-		else if (m.isPitchWheel() || m.isAftertouch() || m.isController())
-		{
-			if (voiceNoteOns.isEmpty())
-			{
-				HiseEvent c(m);
-				n.handleHiseEvent(c);
-			}
-			else
-			{
-				for (auto vd : voiceNoteOns)
-				{
-					if (vd.noteOn.getChannel() == m.getChannel())
-					{
-						HiseEvent c(m);
-						PolyHandler::ScopedVoiceSetter vs(ph, vd.voiceIndex);
-						n.handleHiseEvent(c);
-					}
-				}
-			}
-		}
-		else if (!m.isNoteOn())
-		{
-			for (auto vd : voiceNoteOns)
-			{
-				HiseEvent c(m);
-				PolyHandler::ScopedVoiceSetter vs(ph, vd.voiceIndex);
-				n.handleHiseEvent(c);
-			}
-		}
-	}
-
-	template <typename T> void startVoice(T& n, PolyHandler& ph, int voiceIndex, const HiseEvent& e)
-	{
-		voiceNoteOns.insertWithoutSearch({ voiceIndex, e });
-		HiseEvent c(e);
-
-		PolyHandler::ScopedVoiceSetter vs(ph, voiceIndex);
-
-		HiseEvent copy(e);
-
-		{
-			// Deactivate reset calls of envelopes killing the voice before it begins...
-			scriptnode::PolyHandler::ScopedNoReset vs(ph, voiceIndex);
-			n.reset();
-		}
-
-		n.handleHiseEvent(copy);
-	}
-
-	UnorderedStack<VoiceData, NUM_POLYPHONIC_VOICES> voiceNoteOns;
-};
 
 
 class JavascriptEnvelopeModulator : public JavascriptProcessor,
@@ -605,76 +410,23 @@ public:
 
 	Path getSpecialSymbol() const override;
 
-	bool isPolyphonic() const override { return true; }
-	
-	ValueTree exportAsValueTree() const override { ValueTree v = EnvelopeModulator::exportAsValueTree(); saveContent(v); saveScript(v); return v; }
-	void restoreFromValueTree(const ValueTree &v) override { EnvelopeModulator::restoreFromValueTree(v); restoreScript(v); restoreContent(v); }
+	bool isPolyphonic() const override;
 
-	
+	ValueTree exportAsValueTree() const override;
+	void restoreFromValueTree(const ValueTree &v) override;
+
 
 	int getNumActiveVoices() const override;
 
-	void onVoiceReset(bool allVoices, int voiceIndex) final override
-	{
-		if (allVoices)
-		{
-			for (int i = 0; i < polyManager.getVoiceAmount(); i++)
-				reset(i);
-		}
-		else
-			reset(voiceIndex);
-	}
+	void onVoiceReset(bool allVoices, int voiceIndex) final override;
 
-	int getNumParameters() const override
-	{
-		return getCurrentNetworkParameterHandler(&contentParameterHandler)->getNumParameters() + (int)hise::EnvelopeModulator::Parameters::numParameters;
-	}
+	int getNumParameters() const override;
 
-	void setInternalAttribute(int index, float newValue) override
-	{
-		if (index < hise::EnvelopeModulator::Parameters::numParameters)
-			EnvelopeModulator::setInternalAttribute(index, newValue);
-		else
-		{
-			index -= (int)hise::EnvelopeModulator::Parameters::numParameters;
+	void setInternalAttribute(int index, float newValue) override;
 
-			if (auto n = getActiveOrDebuggedNetwork())
-				n->networkParameterHandler.setParameter(index, newValue);
-			else
-				contentParameterHandler.setParameter(index, newValue);
-		}
-	}
+	float getAttribute(int index) const override;
 
-	float getAttribute(int index) const override
-	{
-		if (index < hise::EnvelopeModulator::Parameters::numParameters)
-			return EnvelopeModulator::getAttribute(index);
-		else
-		{
-			index -= (int)hise::EnvelopeModulator::Parameters::numParameters;
-
-			if (auto n = getActiveOrDebuggedNetwork())
-				return n->networkParameterHandler.getParameter(index);
-			else
-				return contentParameterHandler.getParameter(index);
-		}
-	}
-
-	Identifier getIdentifierForParameterIndex(int index) const override
-	{
-		if (index < hise::EnvelopeModulator::Parameters::numParameters)
-			return parameterNames[index];
-		else
-		{
-			index -= (int)hise::EnvelopeModulator::Parameters::numParameters;
-
-			if (auto n = getActiveOrDebuggedNetwork())
-				return n->networkParameterHandler.getParameterId(index);
-			else
-				return contentParameterHandler.getParameterId(index);
-		}
-		
-	}
+	Identifier getIdentifierForParameterIndex(int index) const override;
 
 	ProcessorEditorBody *createEditor(ProcessorEditor *parentEditor)  override;
 
@@ -687,16 +439,16 @@ public:
 	void reset(int voiceIndex) final override;
 	bool isPlaying(int voiceIndex) const override;
 
-	Processor *getChildProcessor(int /*processorIndex*/) override final { return nullptr; };
-	const Processor *getChildProcessor(int /*processorIndex*/) const override final { return nullptr; };
-	int getNumChildProcessors() const override final { return 0; };
+	Processor *getChildProcessor(int /*processorIndex*/) override final;;
+	const Processor *getChildProcessor(int /*processorIndex*/) const override final;;
+	int getNumChildProcessors() const override final;;
 
 	SnippetDocument *getSnippet(int c) override;
 	const SnippetDocument *getSnippet(int c) const override;
-	int getNumSnippets() const override { return Callback::numCallbacks; }
+	int getNumSnippets() const override;
 	void registerApiClasses() override;
 
-	int getControlCallbackIndex() const override { return (int)Callback::onControl; };
+	int getControlCallbackIndex() const override;;
 
 	void postCompileCallback() override;
 
@@ -706,9 +458,7 @@ private:
 
 	struct ScriptEnvelopeState : public EnvelopeModulator::ModulatorState
 	{
-		ScriptEnvelopeState(int voiceIndex_) :
-			EnvelopeModulator::ModulatorState(voiceIndex_)
-		{};
+		ScriptEnvelopeState(int voiceIndex_);;
 
 		float uptime = 0.0f;
 		bool isPlaying = false;
@@ -720,7 +470,7 @@ private:
 	
 	VoiceDataStack voiceData;
 
-	ModulatorState *createSubclassedState(int voiceIndex) const override { return new ScriptEnvelopeState(voiceIndex); };
+	ModulatorState *createSubclassedState(int voiceIndex) const override;;
 
 	ReferenceCountedObjectPtr<ScriptingApi::Message> currentMidiMessage;
 	ReferenceCountedObjectPtr<ScriptingApi::Engine> engineObject;
@@ -772,7 +522,7 @@ public:
 
 	SnippetDocument *getSnippet(int c) override;
 	const SnippetDocument *getSnippet(int c) const override;
-	int getNumSnippets() const override { return (int)Callback::numCallbacks; }
+	int getNumSnippets() const override;
 	void registerApiClasses() override;
 	void postCompileCallback() override;
 
@@ -783,11 +533,11 @@ public:
 
 	bool isSuspendedOnSilence() const override;
 
-	Processor *getChildProcessor(int /*processorIndex*/) override { return nullptr; };
-	const Processor *getChildProcessor(int /*processorIndex*/) const override { return nullptr; };
+	Processor *getChildProcessor(int /*processorIndex*/) override;;
+	const Processor *getChildProcessor(int /*processorIndex*/) const override;;
 
-	int getNumInternalChains() const override { return 0; };
-	int getNumChildProcessors() const override { return 0; };
+	int getNumInternalChains() const override;;
+	int getNumChildProcessors() const override;;
 
 	virtual void renderWholeBuffer(AudioSampleBuffer &buffer);;
 
@@ -796,27 +546,18 @@ public:
 
     
     
-	float getAttribute(int index) const override 
-	{ 
-		return getCurrentNetworkParameterHandler(&contentParameterHandler)->getParameter(index);
-	}
-	
-	void setInternalAttribute(int index, float newValue) override 
-	{ 
-		getCurrentNetworkParameterHandler(&contentParameterHandler)->setParameter(index, newValue);
-	}
+	float getAttribute(int index) const override;
+
+	void setInternalAttribute(int index, float newValue) override;
 
 	void setBypassed(bool shouldBeBypassed, NotificationType notifyChangeHandler) noexcept override;
 
-	Identifier getIdentifierForParameterIndex(int parameterIndex) const override
-	{
-		return getCurrentNetworkParameterHandler(&contentParameterHandler)->getParameterId(parameterIndex);
-	}
+	Identifier getIdentifierForParameterIndex(int parameterIndex) const override;
 
-	ValueTree exportAsValueTree() const override { ValueTree v = MasterEffectProcessor::exportAsValueTree(); saveContent(v); saveScript(v); return v; }
-	void restoreFromValueTree(const ValueTree &v) override { MasterEffectProcessor::restoreFromValueTree(v); restoreScript(v); restoreContent(v); }
+	ValueTree exportAsValueTree() const override;
+	void restoreFromValueTree(const ValueTree &v) override;
 
-	int getControlCallbackIndex() const override { return (int)Callback::onControl; };
+	int getControlCallbackIndex() const override;;
 
 private:
 
@@ -966,30 +707,20 @@ public:
 
 	struct Sound : public ModulatorSynthSound
 	{
-		bool appliesToNote(int ) final override { return true; };
-		bool appliesToChannel(int ) final override { return true; };
-		bool appliesToVelocity(int ) final override { return true; };
+		bool appliesToNote(int ) final override;;
+		bool appliesToChannel(int ) final override;;
+		bool appliesToVelocity(int ) final override;;
 	};
 
 	struct Voice : public ModulatorSynthVoice
 	{
-		Voice(JavascriptSynthesiser* p) :
-			ModulatorSynthVoice(p),
-			synth(p)
-		{}
+		Voice(JavascriptSynthesiser* p);
 
 		void calculateBlock(int startSample, int numSamples) override;
 
-		void setVoiceStartDataForNextRenderCallback()
-		{
-			isVoiceStart = true;
-		}
+		void setVoiceStartDataForNextRenderCallback();
 
-		virtual void resetVoice() override
-		{
-			ModulatorSynthVoice::resetVoice();
-			synth->voiceData.reset(getVoiceIndex());
-		}
+		virtual void resetVoice() override;
 
 		JavascriptSynthesiser* synth;
 
@@ -1022,7 +753,7 @@ public:
 
 	SnippetDocument *getSnippet(int c) override;
 	const SnippetDocument *getSnippet(int c) const override;
-	int getNumSnippets() const override { return (int)Callback::numCallbacks; }
+	int getNumSnippets() const override;
 	void registerApiClasses() override;
 	void postCompileCallback() override;
 
@@ -1032,95 +763,30 @@ public:
 
 	void prepareToPlay(double sampleRate, int samplesPerBlock) override;
 
-	bool isPolyphonic() const override { return true; }
+	bool isPolyphonic() const override;
 
-	float getModValueForNode(int modIndex, int startSample) const
-	{
-		if (startSample == -1)
-			startSample = currentVoiceStartSample;
+	float getModValueForNode(int modIndex, int startSample) const;
 
-		if (modIndex == BasicChains::PitchChain)
-		{
-			auto& pc = modChains[BasicChains::PitchChain];
-			if (auto pValues = pc.getReadPointerForVoiceValues(0))
-				return pValues[startSample];
-			else
-				return pc.getConstantModulationValue();
-		}
-		else
-		{
-			return modChains[modIndex].getOneModulationValue(startSample);
-		}
-		
-	}
+	Processor* getChildProcessor(int processorIndex) override;
 
-	Processor* getChildProcessor(int processorIndex) override
-	{
-		if (processorIndex < ModulatorSynth::numInternalChains)
-			return ModulatorSynth::getChildProcessor(processorIndex);
-		if (processorIndex == ModulatorSynth::numInternalChains)
-			return modChains[Extra1].getChain();
-		if (processorIndex == ModulatorSynth::numInternalChains + 1)
-			return modChains[Extra2].getChain();
+	const Processor* getChildProcessor(int processorIndex) const override;
 
-		return nullptr;
-	}
+	int getNumInternalChains() const override;;
 
-	const Processor* getChildProcessor(int processorIndex) const override
-	{
-		return const_cast<JavascriptSynthesiser*>(this)->getChildProcessor(processorIndex);
-	}
+	int getNumChildProcessors() const override;;
 
-	int getNumInternalChains() const override { return ModulatorSynth::numInternalChains + 2; };
-
-	int getNumChildProcessors() const override { return getNumInternalChains(); };
-
-	ValueTree exportAsValueTree() const override { ValueTree v = ModulatorSynth::exportAsValueTree(); saveContent(v); saveScript(v); return v; }
+	ValueTree exportAsValueTree() const override;
 	void restoreFromValueTree(const ValueTree &v) override;
 
-	int getNumParameters() const override
-	{
-		return getCurrentNetworkParameterHandler(&contentParameterHandler)->getNumParameters() + (int)ModulatorSynth::Parameters::numModulatorSynthParameters;
-	}
+	int getNumParameters() const override;
 
-	float getAttribute(int index) const override
-	{
-		if (index < ModulatorSynth::Parameters::numModulatorSynthParameters)
-		{
-			return ModulatorSynth::getAttribute(index);
-		}
+	float getAttribute(int index) const override;
 
-		index -= ModulatorSynth::Parameters::numModulatorSynthParameters;
+	void setInternalAttribute(int index, float newValue) override;
 
-		return getCurrentNetworkParameterHandler(&contentParameterHandler)->getParameter(index);
-	}
+	Identifier getIdentifierForParameterIndex(int parameterIndex) const override;
 
-	void setInternalAttribute(int index, float newValue) override
-	{
-		if (index < ModulatorSynth::Parameters::numModulatorSynthParameters)
-		{
-			ModulatorSynth::setInternalAttribute(index, newValue);
-			return;
-		}
-
-		index -= ModulatorSynth::Parameters::numModulatorSynthParameters;
-
-		getCurrentNetworkParameterHandler(&contentParameterHandler)->setParameter(index, newValue);
-	}
-
-	Identifier getIdentifierForParameterIndex(int parameterIndex) const override
-	{
-		if (parameterIndex < ModulatorSynth::Parameters::numModulatorSynthParameters)
-		{
-			return ModulatorSynth::getIdentifierForParameterIndex(parameterIndex);
-		}
-
-		parameterIndex -= ModulatorSynth::Parameters::numModulatorSynthParameters;
-
-		return getCurrentNetworkParameterHandler(&contentParameterHandler)->getParameterId(parameterIndex);
-	}
-
-	int getControlCallbackIndex() const override { return (int)Callback::onControl; };
+	int getControlCallbackIndex() const override;;
 
 	ModulatorChain::ModChainWithBuffer* nodeChains[3];
 

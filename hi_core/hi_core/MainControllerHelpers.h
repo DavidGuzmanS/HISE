@@ -95,7 +95,7 @@ public:
 *	For faster performance, one CC value can only control one parameter.
 *
 */
-class MidiControllerAutomationHandler : public RestorableObject,
+class MidiControllerAutomationHandler : public UserPresetStateManager,
 										public SafeChangeBroadcaster
 {
 public:
@@ -105,10 +105,15 @@ public:
 	void addMidiControlledParameter(Processor *interfaceProcessor, int attributeIndex, NormalisableRange<double> parameterRange, int macroIndex);
 	void removeMidiControlledParameter(Processor *interfaceProcessor, int attributeIndex, NotificationType notifyListeners);
 
+	
+
 	bool isLearningActive() const;
 
 	ValueTree exportAsValueTree() const override;
 	void restoreFromValueTree(const ValueTree &v) override;
+
+	Identifier getUserPresetStateId() const override;;
+	void resetUserPresetState() override;
 
 	bool isLearningActive(Processor *interfaceProcessor, int attributeIndex) const;
 	void deactivateMidiLearning();
@@ -117,7 +122,7 @@ public:
 	int getMidiControllerNumber(Processor *interfaceProcessor, int attributeIndex) const;
 
 	void refreshAnyUsedState();
-	void clear();
+	void clear(NotificationType notifyListeners);
 
 	/** The main routine. Call this for every MidiBuffer you want to process and it handles both setting parameters as well as MIDI learning. */
 	void handleParameterData(MidiBuffer &b);
@@ -125,7 +130,7 @@ public:
 	bool handleControllerMessage(const HiseEvent& e);
 		
 	class MPEData : public ControlledObject,
-					public RestorableObject,
+					public UserPresetStateManager,
 					public Dispatchable
 	{
 	public:
@@ -136,7 +141,7 @@ public:
 		struct Listener
 		{
 		public:
-			virtual ~Listener() {};
+			virtual ~Listener();;
 
 			virtual void mpeModeChanged(bool isEnabled) = 0;
 
@@ -144,7 +149,7 @@ public:
 
 			virtual void mpeDataReloaded() = 0;
 
-			virtual void mpeModulatorAmountChanged() {};
+			virtual void mpeModulatorAmountChanged();;
 
 		private:
 
@@ -161,6 +166,10 @@ public:
             numEventTypes
         };
         
+		Identifier getUserPresetStateId() const override;
+
+		void resetUserPresetState() override;
+
 		void restoreFromValueTree(const ValueTree &previouslyExportedState) override;
 
 		ValueTree exportAsValueTree() const override;
@@ -187,33 +196,15 @@ public:
 
 		void setMpeMode(bool shouldBeOn);
 
-		bool isMpeEnabled() const { return mpeEnabled; }
+		bool isMpeEnabled() const;
 
 		bool contains(MPEModulator* mod) const;
 
-		void addListener(Listener* l)
-		{
-			listeners.addIfNotAlreadyThere(l);
+		void addListener(Listener* l);
 
-			// Fire this once to setup the correct state
-			l->mpeModeChanged(mpeEnabled);
-		}
+		void removeListener(Listener* l);
 
-		void removeListener(Listener* l)
-		{
-			listeners.removeAllInstancesOf(l);
-		}
-
-		void sendAmountChangeMessage()
-		{
-			ScopedLock sl(listeners.getLock());
-
-			for (auto l : listeners)
-			{
-				if (l)
-					l->mpeModulatorAmountChanged();
-			}
-		}
+		void sendAmountChangeMessage();
 
 	private:
 
@@ -221,16 +212,9 @@ public:
 		{
 		public:
 
-			AsyncRestorer(MPEData& parent_) :
-				parent(parent_)
-			{};
+			AsyncRestorer(MPEData& parent_);;
 
-			void restore(const ValueTree& v)
-			{
-				data = v;
-				dirty = true;
-				startTimer(50);
-			}
+			void restore(const ValueTree& v);
 
 		private:
 
@@ -267,7 +251,7 @@ public:
 	{
 		AutomationData();
 
-		~AutomationData() { clear(); }
+		~AutomationData();
 
 		void clear();
 
@@ -292,83 +276,37 @@ public:
 	/** Returns a copy of the automation data for the given index. */
 	AutomationData getDataFromIndex(int index) const;
 
-	MPEData& getMPEData() { return mpeData; }
+	MPEData& getMPEData();
 
-	const MPEData& getMPEData() const { return mpeData; }
+	const MPEData& getMPEData() const;
 
 	int getNumActiveConnections() const;
 	bool setNewRangeForParameter(int index, NormalisableRange<double> range);
 	bool setParameterInverted(int index, bool value);
 
-	void setUnloadedData(const ValueTree& v)
-	{
-		unloadedData = v;
-	};
+	void setUnloadedData(const ValueTree& v);;
 
-	void loadUnloadedData()
-	{
-		if(unloadedData.isValid())
-			restoreFromValueTree(unloadedData);
+	void loadUnloadedData();
 
-		unloadedData = {};
-	}
+	void setControllerPopupNumbers(BigInteger controllerNumberToShow);
 
-	void setControllerPopupNumbers(BigInteger controllerNumberToShow)
-	{
-		controllerNumbersInPopup = controllerNumberToShow;
-	}
+	bool hasSelectedControllerPopupNumbers() const;
 
-	bool shouldAddControllerToPopup(int controllerValue) const
-	{
-		if (controllerNumbersInPopup.isZero())
-			return true;
+	bool shouldAddControllerToPopup(int controllerValue) const;
 
-		return controllerNumbersInPopup[controllerValue];
-	}
+	bool isMappable(int controllerValue) const;
 
-	bool isMappable(int controllerValue) const
-	{
-		if (!exclusiveMode)
-			return shouldAddControllerToPopup(controllerValue);
+	void setExclusiveMode(bool shouldBeExclusive);
 
-		if (isPositiveAndBelow(controllerValue, 128))
-			return automationData[controllerValue].isEmpty();
+	void setConsumeAutomatedControllers(bool shouldConsume);
 
-		return false;
-	}
+	void setControllerPopupNames(const StringArray& newControllerNames);
 
-	void setExclusiveMode(bool shouldBeExclusive)
-	{
-		exclusiveMode = shouldBeExclusive;
-	}
+	String getControllerName(int controllerIndex);
 
-	void setConsumeAutomatedControllers(bool shouldConsume)
-	{
-		consumeEvents = shouldConsume;
-	}
+	void setCCName(const String& newCCName);
 
-	void setControllerPopupNames(const StringArray& newControllerNames)
-	{
-		controllerNames = newControllerNames;
-	}
-
-	String getControllerName(int controllerIndex)
-	{
-		if (isPositiveAndBelow(controllerIndex, controllerNames.size()))
-		{
-			return controllerNames[controllerIndex];
-		}
-		else
-		{
-			String s;
-			s << "CC#" << controllerIndex;
-			return s;
-		}
-	}
-
-	void setCCName(const String& newCCName) { ccName = newCCName; }
-
-	String getCCName() const { return ccName; }
+	String getCCName() const;
 
 private:
 
@@ -448,10 +386,7 @@ public:
 
 		virtual void overlayMessageSent(int state, const String& message) = 0;
 
-		virtual ~Listener()
-		{
-			masterReference.clear();
-		}
+		virtual ~Listener();
 
 	private:
 
@@ -460,34 +395,21 @@ public:
 		WeakReference<Listener>::Master masterReference;
 	};
 
-	OverlayMessageBroadcaster() :
-		internalUpdater(this)
-	{
+	OverlayMessageBroadcaster();
 
-	}
+	virtual ~OverlayMessageBroadcaster();;
 
-	virtual ~OverlayMessageBroadcaster() {};
+	void addOverlayListener(Listener *listener);
 
-	void addOverlayListener(Listener *listener)
-	{
-		listeners.addIfNotAlreadyThere(listener);
-	}
-
-	void removeOverlayListener(Listener* listener)
-	{
-		listeners.removeAllInstancesOf(listener);
-	}
+	void removeOverlayListener(Listener* listener);
 
 	void sendOverlayMessage(int newState, const String& newCustomMessage=String());
 
 	String getOverlayTextMessage(State s) const;
 
-	bool isUsingDefaultOverlay() const { return useDefaultOverlay; }
+	bool isUsingDefaultOverlay() const;
 
-	void setUseDefaultOverlay(bool shouldUseOverlay)
-	{
-		useDefaultOverlay = shouldUseOverlay;
-	}
+	void setUseDefaultOverlay(bool shouldUseOverlay);
 
 private:
 
@@ -495,24 +417,9 @@ private:
 
 	struct InternalAsyncUpdater: public AsyncUpdater
 	{
-		InternalAsyncUpdater(OverlayMessageBroadcaster *parent_): parent(parent_) {}
+		InternalAsyncUpdater(OverlayMessageBroadcaster *parent_);
 
-		void handleAsyncUpdate() override
-		{
-			ScopedLock sl(parent->listeners.getLock());
-
-			for (int i = 0; i < parent->listeners.size(); i++)
-			{
-				if (parent->listeners[i].get() != nullptr)
-				{
-					parent->listeners[i]->overlayMessageSent(parent->currentState, parent->customMessage);
-				}
-				else
-				{
-					parent->listeners.remove(i--);
-				}
-			}
-		}
+		void handleAsyncUpdate() override;
 
 		OverlayMessageBroadcaster* parent;
 	};
@@ -645,6 +552,9 @@ private:
 
 	AudioSampleBuffer processBuffer;
 	MidiBuffer delayedMidiBuffer;
+
+	HiseEventBuffer shortBuffer;
+	int lastBlockSizeForShortBuffer = 0;
 
 	int fullBlockSize;
 

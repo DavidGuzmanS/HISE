@@ -323,6 +323,14 @@ void DynamicLibraryHostFactory::deinitOpaqueNode(scriptnode::OpaqueNode* n)
 		projectDll->deInitOpaqueNode(n);
 }
 
+int DynamicLibraryHostFactory::getHash(int index) const
+{
+	if (projectDll != nullptr)
+		return projectDll->getHash(index);
+
+	return -1;
+}
+
 String ProjectDll::getFuncName(ExportedFunction f)
 {
 	switch (f)
@@ -470,8 +478,12 @@ ProjectDll::ProjectDll(const File& f):
 ProjectDll::~ProjectDll()
 {
 	clearAllFunctions();
-	dll->close();
-	dll = nullptr;
+    
+    if(dll != nullptr)
+    {
+        dll->close();
+        dll = nullptr;
+    }
 }
 
 

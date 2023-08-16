@@ -87,6 +87,7 @@ Array<juce::Identifier> HiseSettings::Project::getAllIds()
 	ids.add(AppGroupID);
 	ids.add(RedirectSampleFolder);
 	ids.add(AAXCategoryFX);
+    ids.add(VST3Category);
 	ids.add(SupportMonoFX);
 	ids.add(EnableMidiInputFX);
     ids.add(EnableMidiOut);
@@ -100,9 +101,11 @@ Array<juce::Identifier> HiseSettings::Project::getAllIds()
     ids.add(ForceStereoOutput);
 	ids.add(AdminPermissions);
 	ids.add(EmbedUserPresets);
+	ids.add(OverwriteOldUserPresets);
 	ids.add(EnableGlobalPreprocessor);
     ids.add(UseGlobalAppDataFolderWindows);
     ids.add(UseGlobalAppDataFolderMacOS);
+	ids.add(DefaultUserPreset);
 
 	return ids;
 }
@@ -160,6 +163,7 @@ Array<juce::Identifier> HiseSettings::Scripting::getAllIds()
 	ids.add(CodeFontSize);
 	ids.add(EnableDebugMode);
 	ids.add(SaveConnectedFilesOnCompile);
+	ids.add(EnableMousePositioning);
 
 	return ids;
 }
@@ -169,7 +173,6 @@ Array<juce::Identifier> HiseSettings::Other::getAllIds()
 	Array<Identifier> ids;
 
 	ids.add(UseOpenGL);
-	ids.add(GlassEffect);
 	ids.add(GlobalSamplePath);
 	ids.add(EnableAutosave);
 	ids.add(AutosaveInterval);
@@ -335,6 +338,11 @@ Array<juce::Identifier> HiseSettings::SnexWorkbench::getAllIds()
 		D("> This is useful if you're running your own preset management or the user preset collection gets too big to be embedded in the plugin");
 		P_();
 
+		P(HiseSettings::Project::OverwriteOldUserPresets);
+		D("If true, then the plugin will silently overwrite user presets with the same name but an older version number.  ");
+		D("This will also overwrite user-modified factory presets but will not modify or delete user-created user presets (with the exception of a name collision).");
+		P_();
+
 		P(HiseSettings::Project::AppGroupID);
 		D("If you're compiling an iOS app, you need to add an App Group to your Apple ID for this project and supply the name here.");
 		D("App Group IDs must have reverse-domain format and start with group, like:");
@@ -376,6 +384,10 @@ Array<juce::Identifier> HiseSettings::SnexWorkbench::getAllIds()
 		D("> This setting will not have an effect on compiled plugins as the preprocessor will already be evaluated on export");
 		P_();
 
+        P(HiseSettings::Project::VST3Category);
+        D("The category the VST3 plugin will appear in");
+        P_();
+        
 		P(HiseSettings::Project::AAXCategoryFX);
 		D("If you export an effect plugin, you can specify the category it will show up in ProTools here");
 		
@@ -449,6 +461,11 @@ Array<juce::Identifier> HiseSettings::SnexWorkbench::getAllIds()
         D("> This setting will write the `HISE_USE_SYSTEM_APP_DATA_FOLDER` flag when exporting the plugin");
         P_();
         
+		P(HiseSettings::Project::DefaultUserPreset);
+		D("The relative path to the user preset that is supposed to be the initialisation state. If non-empty, this will be used ");
+		D("in order to initialise the plugin as well as set the default states and select it in the preset browser");
+		P_();
+
 		P(HiseSettings::User::Company);
 		D("Your company name. This will be used for the path to the app data directory so make sure you don't use weird characters here");
 		P_();
@@ -520,6 +537,12 @@ Array<juce::Identifier> HiseSettings::SnexWorkbench::getAllIds()
 		D("> This setting is baked into a plugin when you compile it");
 		P_();
 
+		P(HiseSettings::Scripting::EnableMousePositioning);
+		D("Sets the default value of whether the interface designer should allow dragging UI components with the mouse");
+		D("> This was always enabled, but on larger projects it's easy to accidentally drag UI elements when you really just wanted to select them so this gives you the option to remove the dragging.");
+		D("Note that you can always choose to enable / disable dragging in the interface designer menu bar, and this only sets the default value. It's still enabled by default so the HISE forum doesn't get swamped with bug reports that the interface designer stopped working...");
+		P_();
+
 		P(HiseSettings::Compiler::Support32BitMacOS);
 		D("If enabled (which is still the default), the compiler will build both 32bit and 64bit versions as universal binary on macOS. However since 32bit binaries are deprecated in the most recent versions of macOS / XCode, you can tell the exporter to just generate 64bit binaries by disabling this flag. If you see this error messag in the compile terminal:");
 		D("> error: The i386 architecture is deprecated. You should update your ARCHS build setting to remove the i386 architecture.");
@@ -582,10 +605,6 @@ Array<juce::Identifier> HiseSettings::SnexWorkbench::getAllIds()
 		P(HiseSettings::Other::UseOpenGL);
 		D("Enable this in order to use OpenGL for the UI rendering of the HISE app. This might drastically accelerate the UI performance, so if you have a laggy UI in HISE, try this option");
 		D("> Be aware that this does not affect whether your compiled project uses OpenGL (as this can be defined separately).");
-		P_();
-
-		P(HiseSettings::Other::GlassEffect);
-		D("Uses a glass effect for the popup windows. Disable this on older systems for increased graphics performance");
 		P_();
 
 		P(HiseSettings::Other::GlobalSamplePath);
@@ -724,6 +743,7 @@ void HiseSettings::Data::refreshProjectData()
 {
 	loadSettingsFromFile(SettingFiles::ProjectSettings);
 	loadSettingsFromFile(SettingFiles::UserSettings);
+    loadSettingsFromFile(SettingFiles::ExpansionSettings);
 }
 
 void HiseSettings::Data::loadSettingsFromFile(const Identifier& id)
@@ -807,8 +827,13 @@ var HiseSettings::Data::getExtraDefinitionsAsObject() const
 
     DynamicObject::Ptr obj = new DynamicObject();
 
-    for (const auto& i : items)
+    for (auto i : items)
     {
+        i = i.trim();
+        
+        if(i.isEmpty())
+            continue;
+        
         obj->setProperty(i.upToFirstOccurrenceOf("=", false, false).trim(), i.fromFirstOccurrenceOf("=", false, false).trim());
     }
     
@@ -846,6 +871,7 @@ juce::StringArray HiseSettings::Data::getOptionsFor(const Identifier& id)
 	if (id == Project::EmbedAudioFiles ||
 		id == Project::EmbedImageFiles ||
 		id == Project::EmbedUserPresets ||
+		id == Project::OverwriteOldUserPresets ||
 		id == Compiler::UseIPP ||
         id == Compiler::LegacyCPUSupport ||
         id == Compiler::EnableLoris ||
@@ -855,7 +881,6 @@ juce::StringArray HiseSettings::Data::getOptionsFor(const Identifier& id)
 		id == Scripting::EnableOptimizations ||
 		id == Other::AudioThreadGuardEnabled ||
 		id == Other::UseOpenGL ||
-		id == Other::GlassEffect ||
         id == Other::AutoShowWorkspace ||
 		id == Other::EnableShaderLineNumbers ||
 		id == Compiler::RebuildPoolFiles ||
@@ -878,7 +903,8 @@ juce::StringArray HiseSettings::Data::getOptionsFor(const Identifier& id)
 		id == Documentation::RefreshOnStartup ||
 		id == SnexWorkbench::PlayOnRecompile ||
 		id == SnexWorkbench::AddFade ||
-		id == Scripting::SaveConnectedFilesOnCompile)
+		id == Scripting::SaveConnectedFilesOnCompile ||
+		id == Scripting::EnableMousePositioning)
 	    return { "Yes", "No" };
 
 	if (id == Compiler::VisualStudioVersion)
@@ -889,6 +915,29 @@ juce::StringArray HiseSettings::Data::getOptionsFor(const Identifier& id)
 		return { "Disabled", "FilesOnly", "Encrypted", "Full", "Custom" };
 	}
 
+    if(id == Project::VST3Category)
+    {
+        return {
+            "Analyzer",
+            "Delay",
+            "Distortion",
+            "Dynamics",
+            "EQ",
+            "Filter",
+            "Generator",
+            "Mastering",
+            "Modulation",
+            "Pitch Shift",
+            "Restoration",
+            "Reverb",
+            "Spatial",
+            "Surround",
+            "Tools",
+            "Drum",
+            "Synth",
+            "Sampler"
+        };
+    }
 	if (id == Project::AAXCategoryFX)
 		return {
 			"AAX_ePlugInCategory_EQ",
@@ -1050,9 +1099,11 @@ var HiseSettings::Data::getDefaultSetting(const Identifier& id) const
 	else if (id == Project::EmbedAudioFiles)		return "Yes";
 	else if (id == Project::EmbedImageFiles)		return "Yes";
 	else if (id == Project::EmbedUserPresets)		return "Yes";
+	else if (id == Project::OverwriteOldUserPresets)    return "No";
 	else if (id == Project::SupportFullDynamicsHLAC)	return "No";
 	else if (id == Project::RedirectSampleFolder)	BACKEND_ONLY(return handler_.isRedirected(ProjectHandler::SubDirectories::Samples) ? handler_.getSubDirectory(ProjectHandler::SubDirectories::Samples).getFullPathName() : "");
-	else if (id == Project::AAXCategoryFX)			return "AAX_ePlugInCategory_Modulation";
+    else if (id == Project::AAXCategoryFX)			return "AAX_ePlugInCategory_Modulation";           
+    else if (id == Project::VST3Category)           return "";
 	else if (id == Project::SupportMonoFX)			return "No";
 	else if (id == Project::EnableMidiInputFX)		return "No";
     else if (id == Project::EnableMidiOut)          return "No";
@@ -1068,7 +1119,6 @@ var HiseSettings::Data::getDefaultSetting(const Identifier& id) const
     else if (id == Project::UseGlobalAppDataFolderWindows) return "No";
     else if (id == Project::UseGlobalAppDataFolderMacOS)   return "No";
 	else if (id == Other::UseOpenGL)				return "No";
-	else if (id == Other::GlassEffect)				return "No";
 	else if (id == Other::EnableAutosave)			return "Yes";
 	else if (id == Other::AutosaveInterval)			return 5;
 	else if (id == Other::AudioThreadGuardEnabled)  return "Yes";
@@ -1079,6 +1129,7 @@ var HiseSettings::Data::getDefaultSetting(const Identifier& id) const
 	else if (id == Scripting::CodeFontSize)			return 17.0;
 	else if (id == Scripting::EnableCallstack)		return "No";
 	else if (id == Scripting::EnableOptimizations)	return "No";
+	else if (id == Scripting::EnableMousePositioning) return "Yes";
 	else if (id == Scripting::CompileTimeout)		return 5.0;
 	else if (id == Scripting::SaveConnectedFilesOnCompile) return "No";
 #if HISE_USE_VS2022
@@ -1226,7 +1277,7 @@ void HiseSettings::Data::settingWasChanged(const Identifier& id, const var& newV
 
 	else if (id == Scripting::CodeFontSize)
 		mc->getFontSizeChangeBroadcaster().sendMessage(sendNotification, (float)newValue);
-	else if (id == Other::UseOpenGL || id == Other::GlassEffect)
+	else if (id == Other::UseOpenGL)
 		PresetHandler::showMessageWindow("Reopen HISE window", "Restart HISE (or reopen this window) in order to apply the new Graphics setting", PresetHandler::IconType::Info);
 	else if (id == Other::EnableAutosave || id == Other::AutosaveInterval)
 		mc->getAutoSaver().updateAutosaving();

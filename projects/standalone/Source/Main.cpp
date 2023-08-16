@@ -86,7 +86,9 @@ private:
 
 		throwErrorAndQuit("`" + s + "` is not a valid path");
 
+#if JUCE_DEBUG
 		return File();
+#endif
 	}
 
 public:
@@ -352,12 +354,14 @@ public:
 		jsfx->getOrCreate("dsp");
 
 		CompileExporter::setExportingFromCommandLine();
+		CompileExporter::setExportUsingCI(true);
 
 		hise::DspNetworkCompileExporter exporter(nullptr, dynamic_cast<BackendProcessor*>(mc));
 
 		exporter.getComboBoxComponent("build")->setText(config, dontSendNotification);
 
 		exporter.run();
+		exporter.threadFinished();
 	}
 
 	static void setProjectFolder(const String& commandLine, bool exitOnSuccess=true)
@@ -536,6 +540,11 @@ REGISTER_STATIC_DSP_LIBRARIES()
 #if ENABLE_JUCE_DSP
     REGISTER_STATIC_DSP_FACTORY(JuceDspModuleFactory);
 #endif
+}
+
+String hise::PresetHandler::getVersionString()
+{
+	return ProjectInfo::versionString;
 }
 
 AudioProcessor* hise::StandaloneProcessor::createProcessor()

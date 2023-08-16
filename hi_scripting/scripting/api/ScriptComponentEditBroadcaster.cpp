@@ -37,6 +37,30 @@ ScriptComponentEditListener::ScriptComponentEditListener(Processor* p) :
 
 }
 
+ScriptComponentEditListener::~ScriptComponentEditListener()
+{
+	masterReference.clear();
+}
+
+ScriptComponentEditBroadcaster* ScriptComponentEditListener::getScriptComponentEditBroadcaster()
+{ return broadcaster; }
+
+const ScriptComponentEditBroadcaster* ScriptComponentEditListener::getScriptComponentEditBroadcaster() const
+{ return broadcaster; }
+
+const Processor* ScriptComponentEditListener::getProcessor() const
+{
+	return editedProcessor.get();
+}
+
+Processor* ScriptComponentEditListener::getProcessor()
+{
+	return editedProcessor.get();
+}
+
+void ScriptComponentEditListener::updateUndoDescription()
+{}
+
 void ScriptComponentEditListener::addAsScriptEditListener()
 {
 	broadcaster->addScriptComponentEditListener(this);
@@ -46,6 +70,156 @@ void ScriptComponentEditListener::removeAsScriptEditListener()
 {
 	broadcaster->removeScriptComponentEditListener(this);
 }
+
+ScriptComponentEditBroadcaster::ScriptComponentEditBroadcaster()
+{}
+
+ScriptComponentEditBroadcaster::~ScriptComponentEditBroadcaster()
+{
+	clearSelection(dontSendNotification);
+	manager.clearUndoHistory();
+}
+
+ScriptComponentEditBroadcaster::Iterator::Iterator(ScriptComponentEditBroadcaster* parent):
+	broadcaster(parent)
+{
+
+}
+
+ScriptComponentEditBroadcaster::Iterator::Iterator(const ScriptComponentEditBroadcaster* parent):
+	broadcaster(const_cast<ScriptComponentEditBroadcaster*>(parent))
+{
+
+}
+
+ScriptComponent* ScriptComponentEditBroadcaster::Iterator::getNextScriptComponent()
+{
+	while (auto r = getNextInternal())
+		return r;
+
+	return nullptr;
+}
+
+const ScriptComponent* ScriptComponentEditBroadcaster::Iterator::getNextScriptComponent() const
+{
+	while (auto r = getNextInternal())
+		return r;
+
+	return nullptr;
+}
+
+ScriptComponent* ScriptComponentEditBroadcaster::Iterator::getNextInternal()
+{
+	while (index < broadcaster->currentSelection.size())
+	{
+		if (auto r = broadcaster->currentSelection[index++])
+			return r.get();
+	}
+
+	return nullptr;
+}
+
+const ScriptComponent* ScriptComponentEditBroadcaster::Iterator::getNextInternal() const
+{
+	while (index < broadcaster->currentSelection.size())
+	{
+		if (auto r = broadcaster->currentSelection[index++])
+			return r.get();
+	}
+
+	return nullptr;
+}
+
+void ScriptComponentEditBroadcaster::addScriptComponentEditListener(ScriptComponentEditListener* listenerToAdd)
+{
+	listeners.addIfNotAlreadyThere(listenerToAdd);
+}
+
+void ScriptComponentEditBroadcaster::removeScriptComponentEditListener(ScriptComponentEditListener* listenerToRemove)
+{
+	listeners.removeAllInstancesOf(listenerToRemove);
+}
+
+ScriptComponentSelection ScriptComponentEditBroadcaster::getSelection()
+{ return currentSelection; }
+
+int ScriptComponentEditBroadcaster::getNumSelected() const
+{ return currentSelection.size(); }
+
+bool ScriptComponentEditBroadcaster::isBeingEdited(const Processor* p) const
+{
+	return currentlyEditedProcessor.get() == p;
+}
+
+ScriptComponentEditBroadcaster::PropertyChange::PropertyChange(ScriptComponentEditBroadcaster* b_, ScriptComponent* sc,
+	const Identifier& id_, const var& newValue_, NotificationType notifyListeners_):
+	b(b_),
+	id(id_),
+	newValue(newValue_),
+	notifyListeners(notifyListeners_)
+{
+	selection.add(sc);
+}
+
+ScriptComponentEditBroadcaster::PropertyChange::PropertyChange(ScriptComponentEditBroadcaster* b_,
+	ScriptComponentSelection selection_, const Identifier& id_, const var& newValue_, NotificationType notifyListeners_):
+	b(b_),
+	id(id_),
+	newValue(newValue_),
+	notifyListeners(notifyListeners_)
+{
+	selection = selection_;
+}
+
+bool ScriptComponentEditBroadcaster::PropertyChange::perform()
+{
+	for (auto sc : selection)
+	{
+		if (sc != nullptr)
+		{
+			oldValues.add(sc->getScriptObjectProperty(id));
+			b->setPropertyInternal(sc, id, newValue, notifyListeners);
+		}
+		else
+		{
+			return false;
+		}
+	}
+
+	return true;
+}
+
+bool ScriptComponentEditBroadcaster::PropertyChange::undo()
+{
+	for (int i = 0; i < selection.size(); i++)
+	{
+		if (auto sc = selection[i])
+		{
+			var oldValue = oldValues[i];
+			b->setPropertyInternal(sc.get(), id, oldValue, notifyListeners);
+		}
+		else
+		{
+			return false;
+		}
+	}
+
+	return true;
+}
+
+UndoManager& ScriptComponentEditBroadcaster::getUndoManager()
+{
+	return manager;
+}
+
+bool ScriptComponentEditBroadcaster::learnModeEnabled() const
+{ return learnMode; }
+
+ScriptComponent* ScriptComponentEditBroadcaster::getCurrentlyLearnedComponent()
+{ return currentlyLearnedComponent.get(); }
+
+ScriptComponentEditBroadcaster::LearnBroadcaster& ScriptComponentEditBroadcaster::getLearnBroadcaster()
+{ return learnBroadcaster; }
 
 void ScriptComponentEditBroadcaster::addToSelection(ScriptComponent* componentToAdd, NotificationType notifyListeners)
 {
@@ -385,6 +559,78 @@ void ScriptComponentEditBroadcaster::showJSONEditor(Component* t)
 	editor->grabKeyboardFocus();
 }
 
+bool ScriptComponentEditBroadcaster::showPanelDataJSON(juce::Component *t)
+{
+    auto fc = getFirstFromSelection();
+    
+    var pd;
+    
+    JSONEditor* editor = nullptr;
+    
+    if(auto sp = dynamic_cast<ScriptingApi::Content::ScriptPanel*>(fc))
+    {
+        auto pd = sp->getConstantValue(0);
+        
+        editor = new JSONEditor(pd);
+
+        auto callback = [sp, pd](const var& newData)
+        {
+            auto copy = newData.clone();
+            auto& prop = copy.getDynamicObject()->getProperties();
+            pd.getDynamicObject()->swapProperties(std::move(prop));
+            sp->repaint();
+            return;
+        };
+        
+        editor->setCallback(callback, false);
+        
+        editor->setName("Editing Panel.data (non-persistent!)");
+    }
+    if(auto vp = dynamic_cast<ScriptingApi::Content::ScriptedViewport*>(fc))
+    {
+        if(auto tm = vp->getTableModel())
+        {
+            auto pd = tm->getRowData();
+            editor = new JSONEditor(pd);
+            
+            
+            
+            auto callback = [vp](const var& newData)
+            {
+                auto mc = vp->getScriptProcessor()->getMainController_();
+                
+                {
+                    LockHelpers::SafeLock(mc, LockHelpers::ScriptLock);
+                    vp->getTableModel()->setRowData(newData);
+                }
+                vp->sendRepaintMessage();
+                
+                return;
+            };
+            
+            editor->setCallback(callback, false);
+            
+            editor->setName("Editing Viewport table rows (non-persistent!)");
+        }
+    }
+    
+    if(editor != nullptr)
+    {
+        editor->setEditable(true);
+        
+        
+        editor->setSize(400, 400);
+
+        t->findParentComponentOfClass<FloatingTile>()->showComponentInRootPopup(editor, t, t->getLocalBounds().getCentre());
+
+        editor->grabKeyboardFocus();
+        
+        return true;
+    }
+    
+    return false;
+}
+
 String ScriptComponentEditBroadcaster::getTransactionName(ScriptComponent* sc, const Identifier& id, const var& newValue)
 {
 	String p;
@@ -503,3 +749,7 @@ void ScriptComponentEditBroadcaster::setLearnData(const MacroControlledObject::L
 }
 
 } // namespace hise
+
+using namespace hise;
+
+

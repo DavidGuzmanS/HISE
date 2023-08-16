@@ -30,9 +30,24 @@
 *   ===========================================================================
 */
 
+// This is a helper tool to print out definitions for the extern const char* variables with the sizeof([]) operator
+#if 0
+#define PRINT_DATA(ns, x) DBG(juce::String("DECLARE_DATA(") + #x + ", " + juce::String(sizeof(ns::x)) + ");")
+
+void printData()
+{
+	PRINT_DATA(HiBinaryData::SpecialSymbols, midiData);
+	PRINT_DATA(HiBinaryData::SpecialSymbols, masterEffect);
+	PRINT_DATA(HiBinaryData::SpecialSymbols, macros);
+	PRINT_DATA(HiBinaryData::SpecialSymbols, globalCableIcon);
+	PRINT_DATA(HiBinaryData::SpecialSymbols, scriptProcessor);
+	PRINT_DATA(HiBinaryData::SpecialSymbols, routingIcon);
+}
+
+#undef PRINT_DATA
+#endif
+
 namespace hise { using namespace juce;
-
-
 
 
 
@@ -41,7 +56,7 @@ MainController(),
 AudioProcessorDriver(deviceManager_, callback_),
 scriptUnlocker(this)
 {
-    
+	//printData();
     
 	ExtendedApiDocumentation::init();
 
@@ -105,7 +120,7 @@ scriptUnlocker(this)
     
     if(GET_HISE_SETTING(getMainSynthChain(), HiseSettings::Compiler::EnableLoris))
     {
-        auto f = ProjectHandler::getAppDataDirectory(this).getChildFile("loris_library");
+        auto f = ProjectHandler::getAppDataDirectory(nullptr).getChildFile("loris_library");
         
         if(f.isDirectory())
         {
@@ -226,6 +241,8 @@ void BackendProcessor::refreshExpansionType()
 
 void BackendProcessor::processBlock(AudioSampleBuffer& buffer, MidiBuffer& midiMessages)
 {
+    TRACE_DSP();
+    
 #if !HISE_BACKEND_AS_FX
 	buffer.clear();
 #endif
@@ -264,9 +281,8 @@ void BackendProcessor::processBlock(AudioSampleBuffer& buffer, MidiBuffer& midiM
         
         externalClockSim.process(numBeforeWrap);
         
-		
-
-        processChunk(channels, buffer, midiMessages, numBeforeWrap, numAfterWrap);
+        if(numAfterWrap > 0)
+            processChunk(channels, buffer, midiMessages, numBeforeWrap, numAfterWrap);
         
         externalClockSim.process(numAfterWrap);
         
@@ -316,6 +332,10 @@ void BackendProcessor::processBlock(AudioSampleBuffer& buffer, MidiBuffer& midiM
 #endif
 
 		getDelayedRenderer().processWrapped(buffer, midiMessages);
+
+#if IS_STANDALONE_APP
+		externalClockSim.addPostTimelineData(buffer, midiMessages);
+#endif
 	}
 
 #if IS_STANDALONE_APP

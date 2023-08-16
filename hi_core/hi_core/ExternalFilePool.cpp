@@ -30,6 +30,10 @@
 *   ===========================================================================
 */
 
+#if JUCE_WINDOWS
+#include "ExternalFilePool_impl.h"
+#endif
+
 namespace hise { using namespace juce;
 
 ProjectHandler::SubDirectories PoolHelpers::getSubDirectoryType(const AudioSampleBuffer& emptyData)
@@ -318,6 +322,60 @@ juce::Image PoolHelpers::getEmptyImage(int width, int height)
 	return i;
 }
 
+bool PoolHelpers::isStrong(LoadingType t)
+{
+	return t == LoadAndCacheStrong || t == ForceReloadStrong || t == SkipPoolSearchStrong || t == LoadIfEmbeddedStrong;
+}
+
+bool PoolHelpers::throwIfNotLoaded(LoadingType t)
+{
+	return t != LoadIfEmbeddedStrong && t != LoadIfEmbeddedWeak;
+}
+
+bool PoolHelpers::shouldSearchInPool(LoadingType t)
+{
+	return t == LoadAndCacheStrong || 
+		t == LoadAndCacheWeak || 
+		t == ForceReloadStrong || 
+		t == ForceReloadWeak || 
+		t == DontCreateNewEntry ||
+		t == LoadIfEmbeddedStrong ||
+		t == LoadIfEmbeddedWeak;
+}
+
+bool PoolHelpers::shouldForceReload(LoadingType t)
+{
+	return t == ForceReloadStrong || t == ForceReloadWeak;
+}
+
+Identifier PoolHelpers::getPrettyName(const AudioSampleBuffer*)
+{ RETURN_STATIC_IDENTIFIER("AudioFilePool"); }
+
+Identifier PoolHelpers::getPrettyName(const Image*)
+{ RETURN_STATIC_IDENTIFIER("ImagePool"); }
+
+Identifier PoolHelpers::getPrettyName(const ValueTree*)
+{ RETURN_STATIC_IDENTIFIER("SampleMapPool"); }
+
+Identifier PoolHelpers::getPrettyName(const MidiFileReference*)
+{ RETURN_STATIC_IDENTIFIER("MidiFilePool"); }
+
+Identifier PoolHelpers::getPrettyName(const AdditionalDataReference*)
+{ RETURN_STATIC_IDENTIFIER("AdditionalDataPool"); }
+
+int PoolHelpers::Reference::Comparator::compareElements(const Reference& first, const Reference& second)
+{
+	return first.reference.compare(second.reference);
+}
+
+PoolHelpers::Reference::operator bool() const
+{
+	return isValid();
+}
+
+PoolHelpers::Reference::Mode PoolHelpers::Reference::getMode() const
+{ return m; }
+
 void PoolHelpers::sendErrorMessage(MainController* mc, const String& errorMessage)
 {
     mc->sendOverlayMessage(DeactiveOverlay::State::CriticalCustomErrorMessage, errorMessage);
@@ -549,6 +607,13 @@ void PoolHelpers::Reference::parseReferenceString(const MainController* mc, cons
 			if (auto e = mc->getExpansionHandler().getCurrentExpansion())
 			{
 				input = input.replace(projectFolderWildcard, e->getWildcard());
+			}
+		}
+		else if (input.startsWith(sampleFolderWildcard))
+		{
+			if (auto e = mc->getExpansionHandler().getCurrentExpansion())
+			{
+				input = input.replace(sampleFolderWildcard, e->getSubDirectory(FileHandlerBase::Samples).getFullPathName() + "/");
 			}
 		}
 	}
@@ -929,6 +994,143 @@ Array<hise::PoolReference> PoolBase::DataProvider::getListOfAllEmbeddedReference
 	return references;
 }
 
+PoolBase::ScopedNotificationDelayer::ScopedNotificationDelayer(PoolBase& parent_, EventType type):
+	parent(parent_),
+	t(type)
+{
+	parent.skipNotification = true;
+}
+
+PoolBase::ScopedNotificationDelayer::~ScopedNotificationDelayer()
+{
+	parent.skipNotification = false;
+	parent.sendPoolChangeMessage(t, sendNotificationAsync);
+}
+
+PoolBase::DataProvider::Compressor::~Compressor()
+{}
+
+PoolBase::DataProvider::DataProvider(PoolBase* pool_):
+	pool(pool_),
+	metadataOffset(-1),
+	compressor(new Compressor())
+{}
+
+PoolBase::DataProvider::~DataProvider()
+{}
+
+const PoolBase::DataProvider::Compressor* PoolBase::DataProvider::getCompressor() const
+{ return compressor; }
+
+void PoolBase::DataProvider::setCompressor(Compressor* newCompressor)
+{ compressor = newCompressor; }
+
+size_t PoolBase::DataProvider::getSizeOfEmbeddedReferences() const
+{ return embeddedSize; }
+
+PoolBase::Listener::~Listener()
+{}
+
+void PoolBase::Listener::poolEntryAdded()
+{}
+
+void PoolBase::Listener::poolEntryRemoved()
+{}
+
+void PoolBase::Listener::poolEntryChanged(PoolReference referenceThatWasChanged)
+{}
+
+void PoolBase::Listener::poolEntryReloaded(PoolReference referenceThatWasChanged)
+{}
+
+void PoolBase::sendPoolChangeMessage(EventType t, NotificationType notify, PoolReference r)
+{
+	if (skipNotification && notify == sendNotificationAsync)
+		return;
+
+	lastType = t;
+	lastReference = r;
+
+	if (notify == sendNotificationAsync)
+		notifier.triggerAsyncUpdate();
+	else
+		notifier.handleAsyncUpdate();
+}
+
+void PoolBase::addListener(Listener* l)
+{
+	listeners.addIfNotAlreadyThere(l);
+}
+
+void PoolBase::removeListener(Listener* l)
+{
+	listeners.removeAllInstancesOf(l);
+}
+
+void PoolBase::setDataProvider(DataProvider* newDataProvider)
+{
+	dataProvider = newDataProvider;
+}
+
+PoolBase::DataProvider* PoolBase::getDataProvider()
+{ return dataProvider; }
+
+const PoolBase::DataProvider* PoolBase::getDataProvider() const
+{ return dataProvider; }
+
+FileHandlerBase::SubDirectories PoolBase::getFileType() const
+{
+	return type;
+}
+
+void PoolBase::setUseSharedPool(bool shouldUse)
+{
+	useSharedCache = shouldUse;
+}
+
+FileHandlerBase* PoolBase::getFileHandler() const
+{ return parentHandler; }
+
+PoolBase::PoolBase(MainController* mc, FileHandlerBase* handler):
+	ControlledObject(mc),
+	notifier(*this),
+	type(FileHandlerBase::SubDirectories::numSubDirectories),
+	dataProvider(new DataProvider(this)),
+	parentHandler(handler)
+{
+
+}
+
+PoolBase::Notifier::Notifier(PoolBase& parent_):
+	parent(parent_)
+{}
+
+PoolBase::Notifier::~Notifier()
+{
+	cancelPendingUpdate();
+}
+
+void PoolBase::Notifier::handleAsyncUpdate()
+{
+	ScopedLock sl(parent.listeners.getLock());
+			
+	for (auto& l : parent.listeners)
+	{
+		if (l != nullptr)
+		{
+			switch (parent.lastType)
+			{
+			case Added: l->poolEntryAdded(); break;
+			case Removed: l->poolEntryRemoved(); break;
+			case Changed: l->poolEntryChanged(parent.lastReference); break;
+			case Reloaded: l->poolEntryReloaded(parent.lastReference); break;
+			default:
+				break;
+			}
+		}
+	}
+}
+
 void PoolBase::DataProvider::Compressor::write(OutputStream& output, const ValueTree& data, const File& /*originalFile*/) const
 {
 	zstd::ZCompressor<SampleMapDictionaryProvider> comp;
@@ -951,7 +1153,7 @@ void PoolBase::DataProvider::Compressor::write(OutputStream& output, const Image
 
 	if (isValidImage)
 	{
-		originalFileSize = originalFile.getSize();
+		originalFileSize = (int)originalFile.getSize();
 	}
 
 	MemoryOutputStream newlyCompressedImage;
@@ -1296,6 +1498,15 @@ const ModulatorSamplerSoundPool* PoolCollection::getSamplePool() const
 ModulatorSamplerSoundPool* PoolCollection::getSamplePool()
 {
 	return static_cast<ModulatorSamplerSoundPool*>(dataPools[FileHandlerBase::Samples]);
+}
+
+PooledAudioFileDataProvider::PooledAudioFileDataProvider(MainController* mc):
+	ControlledObject(mc)
+{}
+
+void PooledAudioFileDataProvider::setRootDirectory(const File& rootDirectory)
+{
+	customDefaultFolder = rootDirectory;
 }
 
 hise::MultiChannelAudioBuffer::SampleReference::Ptr PooledAudioFileDataProvider::loadFile(const String& reference)

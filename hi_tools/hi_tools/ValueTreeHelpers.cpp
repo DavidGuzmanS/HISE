@@ -38,6 +38,254 @@ using namespace juce;
 namespace valuetree
 {
 
+bool Helpers::isBetween(IterationType l, IterationType u, IterationType v)
+{
+	return v >= l && v <= u;
+}
+
+bool Helpers::isBackwards(IterationType t)
+{
+	return t == IterationType::Backwards || t == IterationType::ChildrenFirstBackwards || t == IterationType::OnlyChildrenBackwards;
+}
+
+bool Helpers::isRecursive(IterationType t)
+{
+	return !isBetween(IterationType::OnlyChildren, IterationType::OnlyChildrenBackwards, t);
+}
+
+bool Helpers::forEach(ValueTree v, const std::function<bool(ValueTree& v)>& f, IterationType type)
+{
+	if (isBetween(IterationType::Forward, IterationType::Backwards, type))
+	{
+		if (f(v))
+			return true;
+	}
+
+	if (isBackwards(type))
+	{
+		for (int i = v.getNumChildren() - 1; i >= 0; i--)
+		{
+			if (isRecursive(type))
+			{
+				if (forEach(v.getChild(i), f, type))
+					return true;
+			}
+			else
+			{
+				auto c = v.getChild(i);
+				if (f(c))
+					return true;
+			}
+		}
+	}
+	else
+	{
+		for (auto c : v)
+		{
+			if (isRecursive(type))
+			{
+				if (forEach(c, f, type))
+					return true;
+			}
+			else
+			{
+				if (f(c))
+					return true;
+			}
+		}
+	}
+
+	if (isBetween(IterationType::ChildrenFirst, IterationType::ChildrenFirstBackwards, type))
+	{
+		if (f(v))
+			return true;
+	}
+
+	return false;
+}
+
+void Helpers::dump(const ValueTree& v)
+{
+#if JUCE_DEBUG
+	auto xml = v.createXml();
+
+	auto xmlText = xml->createDocument("");
+
+	DBG(xmlText);
+#endif
+}
+
+
+var Helpers::valueTreeToJSON(const ValueTree& v)
+{
+	DynamicObject::Ptr p = new DynamicObject();
+
+	for (int i = 0; i < v.getNumProperties(); i++)
+	{
+		auto id = v.getPropertyName(i);
+		p->setProperty(id, v[id]);
+	}
+
+	bool hasChildrenWithSameName = v.getNumChildren() > 0;
+	auto firstType = v.getChild(0).getType();
+
+	for (auto c : v)
+	{
+		if (c.getType() != firstType)
+		{
+			hasChildrenWithSameName = false;
+			break;
+		}
+	}
+
+	Array<var> childList;
+
+
+
+	for (auto c : v)
+	{
+		if (c.getNumChildren() == 0 && c.getNumProperties() == 0)
+		{
+			p->setProperty(c.getType(), new DynamicObject());
+			continue;
+		}
+
+		auto jsonChild = valueTreeToJSON(c);
+
+		if (hasChildrenWithSameName)
+			childList.add(jsonChild);
+		else
+			p->setProperty(c.getType(), jsonChild);
+	}
+
+	if (hasChildrenWithSameName)
+	{
+		p->setProperty("ChildId", firstType.toString());
+		p->setProperty("Children", var(childList));
+	}
+
+	return var(p.get());
+}
+
+juce::ValueTree Helpers::jsonToValueTree(var data, const Identifier& typeId, bool isParentData)
+{
+	if (isParentData)
+	{
+		data = data.getProperty(typeId, {});
+		jassert(data.isObject());
+	}
+
+	ValueTree v(typeId);
+
+	if (data.hasProperty("ChildId"))
+	{
+		Identifier childId(data.getProperty("ChildId", "").toString());
+
+		for (auto& nv : data.getDynamicObject()->getProperties())
+		{
+			if (nv.name.toString() == "ChildId")
+				continue;
+
+			if (nv.name.toString() == "Children")
+				continue;
+
+			v.setProperty(nv.name, nv.value, nullptr);
+		}
+
+		auto lv = data.getProperty("Children", var());
+		if (auto l = lv.getArray())
+		{
+			for (auto& c : *l)
+			{
+				v.addChild(jsonToValueTree(c, childId, false), -1, nullptr);
+			}
+		}
+	}
+	else
+	{
+		if (auto dyn = data.getDynamicObject())
+		{
+			for (const auto& nv : dyn->getProperties())
+			{
+				if (nv.value.isObject())
+				{
+					v.addChild(jsonToValueTree(nv.value, nv.name, false), -1, nullptr);
+				}
+				else if (nv.value.isArray())
+				{
+					// must not happen
+					jassertfalse;
+				}
+				else
+				{
+					v.setProperty(nv.name, nv.value, nullptr);
+				}
+			}
+		}
+	}
+
+	return v;
+}
+
+ValueTree Helpers::findParentWithType(const ValueTree& v, const Identifier& id)
+{
+	auto p = v.getParent();
+
+	if (!p.isValid())
+		return {};
+
+	if (p.getType() == id)
+		return p;
+
+	return findParentWithType(p, id);
+}
+
+bool Helpers::isLast(const ValueTree& v)
+{
+	return (v.getParent().getNumChildren() - 1) == getIndexInParent(v);
+}
+
+bool Helpers::isParent(const ValueTree& v, const ValueTree& possibleParent)
+{
+	if (!v.isValid())
+		return false;
+
+	if (v == possibleParent)
+		return true;
+
+	return isParent(v.getParent(), possibleParent);
+}
+
+int Helpers::getIndexInParent(const ValueTree& v)
+{
+	return v.getParent().indexOf(v);
+}
+
+ValueTree Helpers::getRoot(const ValueTree& v)
+{
+	auto p = v.getParent();
+
+	if (p.isValid())
+		return getRoot(p);
+
+	return v;
+}
+
+bool Helpers::forEachParent(ValueTree& v, const Function& f)
+{
+	if (!v.isValid())
+		return false;
+
+	if (f(v))
+		return true;
+
+
+	auto p = v.getParent();
+	return forEachParent(p, f);
+}
+
+
+
 
 void PropertyListener::setCallback(ValueTree d, const Array<Identifier>& ids_, AsyncMode asyncMode, const PropertyCallback& f_)
 {
@@ -535,6 +783,40 @@ AnyListener::AnyListener(AsyncMode mode_) :
 
 	for (int i = 0; i < numCallbackTypes; i++)
 		setForwardCallback((CallbackType)i, true);
+}
+
+void AnyListener::setMillisecondsBetweenUpdate(int milliSeconds)
+{
+	if (milliSeconds == 0)
+		mode = AsyncMode::Asynchronously;
+	else
+	{
+		mode = AsyncMode::Coallescated;
+		milliSecondsBetweenUpdate = milliSeconds;
+	}
+}
+
+void AnyListener::setEnableLogging(bool shouldLog)
+{
+	loggingEnabled = shouldLog;
+}
+
+void AnyListener::setRootValueTree(const ValueTree& d)
+{
+	data = d;
+	data.addListener(this);
+
+	anythingChanged(lastCallbackType);
+}
+
+void AnyListener::setForwardCallback(CallbackType c, bool shouldForward)
+{
+	forwardCallbacks[c] = shouldForward;
+}
+
+void AnyListener::setPropertyCondition(const PropertyConditionFunc& f)
+{
+	pcf = f;
 }
 
 void AnyListener::handleAsyncUpdate()

@@ -45,22 +45,18 @@
 
 #define JUCE_USE_DARK_SPLASH_SCREEN 1
 
-#define JUCE_PROJUCER_VERSION 0x60104
+#define JUCE_PROJUCER_VERSION 0x60103
 
 //==============================================================================
 #define JUCE_MODULE_AVAILABLE_hi_backend                  1
-#define JUCE_MODULE_AVAILABLE_hi_components               1
 #define JUCE_MODULE_AVAILABLE_hi_core                     1
-#define JUCE_MODULE_AVAILABLE_hi_dsp                      1
 #define JUCE_MODULE_AVAILABLE_hi_dsp_library              1
 #define JUCE_MODULE_AVAILABLE_hi_faust                    1
 #define JUCE_MODULE_AVAILABLE_hi_faust_jit                1
 #define JUCE_MODULE_AVAILABLE_hi_faust_lib                1
 #define JUCE_MODULE_AVAILABLE_hi_faust_types              1
 #define JUCE_MODULE_AVAILABLE_hi_lac                      1
-#define JUCE_MODULE_AVAILABLE_hi_modules                  1
 #define JUCE_MODULE_AVAILABLE_hi_rlottie                  1
-#define JUCE_MODULE_AVAILABLE_hi_sampler                  1
 #define JUCE_MODULE_AVAILABLE_hi_scripting                1
 #define JUCE_MODULE_AVAILABLE_hi_snex                     1
 #define JUCE_MODULE_AVAILABLE_hi_streaming                1
@@ -93,13 +89,6 @@
 #endif
 
 //==============================================================================
-// hi_components flags:
-
-#ifndef    HISE_INCLUDE_SNEX_FLOATING_TILES
- //#define HISE_INCLUDE_SNEX_FLOATING_TILES 0
-#endif
-
-//==============================================================================
 // hi_core flags:
 
 #ifndef    USE_BACKEND
@@ -124,6 +113,10 @@
 
 #ifndef    DONT_CREATE_EXPANSIONS_FOLDER
  //#define DONT_CREATE_EXPANSIONS_FOLDER 0
+#endif
+
+#ifndef    HISE_OVERWRITE_OLD_USER_PRESETS
+ //#define HISE_OVERWRITE_OLD_USER_PRESETS 0
 #endif
 
 #ifndef    HISE_BACKEND_AS_FX
@@ -243,11 +236,11 @@
 #endif
 
 #ifndef    HISE_USE_OPENGL_FOR_PLUGIN
- #define   HISE_USE_OPENGL_FOR_PLUGIN 1
+ //#define HISE_USE_OPENGL_FOR_PLUGIN 0
 #endif
 
 #ifndef    HISE_DEFAULT_OPENGL_VALUE
- #define   HISE_DEFAULT_OPENGL_VALUE 0
+ //#define HISE_DEFAULT_OPENGL_VALUE 1
 #endif
 
 #ifndef    HISE_USE_SYSTEM_APP_DATA_FOLDER
@@ -301,6 +294,10 @@
  //#define IS_STATIC_DSP_LIBRARY 1
 #endif
 
+#ifndef    HISE_LOG_FILTER_FREQMOD
+ //#define HISE_LOG_FILTER_FREQMOD 0
+#endif
+
 //==============================================================================
 // hi_faust flags:
 
@@ -320,7 +317,7 @@
 // hi_faust_types flags:
 
 #ifndef    FAUST_NO_WARNING_MESSAGES
- #define   FAUST_NO_WARNING_MESSAGES 1
+ //#define FAUST_NO_WARNING_MESSAGES 0
 #endif
 
 //==============================================================================
@@ -368,7 +365,11 @@
 #endif
 
 #ifndef    HISE_INCLUDE_SNEX
- //#define HISE_INCLUDE_SNEX 0
+ #define   HISE_INCLUDE_SNEX 1
+#endif
+
+#ifndef    SNEX_STANDALONE_PLAYGROUND
+ //#define SNEX_STANDALONE_PLAYGROUND 0
 #endif
 
 #ifndef    SNEX_INCLUDE_MEMORY_ADDRESS_IN_DUMP
@@ -380,6 +381,10 @@
 
 #ifndef    STANDALONE_STREAMING
  //#define STANDALONE_STREAMING 1
+#endif
+
+#ifndef    HISE_SAMPLER_CUBIC_INTERPOLATION
+ //#define HISE_SAMPLER_CUBIC_INTERPOLATION 0
 #endif
 
 //==============================================================================

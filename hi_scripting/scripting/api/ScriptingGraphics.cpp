@@ -415,8 +415,8 @@ struct ScriptingObjects::ScriptShader::PreviewComponent: public Component,
 		Path p;
 
 #if USE_BACKEND
-		LOAD_PATH_IF_URL("stats", BackendBinaryData::ToolbarIcons::debugPanel);
-		LOAD_PATH_IF_URL("view", BackendBinaryData::ToolbarIcons::viewPanel);
+		LOAD_EPATH_IF_URL("stats", BackendBinaryData::ToolbarIcons::debugPanel);
+		LOAD_EPATH_IF_URL("view", BackendBinaryData::ToolbarIcons::viewPanel);
 		LOAD_PATH_IF_URL("time", ColumnIcons::moveIcon);
 #endif
 		return p;
@@ -486,6 +486,69 @@ ScriptingObjects::ScriptShader::ScriptShader(ProcessorWithScriptingContent* sp) 
 	ADD_API_METHOD_0(getOpenGLStatistics);
 	ADD_API_METHOD_1(setEnableCachedBuffer);
 	ADD_API_METHOD_2(setPreprocessor);
+}
+
+Identifier ScriptingObjects::ScriptShader::getObjectName() const
+{ RETURN_STATIC_IDENTIFIER("ScriptShader"); }
+
+void ScriptingObjects::ScriptShader::setEnableLineNumbers(bool shouldUseLineNumbers)
+{
+	useLineNumbers = shouldUseLineNumbers;
+}
+
+bool ScriptingObjects::ScriptShader::compiledOk() const
+{ return r.wasOk(); }
+
+void ScriptingObjects::ScriptShader::setCompileResult(Result compileResult)
+{
+	r = processErrorMessage(compileResult);
+
+	for (auto f : includedFiles)
+		f->setRuntimeErrors(r);
+}
+
+void ScriptingObjects::ScriptShader::setGlobalBounds(Rectangle<int> b, float sf)
+{
+	globalRect = b.toFloat();
+	scaleFactor = sf;
+}
+
+bool ScriptingObjects::ScriptShader::shouldWriteToBuffer() const
+{
+	return enableCache || screenshotPending;
+}
+
+void ScriptingObjects::ScriptShader::renderWasFinished(ScreenshotListener::CachedImageBuffer::Ptr newData)
+{
+	if (screenshotPending)
+	{
+		DBG("REPAINT DONE");
+		screenshotPending = false;
+		lastScreenshot = newData;
+	}
+	else
+		lastScreenshot = nullptr;
+}
+
+ScreenshotListener::CachedImageBuffer::Ptr ScriptingObjects::ScriptShader::getScreenshotBuffer()
+{
+	if (isRenderingScreenshot())
+		return lastScreenshot;
+
+	return nullptr;
+}
+
+bool ScriptingObjects::ScriptShader::isRenderingScreenshot()
+{ return renderingScreenShot; }
+
+ScriptingObjects::ScriptShader::ScopedScreenshotRenderer::ScopedScreenshotRenderer()
+{
+	renderingScreenShot = true;
+}
+
+ScriptingObjects::ScriptShader::ScopedScreenshotRenderer::~ScopedScreenshotRenderer()
+{
+	renderingScreenShot = false;
 }
 
 bool ScriptingObjects::ScriptShader::renderingScreenShot = false;
@@ -817,11 +880,13 @@ ScriptingObjects::SVGObject::SVGObject(ProcessorWithScriptingContent* p, const S
     
     comp.expand(mb, xmlText);
     
-    if(auto xml = XmlDocument::parse(xmlText))
-    {
-        MessageManagerLock mm;
-        svg = Drawable::createFromSVG(*xml);
-    }
+	WeakReference<SVGObject> safeThis(this);
+
+	SafeAsyncCall::call<SVGObject>(*this, [xmlText](SVGObject& obj)
+	{
+		if (auto xml = XmlDocument::parse(xmlText))
+			obj.svg = Drawable::createFromSVG(*xml);
+	});
 }
 
 
@@ -2299,6 +2364,8 @@ Array<Identifier> ScriptingObjects::ScriptedLookAndFeel::getAllFunctionNames()
 		"drawPresetBrowserListItem",
 		"drawPresetBrowserSearchBar",
 		"drawPresetBrowserTag",
+		"drawWavetableBackground",
+		"drawWavetablePath",
 		"drawTableBackground",
 		"drawTablePath",
 		"drawTablePoint",
@@ -2499,6 +2566,98 @@ void ScriptingObjects::ScriptedLookAndFeel::Laf::setColourOrBlack(DynamicObject*
 		obj->setProperty(id, c.findColour(colourId).getARGB());
 	else
 		obj->setProperty(id, 0);
+}
+
+ScriptingObjects::ScriptedLookAndFeel::Laf::Laf(MainController* mc):
+	ControlledObject(mc)
+{}
+
+ScriptingObjects::ScriptedLookAndFeel::Laf::~Laf()
+{}
+
+ScriptingObjects::ScriptedLookAndFeel* ScriptingObjects::ScriptedLookAndFeel::Laf::get()
+{
+	return dynamic_cast<ScriptedLookAndFeel*>(getMainController()->getCurrentScriptLookAndFeel());
+}
+
+Font ScriptingObjects::ScriptedLookAndFeel::Laf::getFont()
+{
+	if (auto l = get())
+		return l->f;
+	else
+		return GLOBAL_BOLD_FONT();
+}
+
+Font ScriptingObjects::ScriptedLookAndFeel::Laf::getAlertWindowMessageFont()
+{ return getFont(); }
+
+Font ScriptingObjects::ScriptedLookAndFeel::Laf::getAlertWindowTitleFont()
+{ return getFont(); }
+
+Font ScriptingObjects::ScriptedLookAndFeel::Laf::getTextButtonFont(TextButton& textButton, int i)
+{ return getFont(); }
+
+Font ScriptingObjects::ScriptedLookAndFeel::Laf::getComboBoxFont(ComboBox& comboBox)
+{ return getFont(); }
+
+Font ScriptingObjects::ScriptedLookAndFeel::Laf::getPopupMenuFont()
+{ return getFont(); }
+
+Font ScriptingObjects::ScriptedLookAndFeel::Laf::getAlertWindowFont()
+{ return getFont(); }
+
+Identifier ScriptingObjects::ScriptedLookAndFeel::getObjectName() const
+{ return "ScriptLookAndFeel"; }
+
+int ScriptingObjects::ScriptedLookAndFeel::getNumChildElements() const
+{
+	if (auto dyn = functions.getDynamicObject())
+		return dyn->getProperties().size();
+            
+	return 0;
+}
+
+DebugInformationBase* ScriptingObjects::ScriptedLookAndFeel::getChildElement(int index)
+{
+	WeakReference<ScriptedLookAndFeel> safeThis(this);
+
+	auto vf = [safeThis, index]()
+	{
+		if (safeThis != nullptr)
+		{
+			if (auto dyn = safeThis->functions.getDynamicObject())
+			{
+				if(isPositiveAndBelow(index, dyn->getProperties().size()))
+					return dyn->getProperties().getValueAt(index);
+			}
+		}
+
+		return var();
+	};
+
+	String id = "%PARENT%.";
+
+	auto mid = functions.getDynamicObject()->getProperties().getName(index);
+
+	id << mid;
+
+	Location l = getLocation();
+
+
+	return new LambdaValueInformation(vf, id, {}, (DebugInformation::Type)getTypeNumber(), l);
+}
+
+Image ScriptingObjects::ScriptedLookAndFeel::getLoadedImage(const String& prettyName)
+{
+	for (auto& img : loadedImages)
+	{
+		if (img.prettyName == prettyName)
+		{
+			return img.image ? *img.image.getData() : Image();
+		}
+	}
+
+	return Image();
 }
 
 void ScriptingObjects::ScriptedLookAndFeel::Laf::drawAlertBox(Graphics& g_, AlertWindow& w, const Rectangle<int>& ta, TextLayout& tl)
@@ -3940,6 +4099,71 @@ void ScriptingObjects::ScriptedLookAndFeel::Laf::drawMatrixPeakMeter(Graphics& g
     }
 
     MatrixPeakMeter::LookAndFeelMethods::drawMatrixPeakMeter(g_, peakValues, maxPeaks, numChannels, isVertical, segmentSize, paddingSize, c);
+}
+
+void ScriptingObjects::ScriptedLookAndFeel::Laf::drawWavetableBackground(Graphics& g_, WaterfallComponent& wc, bool isEmpty)
+{
+	if (functionDefined("drawWavetableBackground"))
+	{
+		auto obj = new DynamicObject();
+
+		obj->setProperty("area", ApiHelpers::getVarRectangle(wc.getLocalBounds().toFloat()));
+
+		obj->setProperty("isEmpty", isEmpty);
+		
+		if (auto pc = wc.findParentComponentOfClass<PanelWithProcessorConnection>())
+			obj->setProperty("processorId", pc->getConnectedProcessor()->getId());
+
+		addParentFloatingTile(wc, obj);
+
+		setColourOrBlack(obj, "bgColour", wc, HiseColourScheme::ComponentBackgroundColour);
+		setColourOrBlack(obj, "itemColour", wc, HiseColourScheme::ComponentFillTopColourId);
+		setColourOrBlack(obj, "itemColour2", wc, HiseColourScheme::ComponentOutlineColourId);
+		setColourOrBlack(obj, "textColour", wc, HiseColourScheme::ComponentTextColourId);
+
+		if (get()->callWithGraphics(g_, "drawWavetableBackground", var(obj), &wc))
+			return;
+	}
+
+	WaterfallComponent::LookAndFeelMethods::drawWavetableBackground(g_, wc, isEmpty);
+}
+
+void ScriptingObjects::ScriptedLookAndFeel::Laf::drawWavetablePath(Graphics& g_, WaterfallComponent& wc, const Path& p, int tableIndex, bool isStereo, int currentTableIndex, int numTables)
+{
+	if (functionDefined("drawWavetablePath"))
+	{
+		auto obj = new DynamicObject();
+
+		obj->setProperty("area", ApiHelpers::getVarRectangle(p.getBounds().toFloat()));
+
+		auto pat = new ScriptingObjects::PathObject(get()->getScriptProcessor());
+
+		var keeper(pat);
+
+		pat->getPath() = p;
+
+		obj->setProperty("path", keeper);
+
+		obj->setProperty("tableIndex", tableIndex);
+		obj->setProperty("isStereo", isStereo);
+		obj->setProperty("currentTableIndex", currentTableIndex);
+		obj->setProperty("numTables", numTables);
+
+		if (auto pc = wc.findParentComponentOfClass<PanelWithProcessorConnection>())
+			obj->setProperty("processorId", pc->getConnectedProcessor()->getId());
+
+		addParentFloatingTile(wc, obj);
+
+		setColourOrBlack(obj, "bgColour", wc, HiseColourScheme::ComponentBackgroundColour);
+		setColourOrBlack(obj, "itemColour", wc, HiseColourScheme::ComponentFillTopColourId);
+		setColourOrBlack(obj, "itemColour2", wc, HiseColourScheme::ComponentOutlineColourId);
+		setColourOrBlack(obj, "textColour", wc, HiseColourScheme::ComponentTextColourId);
+
+		if (get()->callWithGraphics(g_, "drawWavetablePath", var(obj), &wc))
+			return;
+	}
+
+	WaterfallComponent::LookAndFeelMethods::drawWavetablePath(g_, wc, p, tableIndex, isStereo, currentTableIndex, numTables);
 }
 
 juce::Image ScriptingObjects::ScriptedLookAndFeel::Laf::createIcon(PresetHandler::IconType type)

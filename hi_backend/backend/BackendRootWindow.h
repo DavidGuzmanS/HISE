@@ -58,11 +58,30 @@ class BackendRootWindow : public TopLevelWindowWithOptionalOpenGL,
 						  public ComponentWithBackendConnection,
 						  public DragAndDropContainer,
 						  public ComponentWithHelp::GlobalHandler,
-						  public PeriodicScreenshotter::Holder,
                           public ProjectHandler::Listener,
 						  public MainController::LockFreeDispatcher::PresetLoadListener
 {
 public:
+
+	struct TooltipLookAndFeel: public LookAndFeel_V4
+	{
+		static TextLayout layoutTooltipText(const String& text, Colour colour) noexcept;
+
+		Rectangle< int > getTooltipBounds(const String& tipText, Point<int> screenPos, Rectangle<int> parentArea) override;
+
+		void drawTooltip(Graphics& g, const String& text, int width,int height) override;
+	} ttlaf;
+
+	struct TooltipWindowWithoutScriptContent: public juce::TooltipWindow
+	{
+		TooltipWindowWithoutScriptContent() :
+			TooltipWindow(nullptr, 900)
+		{};
+
+		String getTipFor(Component&component) override;
+	};
+
+	TooltipWindowWithoutScriptContent funkytooltips;
 
 	BackendRootWindow(AudioProcessor *ownerProcessor, var editorState);
 
@@ -72,21 +91,13 @@ public:
 
     
     
-	File getKeyPressSettingFile() const override
-	{
-		return ProjectHandler::getAppDataDirectory(nullptr).getChildFile("KeyPressMapping.xml");
-	}
+	File getKeyPressSettingFile() const override;
 
 	void initialiseAllKeyPresses() override;
 
-	void paint(Graphics& g) override
-	{
-		g.fillAll(HiseColourScheme::getColour(HiseColourScheme::ColourIds::EditorBackgroundColourIdBright));
+	void paint(Graphics& g) override;
 
-		//g.fillAll(Colour(0xFF333333));
-	}
-
-    void workbenchChanged(WorkbenchData::Ptr newWorkbench) override
+	void workbenchChanged(WorkbenchData::Ptr newWorkbench) override
     {
         if(newWorkbench != nullptr && newWorkbench->getCodeProvider()->providesCode())
         {
@@ -221,8 +232,6 @@ public:
 
 	MarkdownPreview* createOrShowDocWindow(const MarkdownLink& l);
 
-	PeriodicScreenshotter* getScreenshotter() override { return screenshotter; };
-
 	void paintOverChildren(Graphics& g) override;
 
 	template <class EditorType> bool addEditorTabsOfType()
@@ -244,7 +253,14 @@ public:
 		return false;
 	}
 
+	void setProjectIsBeingExtracted()
+	{
+		projectIsBeingExtracted = true;
+	}
+
 private:
+
+	bool projectIsBeingExtracted = false;
 
 	friend class ProjectImporter;
 
@@ -264,7 +280,7 @@ private:
 
 	friend class BackendCommandTarget;
 
-	ScopedPointer<PeriodicScreenshotter::PopupGlassLookAndFeel> plaf;
+	PopupLookAndFeel plaf;
 
 	BackendProcessor *owner;
 
@@ -289,8 +305,6 @@ private:
 	ScopedPointer<FloatingTileDocumentWindow> docWindow;
 
 	bool resetOnClose = false;
-
-	ScopedPointer<PeriodicScreenshotter> screenshotter;
 
 	JUCE_DECLARE_WEAK_REFERENCEABLE(BackendRootWindow);
 };

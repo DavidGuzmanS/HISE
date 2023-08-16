@@ -1,3 +1,5 @@
+
+
 namespace hise { using namespace juce;
 
 #if ENABLE_STARTUP_LOG
@@ -311,6 +313,69 @@ struct DebugLogger::Failure : public DebugLogger::Message
 	
 };
 
+
+DebugLogger::PerformanceData::PerformanceData(int location_, float thisPercentage_, float averagePercentage_,
+	Processor* p_):
+	location(location_),
+	thisPercentage(thisPercentage_),
+	averagePercentage(averagePercentage_),
+	p(p_)
+{}
+
+DebugLogger::PerformanceData::PerformanceData():
+	location(0),
+	thisPercentage(0.0f),
+	averagePercentage(0.0f),
+	p(nullptr)
+{}
+
+DebugLogger::Listener::~Listener()
+{}
+
+void DebugLogger::Listener::logStarted()
+{}
+
+void DebugLogger::Listener::logEnded()
+{}
+
+void DebugLogger::Listener::errorDetected()
+{}
+
+void DebugLogger::Listener::recordStateChanged(bool isRecording)
+{}
+
+MainController* DebugLogger::getMainController()
+{
+	return mc;
+}
+
+void DebugLogger::setStackBacktrace(const String& newBackTrace) const
+{
+	jassert(MessageManager::getInstance()->isThisTheMessageThread());
+
+	messageCallbackStackBacktrace = newBackTrace;
+}
+
+File DebugLogger::getCurrentLogFile() const
+{
+	return currentLogFile;
+}
+
+double DebugLogger::getScaleFactorForWarningLevel() const
+{
+	switch (warningLevel)
+	{
+	case 0: return 3.0;
+	case 1: return 2.0;
+	case 2: return 1.0;
+	}
+
+	return 1.0;
+}
+
+DebugLogger::RecordDumper::RecordDumper(DebugLogger& parent_):
+	parent(parent_)
+{}
 
 DebugLogger::DebugLogger(MainController* mc_):
 	mc(mc_),
@@ -1052,7 +1117,7 @@ String DebugLogger::getHeader()
 	header << "# Debug Log file\n\n" << nl;
 #if USE_BACKEND
 	header << "Product: **HISE**  " << nl;
-	header << "Version: **" << ProjectInfo::versionString << "**  " << nl;
+	header << "Version: **" << PresetHandler::getVersionString() << "**  " << nl;
 #else
 
 	header << "Product: **" << FrontendHandler::getCompanyName() << " - " << FrontendHandler::getProjectName() << "**  " << nl;

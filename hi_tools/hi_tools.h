@@ -192,9 +192,8 @@ will break compatibility with older projects / presets because the tempo indexes
 #define USE_LATO_AS_DEFAULT 1
 #endif
 
-#if !HISE_NO_GUI_TOOLS
 #include "hi_binary_data/hi_binary_data.h"
-#endif
+
 
 #include "Macros.h"
 
@@ -241,22 +240,31 @@ will break compatibility with older projects / presets because the tempo indexes
 #include "hi_markdown/MarkdownDatabaseCrawler.h"
 #include "hi_markdown/MarkdownRenderer.h"
 
-#if USE_BACKEND // Only include this file in the GPL build configuration
-#include "hi_tools/FaustTokeniser.h"
-#endif
+
 
 #include "mcl_editor/mcl_editor.h"
 
 
 
 #include "hi_tools/JavascriptTokeniser.h"
-#include "hi_tools/JavascriptTokeniserFunctions.h"
 
+
+
+#include "hi_standalone_components/ChocWebView.h"
 #include "hi_standalone_components/CodeEditorApiBase.h"
 #include "hi_standalone_components/AdvancedCodeEditor.h"
 #include "hi_standalone_components/ScriptWatchTable.h"
 #include "hi_standalone_components/ComponentWithPreferredSize.h"
+#include "hi_standalone_components/ZoomableViewport.h"
+#else
+using ComponentWithMiddleMouseDrag = juce::Component;
+#define CHECK_MIDDLE_MOUSE_DOWN(e) ignoreUnused(e);
+#define CHECK_MIDDLE_MOUSE_UP(e) ignoreUnused(e);
+#define CHECK_MIDDLE_MOUSE_DRAG(e) ignoreUnused(e);
+#define CHECK_VIEWPORT_SCROLL(e, details) ignoreUnused(e, details);
 #endif
+
+
 
 #if HISE_INCLUDE_RLOTTIE
 #include "hi_standalone_components/RLottieDevComponent.h"
@@ -270,6 +278,8 @@ will break compatibility with older projects / presets because the tempo indexes
 #include "hi_standalone_components/TableEditor.h"
 
 #include "hi_standalone_components/VuMeter.h"
+
+
 #include "hi_standalone_components/SampleDisplayComponent.h"
 
 
