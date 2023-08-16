@@ -45,7 +45,7 @@
 
 #define JUCE_USE_DARK_SPLASH_SCREEN 1
 
-#define JUCE_PROJUCER_VERSION 0x60103
+#define JUCE_PROJUCER_VERSION 0x60104
 
 //==============================================================================
 #define JUCE_MODULE_AVAILABLE_hi_backend                  1
@@ -260,7 +260,7 @@
 #endif
 
 #ifndef    USE_HARD_CLIPPER
- //#define USE_HARD_CLIPPER 0
+ #define   USE_HARD_CLIPPER 1
 #endif
 
 #ifndef    USE_SPLASH_SCREEN
@@ -317,7 +317,7 @@
 // hi_faust_types flags:
 
 #ifndef    FAUST_NO_WARNING_MESSAGES
- //#define FAUST_NO_WARNING_MESSAGES 0
+ #define   FAUST_NO_WARNING_MESSAGES 1
 #endif
 
 //==============================================================================
