@@ -238,11 +238,11 @@
 #endif
 
 #ifndef    HISE_USE_OPENGL_FOR_PLUGIN
- #define   HISE_USE_OPENGL_FOR_PLUGIN 1
+ //#define HISE_USE_OPENGL_FOR_PLUGIN 0
 #endif
 
 #ifndef    HISE_DEFAULT_OPENGL_VALUE
- #define   HISE_DEFAULT_OPENGL_VALUE 0
+ //#define HISE_DEFAULT_OPENGL_VALUE 1
 #endif
 
 #ifndef    HISE_USE_SYSTEM_APP_DATA_FOLDER
@@ -262,7 +262,7 @@
 #endif
 
 #ifndef    USE_HARD_CLIPPER
- #define   USE_HARD_CLIPPER 1
+ //#define USE_HARD_CLIPPER 0
 #endif
 
 #ifndef    USE_SPLASH_SCREEN
@@ -323,7 +323,7 @@
 // hi_faust_types flags:
 
 #ifndef    FAUST_NO_WARNING_MESSAGES
- #define   FAUST_NO_WARNING_MESSAGES 1
+ //#define FAUST_NO_WARNING_MESSAGES 0
 #endif
 
 //==============================================================================
