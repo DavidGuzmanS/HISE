@@ -117,7 +117,27 @@
 #define HISE_AUV3_MAX_INSTANCE_COUNT 2
 #endif
 
+#ifndef HISE_UNDO_INTERVAL
+#define HISE_UNDO_INTERVAL 500
+#endif
 
+
+// Enable this if you want to use the old event notification system for HISE modules (aka hise::Processor)
+#define HISE_OLD_PROCESSOR_DISPATCH 0
+// Enable this if you want to use the new event notification system using the hise::dispatch::library::Processor class
+#define HISE_NEW_PROCESSOR_DISPATCH 1
+
+#if HISE_NEW_PROCESSOR_DISPATCH
+#define NEW_PROCESSOR_DISPATCH(x) x
+#else
+#define NEW_PROCESSOR_DISPATCH(x)
+#endif
+
+#if HISE_OLD_PROCESSOR_DISPATCH
+#define OLD_PROCESSOR_DISPATCH(x) x
+#else
+#define OLD_PROCESSOR_DISPATCH(x)
+#endif
 
 namespace hise { using namespace juce;
 

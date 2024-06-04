@@ -145,7 +145,7 @@ void SampleMap::clear(NotificationType n)
 
 	if (sampler != nullptr)
 	{
-		sampler->sendChangeMessage();
+		sampler->sendOtherChangeMessage(dispatch::library::ProcessorChangeEvent::Custom);
 		getCurrentSamplePool()->sendChangeMessage();
 	}
 
@@ -525,7 +525,7 @@ void SampleMap::addSampleFromValueTree(ValueTree childWhichHasBeenAdded)
 	auto newSound = new ModulatorSamplerSound(map, childWhichHasBeenAdded, map->currentMonolith.get());
 
 	{
-		LockHelpers::SafeLock sl(sampler->getMainController(), LockHelpers::SampleLock);
+		LockHelpers::SafeLock sl(sampler->getMainController(), LockHelpers::Type::SampleLock);
 		sampler->addSound(newSound);
 	}
 
@@ -552,7 +552,7 @@ void SampleMap::sendSampleAddedMessage()
 
 		ModulatorSamplerSoundPool* pool = sampler->getSampleMap()->getCurrentSamplePool();
 		pool->sendChangeMessage();
-		sampler->sendChangeMessage();
+		sampler->sendOtherChangeMessage(dispatch::library::ProcessorChangeEvent::Custom);
 
 		sampler->getSampleMap()->notifier.sendSampleAmountChangeMessage(sendNotificationAsync);
 
@@ -1878,7 +1878,7 @@ void SampleMap::Notifier::handleHeavyweightPropertyChanges()
 {
 	auto f = [this](Processor* /*p*/)
 	{
-		LockHelpers::SafeLock sl(parent.getSampler()->getMainController(), LockHelpers::SampleLock);
+		LockHelpers::SafeLock sl(parent.getSampler()->getMainController(), LockHelpers::Type::SampleLock);
 
 		Array<AsyncPropertyChange, CriticalSection> changesThisTime;
 

@@ -36,7 +36,9 @@ namespace hise { using namespace juce;
 
 struct ScriptTableListModel : public juce::TableListBoxModel,
 							  public ReferenceCountedObject,
-							  public PooledUIUpdater::SimpleTimer
+						      public DebugableObjectBase,
+							  public PooledUIUpdater::SimpleTimer,
+							  public AsyncUpdater
 {
 	using Ptr = ReferenceCountedObjectPtr<ScriptTableListModel>;
 
@@ -52,7 +54,8 @@ struct ScriptTableListModel : public juce::TableListBoxModel,
 		SpaceKey,
 		SetValue,
 		Undo,
-		DeleteRow
+		DeleteRow,
+		numEventTypes
 	};
 
 	enum class CellType
@@ -80,7 +83,7 @@ struct ScriptTableListModel : public juce::TableListBoxModel,
 	{
 		virtual ~LookAndFeelMethods();;
 
-		virtual void drawTableRowBackground(Graphics& g, const LookAndFeelData& d, int rowNumber, int width, int height, bool rowIsSelected);
+		virtual void drawTableRowBackground(Graphics& g, const LookAndFeelData& d, int rowNumber, int width, int height, bool rowIsSelected, bool rowIsHovered);
 
 		virtual void drawTableCell(Graphics& g, const LookAndFeelData& d, const String& text, int rowNumber, int columnId, int width, int height, bool rowIsSelected, bool cellIsClicked, bool cellIsHovered);
 
@@ -119,6 +122,9 @@ struct ScriptTableListModel : public juce::TableListBoxModel,
 
 	void setup(juce::TableListBox* t);
 
+	/** Override this and return the class id of this object. */
+	virtual Identifier getObjectName() const { RETURN_STATIC_IDENTIFIER("TableModel"); }
+
 	CellType getCellType(int columnId) const;
 
 	void setTableColumnData(var cd);
@@ -129,7 +135,21 @@ struct ScriptTableListModel : public juce::TableListBoxModel,
 
 	void setCallback(var callback);
 
-	void sendCallback(int rowId, int columnId, var value, EventType type);
+	void sendCallback(int rowId, int columnId, var value, EventType type, NotificationType notification = sendNotificationAsync);
+
+	struct EventData
+	{
+		operator bool() const { return type != EventType::numEventTypes; };
+
+		int rowId = -1;
+		int columnId = -1;
+		var value;
+		EventType type = EventType::numEventTypes;
+	};
+
+	void handleAsyncUpdate() override;
+
+	EventData pendingEvent;
 
 	void setFont(Font f, Justification c);
 
@@ -163,7 +183,28 @@ struct ScriptTableListModel : public juce::TableListBoxModel,
 
     var getRowData() const;
 
+	String getCellTooltip (int, int) override
+	{
+		return tooltip;
+	}
+
+	void setTooltip(const String& newTooltip)
+	{
+		tooltip = newTooltip;
+	}
+
 private:
+
+	String tooltip;
+
+
+	bool shouldSendCallOnDrag() const
+	{
+		return tableMetadata.getProperty("CallbackOnSliderDrag", true);
+	}
+	
+	
+	RangeHelpers::IdSet rangeSet = RangeHelpers::IdSet::scriptnode;
 
 	Array<int> repaintedColumns;
 
@@ -209,13 +250,16 @@ private:
 	DefaultLookAndFeel fallback;
 	WeakReference<LookAndFeelMethods> laf = nullptr;
 
-	Point<int> hoverPos;
+	Point<int> hoverPos = { 0, -1 };
 	Point<int> lastClickedCell;
 
     bool processSpaceKey = false;
     
 	var tableMetadata;
 	var columnMetadata;
+
+	mutable hise::SimpleReadWriteLock rowLock;
+
 	var rowData;
 	var originalRowData;
 	WeakCallbackHolder cellCallback;

@@ -52,8 +52,8 @@ bool snex_node::preprocess(String& code)
 	}
 
 	SnexSource::preprocess(code);
-	SnexSource::addDummyProcessFunctions(code);
-	SnexSource::addDummyNodeCallbacks(code);
+	SnexSource::addDummyProcessFunctions(code, true);
+	SnexSource::addDummyNodeCallbacks(code, true, true, code.indexOf("handleModulation(") != -1);
 
 	return true;
 }

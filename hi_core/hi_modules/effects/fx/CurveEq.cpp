@@ -77,6 +77,8 @@ float CurveEq::getAttribute(int index) const
 	const int filterIndex = index / BandParameter::numBandParameters;
 	const BandParameter parameter = (BandParameter)(index % numBandParameters);
 
+	hise::SimpleReadWriteLock::ScopedReadLock sl(bandLock);
+
 	if (auto filter = filterBands[filterIndex])
 	{
 		switch (parameter)
@@ -109,6 +111,8 @@ void CurveEq::setInternalAttribute(int index, float newValue)
 	const int filterIndex = index / BandParameter::numBandParameters;
 	const BandParameter parameter = (BandParameter)(index % numBandParameters);
 
+	hise::SimpleReadWriteLock::ScopedReadLock sl(bandLock);
+
 	StereoFilter *filter = filterBands[filterIndex];
 
 	jassert(filter != nullptr);
@@ -130,6 +134,9 @@ void CurveEq::setInternalAttribute(int index, float newValue)
 	{
 		debugError(this, "Invalid attribute index: " + String(index));
 	}
+
+	dispatcher.sendChangeMessage(dispatch::library::ProcessorChangeEvent::Custom, dispatch::DispatchType::sendNotificationAsync);
+
 }
 
 void CurveEq::sendBroadcasterMessage(const String& type, const var& value, NotificationType n /*= sendNotificationAsync*/)

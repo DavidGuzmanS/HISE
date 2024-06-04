@@ -70,11 +70,13 @@ public:
         
         DisplayMode displayMode = DisplayMode::SymmetricArea;
         float manualDownSampleFactor = -1.0f;
+		int multithreadThreshold = 44100;
         bool drawHorizontalLines = false;
         bool scaleVertically = false;
         float displayGain = 1.0f;
         bool useRectList = false;
         int forceSymmetry = 0;
+		bool dynamicOptions = false;
     };
     
 	struct LookAndFeelMethods
@@ -163,6 +165,7 @@ public:
 private:
 
     RenderOptions currentOptions;
+	bool optionsInitialised = false;
     
 	//float manualDownSampleFactor = -1.0f;
 
@@ -250,7 +253,8 @@ private:
 *
 *	You can create subclasses of this component and populate it with some SampleArea objects (you can nest them if desired)
 */
-class AudioDisplayComponent: public ComponentWithMiddleMouseDrag
+class AudioDisplayComponent: public ComponentWithMiddleMouseDrag,
+                             public SettableTooltipClient
 {
 public:
 
@@ -520,6 +524,8 @@ struct MultiChannelAudioBuffer : public ComplexDataUIBase
 		/** Override this function and load the content and process the string to be displayed. */
 		virtual SampleReference::Ptr loadFile(const String& referenceString) = 0;
 
+		virtual File parseFileReference(const String& b64) const = 0;
+
 		/** This directory will be used as default directory when opening files. */
 		virtual File getRootDirectory();
 
@@ -558,6 +564,14 @@ struct MultiChannelAudioBuffer : public ComplexDataUIBase
 		int indexOf(const String& ref) const;
 
 		SampleReference::Ptr loadFile(const String& ref) override;
+
+		File parseFileReference(const String& b64) const override
+		{
+			if(File::isAbsolutePath(b64))
+				return File(b64);
+
+			return File();
+		}
 
 		ReferenceCountedArray<SampleReference> pool;
 	};
@@ -697,7 +711,18 @@ struct MultiChannelAudioBuffer : public ComplexDataUIBase
 
 	void setDisabledXYZProviders(const Array<Identifier>& ids);
 
+	struct ScopedUndoActivator
+	{
+		ScopedUndoActivator(MultiChannelAudioBuffer& parent, bool value=true):
+		  state(parent.useUndoManagerForLoadOperation, value)
+		{}
+
+		ScopedValueSetter<bool> state;
+	};
+
 private:
+
+	bool useUndoManagerForLoadOperation = false;
 
 	Array<Identifier> deactivatedXYZIds;
 
@@ -794,6 +819,13 @@ public:
 
 	virtual void setSpecialLookAndFeel(LookAndFeel* l, bool shouldOwn=false);
 
+	
+
+	void setLoadWithLeftClick(bool newValue)
+	{
+		loadWithLeftClick = newValue;
+	}
+
 	MultiChannelAudioBufferDisplay();
 	virtual ~MultiChannelAudioBufferDisplay();
 
@@ -854,6 +886,7 @@ protected:
 
 	bool over = false;
 
+	bool loadWithLeftClick = false;
 	bool showLoop = false;
 	bool showFileName = true;
 

@@ -140,7 +140,7 @@ void MacroControlledObject::enableMidiLearnWithPopup()
 
 	auto ccName = handler->getCCName();
 
-	if (!isOnHiseModuleUI)
+	if (!isOnHiseModuleUI && getMacroIndex() == -1)
 	{
 		auto addNumbersToMenu = [&](PopupMenu& mToUse)
 		{
@@ -153,21 +153,24 @@ void MacroControlledObject::enableMidiLearnWithPopup()
 			}
 		};
 
-		if(handler->hasSelectedControllerPopupNumbers())
+		auto isUsingCustomModel = getProcessor()->getMainController()->getUserPresetHandler().getNumCustomAutomationData() != 0;
+
+		auto showMidi = !isUsingCustomModel || (isUsingCustomModel && customId.isValid());
+		
+		if(showMidi)
 		{
-			m.addSectionHeader("Assign " + ccName);
-
-			addNumbersToMenu(m);
-		}
-		else
-		{
-			m.addItem(Learn, "Learn " + ccName, true, learningActive);
-
-			PopupMenu s;
-
-			addNumbersToMenu(s);
-
-			m.addSubMenu("Assign " + ccName, s, true);
+			if (handler->hasSelectedControllerPopupNumbers())
+			{
+				m.addSectionHeader("Assign " + ccName);
+				addNumbersToMenu(m);
+			}
+			else
+			{
+				m.addItem(Learn, "Learn " + ccName, true, learningActive);
+				PopupMenu s;
+				addNumbersToMenu(s);
+				m.addSubMenu("Assign " + ccName, s, true);
+			}
 		}
 	}
 
@@ -196,7 +199,19 @@ void MacroControlledObject::enableMidiLearnWithPopup()
 
 	if (macroIndex != -1)
 	{
-		m.addItem(RemoveMacroControl, "Remove Macro control");
+		auto& mm = getProcessor()->getMainController()->getMacroManager();
+		auto macroChain = mm.getMacroChain();
+
+		if (mm.isMacroEnabledOnFrontend())
+		{
+			auto name = macroChain->getMacroControlData(macroIndex)->getMacroName();
+
+			m.addItem(RemoveMacroControl, "Remove " + name);
+		}
+		else
+		{
+			m.addItem(RemoveMacroControl, "Remove Macro control");
+		}
 	}
 	else
 	{
@@ -205,14 +220,38 @@ void MacroControlledObject::enableMidiLearnWithPopup()
 
 		if (mm.isMacroEnabledOnFrontend())
 		{
+			
+
+#if HISE_MACROS_ARE_PLUGIN_PARAMETERS
+			auto title = "Assign Automation";
+#else
+			auto title = "Assign Macro";
+#endif
+
+			PopupMenu sub;
+			auto mToUse = &m;
+
+			static constexpr bool useSubMenu = HISE_NUM_MACROS > 8;
+
+			if constexpr (useSubMenu)
+				mToUse = &sub;
+			else
+				m.addSectionHeader(title);
+				
 			for (int i = 0; i < HISE_NUM_MACROS; i++)
 			{
 				auto name = macroChain->getMacroControlData(i)->getMacroName();
 
 				if (name.isNotEmpty())
 				{
-					m.addItem((int)AddMacroControlOffset + i, "Add to " + name);
+					mToUse->addItem((int)AddMacroControlOffset + i, "Connect to " + name);
 				}
+			}
+
+			if constexpr (useSubMenu)
+			{
+				m.addSeparator();
+				m.addSubMenu(title, sub);
 			}
 		}
 	}
@@ -279,7 +318,7 @@ void MacroControlledObject::enableMidiLearnWithPopup()
 		if (customId.isValid())
 			nameToUse = customId.toString();
 
-		getProcessor()->getMainController()->getMacroManager().getMacroChain()->getMacroControlData(macroIndex)->removeParameter(nameToUse, getProcessor());
+		getProcessor()->getMainController()->getMacroManager().getMacroChain()->getMacroControlData(macroIndex)->removeParameter(nameToUse, getProcessor(), sendNotificationSync);
 		
 		initMacroControl(sendNotification);
 	}
@@ -341,8 +380,19 @@ void MacroControlledObject::setAttributeWithUndo(float newValue, bool useCustomO
 
 void MacroControlledObject::macroConnectionChanged(int macroIndex, Processor* p, int parameterIndex, bool wasAdded)
 {
-	if (getProcessor() == p && parameter == parameterIndex)
+	auto parameterToUse = getAutomationIndex();
+
+	if (getProcessor() == p && parameterToUse == parameterIndex)
 	{
+		auto pd = p->getMainController()->getMainSynthChain()->getMacroControlData(macroIndex)->getParameterWithProcessorAndIndex(p, parameterIndex);
+
+		if(pd != nullptr && pd->isCustomAutomation() != customId.isValid())
+		{
+			// This might happen if you have a control with a custom automation index
+			// that might collide with a normal parameter index...
+			return;
+		}
+
 		if (wasAdded)
 			addToMacroController(macroIndex);
 		else
@@ -358,12 +408,7 @@ void MacroControlledObject::macroConnectionChanged(int macroIndex, Processor* p,
 bool MacroControlledObject::canBeMidiLearned() const
 {
 #if HISE_ENABLE_MIDI_LEARN
-
-	if (processor->getMainController()->getUserPresetHandler().isUsingCustomDataModel())
-	{
-		return customId.isValid() && midiLearnEnabled;
-	}
-
+	
 	return midiLearnEnabled;
 #else
 	return false;
@@ -377,6 +422,12 @@ MacroControlledObject::~MacroControlledObject()
     
 	if (auto p = getProcessor())
 	{
+		if(valueListener != nullptr)
+		{
+			p->removeAttributeListener(valueListener);
+			valueListener = nullptr;
+		}
+
 		p->getMainController()->getMainSynthChain()->removeMacroConnectionListener(this);
 	}
 }
@@ -396,9 +447,22 @@ bool MacroControlledObject::isConnectedToModulator() const
 
 void MacroControlledObject::setup(Processor *p, int parameter_, const String &name_)
 {
+	if(valueListener != nullptr)
+	{
+		p->removeAttributeListener(valueListener);
+		valueListener = nullptr;
+	}
+
 	processor = p;
-	parameter = parameter_;
 	name = name_;
+
+	if(parameter_ != -1)
+	{
+		valueListener = new dispatch::library::ProcessorHandler::AttributeListener(p->getMainController()->getRootDispatcher(), *this, BIND_MEMBER_FUNCTION_2(MacroControlledObject::onAttributeChange));
+		parameter = parameter_;
+		auto a = (uint16)parameter;
+		p->addAttributeListener(valueListener, &a, 1, dispatch::DispatchType::sendNotificationAsync);
+	}
 
 	initMacroControl(dontSendNotification);
 
@@ -416,6 +480,7 @@ void MacroControlledObject::setup(Processor *p, int parameter_, const String &na
 
 	p->getMainController()->getMainSynthChain()->addMacroConnectionListener(this);
 
+    updateValue(sendNotificationSync);
 	
 }
 
@@ -463,7 +528,9 @@ bool  MacroControlledObject::isReadOnly()
 	if (index == -1)
 		return false;
 
-	const MacroControlBroadcaster::MacroControlledParameterData *data = GET_MACROCHAIN()->getMacroControlData(index)->getParameterWithProcessorAndName(getProcessor(), name);
+	auto parameterIndexToUse = getAutomationIndex();
+
+	const MacroControlBroadcaster::MacroControlledParameterData *data = GET_MACROCHAIN()->getMacroControlData(index)->getParameterWithProcessorAndIndex(getProcessor(), parameterIndexToUse);
 
 	if(data == nullptr) return true;
 
@@ -474,9 +541,6 @@ bool  MacroControlledObject::isReadOnly()
 
 bool SliderWithShiftTextBox::onShiftClick(const MouseEvent& e)
 {
-	if (!e.mods.isShiftDown())
-		return false;
-
 	if (asSlider()->getWidth() > 25 && enableShiftTextInput)
 	{
 		asSlider()->addAndMakeVisible(inputLabel = new TextEditor());
@@ -498,9 +562,11 @@ bool SliderWithShiftTextBox::onShiftClick(const MouseEvent& e)
 		inputLabel->setText(asSlider()->getTextFromValue(asSlider()->getValue()), dontSendNotification);
 		inputLabel->selectAll();
 		inputLabel->grabKeyboardFocus();
+        
+        return true;
 	}
 
-	return true;
+    return false;
 }
 
 SliderWithShiftTextBox::~SliderWithShiftTextBox()
@@ -561,11 +627,15 @@ void SliderWithShiftTextBox::textEditorEscapeKeyPressed(TextEditor&)
 void HiSlider::sliderValueChanged(Slider *s)
 {
 	jassert(s == this);
- 
 
+	if(!sendValueOnDrag)
+		return;
+
+	if (callWhenSingleMacro(BIND_MEMBER_FUNCTION_2(HiSlider::changePluginParameter)))
+		return;
+
+#if !HISE_MACROS_ARE_PLUGIN_PARAMETERS
 	const int index = GET_MACROCHAIN()->getMacroControlIndexForProcessorParameter(getProcessor(), parameter);
-
-
     
 	if (index != -1 && !isReadOnly())
 	{
@@ -573,9 +643,8 @@ void HiSlider::sliderValueChanged(Slider *s)
 
 		GET_MACROCHAIN()->setMacroControl(index,v * 127.0f, sendNotification);
 	}
-
-
-    
+#endif
+	
 	if(!checkLearnMode())
 	{
 		if (getSliderStyle() == Slider::TwoValueHorizontal)
@@ -586,7 +655,7 @@ void HiSlider::sliderValueChanged(Slider *s)
 		{
 			modeValues[mode] = s->getValue();
 
-			getProcessor()->setAttribute(parameter, (float)s->getValue(), dontSendNotification);
+			getProcessor()->setAttribute(parameter, (float)s->getValue(), sendNotificationAsync);
 		}
 	}
 }
@@ -596,6 +665,12 @@ void HiSlider::sliderValueChanged(Slider *s)
 
 void HiSlider::sliderDragStarted(Slider* s)
 {
+	callWhenSingleMacro([](AudioProcessor* p, int parameterIndex)
+	{
+		p->beginParameterChangeGesture(parameterIndex);
+		return false;
+	});
+	
 	dragStartValue = s->getValue();
 
 	Point<int> o;
@@ -605,13 +680,52 @@ void HiSlider::sliderDragStarted(Slider* s)
 
 void HiSlider::sliderDragEnded(Slider* s)
 {
+	callWhenSingleMacro([](AudioProcessor* p, int parameterIndex)
+	{
+		p->endParameterChangeGesture(parameterIndex);
+		return false;
+	});
+
 	abortTouch();
 	setAttributeWithUndo((float)s->getValue(), true, (float)dragStartValue);
 }
 
+bool HiSlider::changePluginParameter(AudioProcessor* p, int parameterIndex)
+{
+	auto value = getValue();
+	auto pd = dynamic_cast<MainController*>(p)->getMainSynthChain()->getMacroControlData(parameterIndex)->getParameter(0);
+
+	jassert(pd != nullptr);
+
+	value = pd->getParameterRange().convertTo0to1(value);
+
+	p->setParameterNotifyingHost(parameterIndex, (float)value);
+	return true;
+}
+
+bool HiSlider::callWhenSingleMacro(const std::function<bool(AudioProcessor* p, int parameterIndex)>& f)
+{
+#if HISE_MACROS_ARE_PLUGIN_PARAMETERS
+	if (getMacroIndex() != -1)
+	{
+		auto mc = getProcessor()->getMainController();
+		auto md = mc->getMainSynthChain()->getMacroControlData(getMacroIndex());
+
+		if (md->getNumParameters() == 1)
+		{
+			return f(dynamic_cast<AudioProcessor*>(mc), getMacroIndex());
+		}
+	}
+#endif
+
+	return false;
+}
+
 void HiSlider::updateValue(NotificationType /*sendAttributeChange*/)
 {
-
+	if(getProcessor() == nullptr)
+		return;
+	
 	const bool enabled = !isLocked();
 
 	setEnabled(enabled);
@@ -652,7 +766,8 @@ void HiSlider::setup(Processor *p, int parameterIndex, const String &parameterNa
 		modeValues[i] = 0.0;
 	}
 
-	setDoubleClickReturnValue(true, (double)p->getDefaultValue(parameterIndex));
+	if(parameterIndex != -1)
+		setDoubleClickReturnValue(true, (double)p->getDefaultValue(parameterIndex), ModifierKeys());
 
 	setName(parameterName);
 }
@@ -820,35 +935,31 @@ double HiSlider::getFrequencyFromTextString(const String& t)
 		return t.getDoubleValue();
 }
 
+void HiSlider::mouseDoubleClick(const MouseEvent &e)
+{
+    performModifierAction(e, true);
+}
 
 void HiSlider::mouseDown(const MouseEvent &e)
 {
 	CHECK_MIDDLE_MOUSE_DOWN(e);
 
-	if (e.mods.isLeftButtonDown() && !e.mods.isCtrlDown())
-	{
-		if (onShiftClick(e))
-		{
-			return;
-		}
-		else
-		{
-			PresetHandler::setChanged(getProcessor());
+    if(performModifierAction(e, false))
+    {
+        return;
+    }
+    else
+    {
+        PresetHandler::setChanged(getProcessor());
 
-			checkLearnMode();
+        checkLearnMode();
 
-			if (!isConnectedToModulator())
-			{
-				Slider::mouseDown(e);
-				startTouch(e.getMouseDownPosition());
-			}
-		}
-		
-	}
-	else
-	{
-		enableMidiLearnWithPopup();
-	}
+        if (!isConnectedToModulator())
+        {
+            Slider::mouseDown(e);
+            startTouch(e.getMouseDownPosition());
+        }
+    }
 }
 
 void HiSlider::mouseDrag(const MouseEvent& e)
@@ -881,6 +992,11 @@ void HiSlider::touchAndHold(Point<int> /*downPosition*/)
 
 void HiSlider::onTextValueChange(double newValue)
 {
+	setValue(newValue, dontSendNotification);
+
+	if (callWhenSingleMacro(BIND_MEMBER_FUNCTION_2(HiSlider::changePluginParameter)))
+		return;
+
 	setAttributeWithUndo((float)newValue);
 }
 
@@ -946,6 +1062,8 @@ void HiSlider::setMode(Mode m, double min, double max, double mid, double stepSi
 	{
 		setModeRange(min, max, mid, stepSize);
 	}
+    
+    updateValue(sendNotificationSync);
 }
 
 HiSlider::Mode HiSlider::getMode() const
@@ -1053,7 +1171,7 @@ void HiToggleButton::mouseUp(const MouseEvent& e)
 }
 
 HiComboBox::HiComboBox(const String& name):
-	ComboBox(name),
+	SubmenuComboBox(name),
 	MacroControlledObject()
 {
 	addChildComponent(numberTag);
@@ -1332,6 +1450,17 @@ void HiToggleButton::buttonClicked(Button *b)
 		{
 			numberTag->setNumber(newMacroIndex+1);
 			numberTag->setVisible(true);
+            
+            if(auto asComponent = dynamic_cast<Component*>(this))
+            {
+#define SET_COLOUR(x) numberTag->setColour(x, asComponent->findColour(x));
+                SET_COLOUR(HiseColourScheme::ComponentOutlineColourId);
+                SET_COLOUR(HiseColourScheme::ComponentFillTopColourId);
+                SET_COLOUR(HiseColourScheme::ComponentFillBottomColourId);
+                SET_COLOUR(HiseColourScheme::ComponentTextColourId);
+#undef SET_COLOUR
+            }
+            
 			macroIndex = newMacroIndex;
 		}
 	}
@@ -1359,6 +1488,19 @@ void HiToggleButton::buttonClicked(Button *b)
 		modulationData = modData;
 	}
 
+	void MacroControlledObject::onAttributeChange(dispatch::library::Processor* p, uint8 index)
+	{
+#if HISE_NEW_PROCESSOR_DISPATCH
+		if(&p->getOwner<hise::Processor>() == getProcessor())
+		{
+			if(index == getParameter())
+			{
+				updateValue(sendNotificationSync);
+			}
+		}
+#endif
+	}
+
 	Processor* MacroControlledObject::getProcessor()
 	{return processor.get(); }
 
@@ -1378,7 +1520,7 @@ bool MacroControlledObject::UndoableControlEvent::perform()
 {
 	if (processor.get() != nullptr)
 	{
-		processor->setAttribute(parameterIndex, newValue, sendNotification);
+		processor->setAttribute(parameterIndex, newValue, sendNotificationAsync);
 		return true;
 	}
 	else return false;
@@ -1388,7 +1530,7 @@ bool MacroControlledObject::UndoableControlEvent::undo()
 {
 	if (processor.get() != nullptr)
 	{
-		processor->setAttribute(parameterIndex, oldValue, sendNotification);
+		processor->setAttribute(parameterIndex, oldValue, sendNotificationAsync);
 		return true;
 	}
 	else return false;

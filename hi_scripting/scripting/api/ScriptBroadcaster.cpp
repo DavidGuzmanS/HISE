@@ -883,6 +883,8 @@ Result ScriptBroadcaster::ScriptTarget::callSync(const Array<var>& args)
 	}
 #endif
 
+	TERMINATE_BROADCASTER_TRACK("");
+	
 	auto a = var::NativeFunctionArgs(obj, args.getRawDataPointer(), args.size());
 	return callback.callSync(a, nullptr);
 }
@@ -898,7 +900,10 @@ ScriptBroadcaster::DelayedItem::DelayedItem(ScriptBroadcaster* bc, const var& ob
 
 Result ScriptBroadcaster::DelayedItem::callSync(const Array<var>& args)
 {
+	CONTINUE_BROADCASTER_TRACK("");
+
 	delayedFunction = new DelayedFunction(parent, f, parent->lastValues, ms, obj);
+	delayedFunction->trackIndex = pendingTrack;
 	return Result::ok();
 }
 
@@ -1008,10 +1013,25 @@ juce::Result ScriptBroadcaster::EqListener::callItem(TargetBase* b)
 	return Result::ok();
 }
 
-struct ScriptBroadcaster::ModuleParameterListener::ProcessorListener : public SafeChangeListener,
+
+
+
+
+
+#if HISE_NEW_PROCESSOR_DISPATCH
+struct ScriptBroadcaster::ModuleParameterListener::ProcessorListener : public hise::Processor::AttributeListener,
+#else
+struct ScriptBroadcaster::ModuleParameterListener::ProcessorListener : public hise::Processor::OtherListener,
+#endif
 																	   public hise::Processor::BypassListener
 {
-	ProcessorListener(ScriptBroadcaster* sb_, Processor* p_, const Array<int>& parameterIndexes_, const Identifier& specialId_, bool useIntegerArgs) :
+	ProcessorListener(ScriptBroadcaster* sb_, Processor* p_, const Array<uint16>& parameterIndexes_, const Identifier& specialId_, bool useIntegerArgs) :
+	    BypassListener(p_->getMainController()->getRootDispatcher()),
+#if HISE_NEW_PROCESSOR_DISPATCH
+		AttributeListener(p_->getMainController()->getRootDispatcher()),
+#else
+	    OtherListener(p_, dispatch::library::ProcessorChangeEvent::Any),
+#endif
 		parameterIndexes(parameterIndexes_),
 		p(p_),
 		sb(sb_),
@@ -1032,8 +1052,9 @@ struct ScriptBroadcaster::ModuleParameterListener::ProcessorListener : public Sa
 		args.add(0);
 		args.add(0.0f);
 
-		if(!parameterIndexes.isEmpty())
-			p->addChangeListener(this);
+		auto data = parameterIndexes_.getRawDataPointer();
+		auto num = parameterIndexes_.size();
+		NEW_PROCESSOR_DISPATCH(addToProcessor(p, data, num, dispatch::DispatchType::sendNotificationAsyncHiPriority));
 
 		if (specialId.isValid())
 		{
@@ -1046,12 +1067,60 @@ struct ScriptBroadcaster::ModuleParameterListener::ProcessorListener : public Sa
             }
             else
             {
-                p->addBypassListener(this);
+                p->addBypassListener(this, dispatch::sendNotificationAsyncHiPriority);
                 bypassIdAsVar = var(specialId.toString());
             }
 		}
 	}
-    
+
+#if HISE_NEW_PROCESSOR_DISPATCH
+	void onAttributeUpdate(Processor* p, uint16 index) override
+	{
+		auto i = parameterIndexes.indexOf((int)index);
+
+		auto newValue = p->getAttribute(index);
+
+		if (lastValues[i] != newValue)
+		{
+			lastValues.set(i, newValue);
+
+			var id = parameterNames[i];
+
+			if (useIntegerIndexesAsArgument)
+			{
+				jassert(id.isInt());
+			}
+
+			sendParameterChange(id, newValue);
+		}
+	}
+#else
+	void otherChange(Processor *b) override
+	{
+		if (p == nullptr)
+			return;
+
+		for (int i = 0; i < parameterIndexes.size(); i++)
+		{
+			auto newValue = p->getAttribute(parameterIndexes[i]);
+
+			if (lastValues[i] != newValue)
+			{
+				lastValues.set(i, newValue);
+
+				var id = parameterNames[i];
+
+				if (useIntegerIndexesAsArgument)
+				{
+					jassert(id.isInt());
+				}
+
+				sendParameterChange(id, newValue);
+			}
+		}
+	}
+#endif
+
     static void intensityChanged(ProcessorListener& m, float newValue)
     {
         static const var ip("Intensity");
@@ -1086,38 +1155,16 @@ struct ScriptBroadcaster::ModuleParameterListener::ProcessorListener : public Sa
 
 	~ProcessorListener()
 	{
+		NEW_PROCESSOR_DISPATCH(removeFromProcessor());
+
 		if (p != nullptr)
 		{
-			p->removeChangeListener(this);
 			p->removeBypassListener(this);
 		}
 	}
 
-	void changeListenerCallback(SafeChangeBroadcaster *b) override
-	{
-		if (p == nullptr)
-			return;
 
-		for (int i = 0; i < parameterIndexes.size(); i++)
-		{
-			
-			auto newValue = p->getAttribute(parameterIndexes[i]);
-
-			if (lastValues[i] != newValue)
-			{
-				lastValues.set(i, newValue);
-
-				var id = parameterNames[i];
-
-				if (useIntegerIndexesAsArgument)
-				{
-					jassert(id.isInt());
-				}
-
-				sendParameterChange(id, newValue);
-			}
-		}
-	}
+	
 
 	Array<var> args;
 
@@ -1125,7 +1172,7 @@ struct ScriptBroadcaster::ModuleParameterListener::ProcessorListener : public Sa
 	WeakReference<Processor> p;
 	Array<float> lastValues;
 	Array<var> parameterNames;
-	const Array<int> parameterIndexes;
+	const Array<uint16> parameterIndexes;
 	Identifier specialId;
 	var bypassIdAsVar;
 
@@ -1134,7 +1181,7 @@ struct ScriptBroadcaster::ModuleParameterListener::ProcessorListener : public Sa
     JUCE_DECLARE_WEAK_REFERENCEABLE(ProcessorListener);
 };
 
-ScriptBroadcaster::ModuleParameterListener::ModuleParameterListener(ScriptBroadcaster* b, const Array<WeakReference<Processor>>& processors, const Array<int>& parameterIndexes, const var& metadata, const Identifier& specialId, bool useIntegerParameters):
+ScriptBroadcaster::ModuleParameterListener::ModuleParameterListener(ScriptBroadcaster* b, const Array<WeakReference<Processor>>& processors, const Array<uint16>& parameterIndexes, const var& metadata, const Identifier& specialId, bool useIntegerParameters):
 	ListenerBase(metadata)
 {
 	for (auto& p : processors)
@@ -2515,6 +2562,8 @@ Array<var> ScriptBroadcaster::ComponentPropertyItem::createChildArray() const
 
 juce::Result ScriptBroadcaster::ComponentPropertyItem::callSync(const Array<var>& args)
 {
+	TERMINATE_BROADCASTER_TRACK("");
+
 	auto r = Result::ok();
 	
 	if (!enabled)
@@ -2857,6 +2906,7 @@ ScriptBroadcaster::ScriptBroadcaster(ProcessorWithScriptingContent* p, const var
 	ADD_API_METHOD_0(removeAllSources);
 	ADD_API_METHOD_0(reset);
 	ADD_API_METHOD_2(sendMessage);
+	ADD_API_METHOD_2(sendMessageWithDelay);
 	ADD_API_METHOD_1(sendAsyncMessage);
 	ADD_API_METHOD_1(sendSyncMessage);
 	ADD_API_METHOD_3(attachToComponentProperties);
@@ -2929,6 +2979,7 @@ ScriptBroadcaster::ScriptBroadcaster(ProcessorWithScriptingContent* p, const var
 	k.add(defaultValues);
 	keepers = var(k);
 
+	auto parentId = dynamic_cast<Processor*>(p)->getIDAsIdentifier();
 	setWantsCurrentLocation(true);
 }
 
@@ -3257,7 +3308,12 @@ void ScriptBroadcaster::sendMessageInternal(var args, bool isSync)
 		}
 
 		if (bypassed)
+		{
+			dispatch::StringBuilder b;
+			b << metadata.id << "::sendMessage (bypassed)";
+			TRACE_EVENT("dispatch", DYNAMIC_STRING_BUILDER(b));
 			return;
+		}
 
 		if (isSync)
 		{
@@ -3270,6 +3326,14 @@ void ScriptBroadcaster::sendMessageInternal(var args, bool isSync)
 		{
 			if (!asyncPending.load() || enableQueue)
 			{
+				TRACE_EVENT("dispatch", "Broadcaster::sendMessage");
+
+				for(auto i: items)
+				{
+					ignoreUnused(i);
+					OPEN_BROADCASTER_TRACK(i, getScriptProcessor()->getMainController_()->getRootDispatcher());
+				}
+
 				WeakReference<ScriptBroadcaster> safeThis(this);
 
 				auto& pool = getScriptProcessor()->getMainController_()->getJavascriptThreadPool();
@@ -3319,20 +3383,32 @@ ScriptBroadcaster::DelayedFunction::DelayedFunction(ScriptBroadcaster* b, var f,
 	if (thisObj.isObject() && thisObj.getObject() != b)
 		c.setThisObjectRefCounted(thisObj);
 
+	c.addAsSource(b, "delayedFunction");
+	
 	startTimer(milliSeconds);
 }
 
 ScriptBroadcaster::DelayedFunction::~DelayedFunction()
 {
+	ScopedValueSetter<bool> svs(busy, true);
 	stopTimer();
 }
 
 void ScriptBroadcaster::DelayedFunction::timerCallback()
 {
+	if(busy)
+	{
+		return;
+	}
+
 	if (bc != nullptr && !bc->bypassed)
 	{
+        auto mc = bc->getScriptProcessor()->getMainController_();
+        
+        jassert(!mc->getRootDispatcher().isHighPriorityFlushPending());
+        
 		ScopedLock sl(bc->delayFunctionLock);
-
+		c.setTrackIndex(trackIndex);
 		c.call(args.getRawDataPointer(), args.size());
 	}
 				
@@ -3475,6 +3551,8 @@ void ScriptBroadcaster::attachToComponentMouseEvents(var componentIds, var callb
 
 	auto cLevel = (MouseCallbackComponent::CallbackLevel)clValue;
 
+	forceSend = true;
+
 	attachedListeners.add(new MouseEventListener(this, componentIds, cLevel, optionalMetadata));
 	checkMetadataAndCallWithInitValues(attachedListeners.getLast());
 }
@@ -3555,7 +3633,7 @@ void ScriptBroadcaster::attachToModuleParameter(var moduleIds, var parameterIds,
 	}
 
 	
-	Array<int> parameterIndexes;
+	Array<uint16> parameterIndexes;
 
     Identifier specialId;
 
@@ -4063,6 +4141,8 @@ void ScriptBroadcaster::handleDebugStuff()
 
 Result ScriptBroadcaster::sendInternal(const Array<var>& args)
 {
+	TRACE_EVENT("dispatch", "Broadcaster.callListeners");
+
 	{
 		SimpleReadWriteLock::ScopedReadLock v(lastValueLock);
 
@@ -4271,6 +4351,11 @@ ScriptBroadcaster::Metadata::Metadata(const var& obj, bool mustBeValid) :
 
 	if (idString.isNotEmpty())
 		id = Identifier(idString);
+
+	if(obj.hasProperty("visible"))
+		visible = (bool)obj["visible"];
+	else
+		visible = true;
 
 	hash = idString.hashCode64();
 

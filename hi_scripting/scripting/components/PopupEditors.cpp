@@ -104,8 +104,11 @@ PopupIncludeEditor::PopupIncludeEditor(JavascriptProcessor *s, const File &fileT
 	callback(Identifier()),
 	tokeniser(new JavascriptTokeniser())
 {
+	tokeniser->setUseScopeStatements(true);
+	
+
 	Processor *p = dynamic_cast<Processor*>(jp.get());
-	externalFile = p->getMainController()->getExternalScriptFile(fileToEdit);
+	externalFile = p->getMainController()->getExternalScriptFile(fileToEdit, true);
 
     p->getMainController()->addScriptListener(this);
     
@@ -143,6 +146,7 @@ PopupIncludeEditor::PopupIncludeEditor(JavascriptProcessor* s, const Identifier 
 	callback(callback_),
 	tokeniser(new JavascriptTokeniser())
 {
+	tokeniser->setUseScopeStatements(true);
 	
 	auto& d = *jp->getSnippet(callback_);
 	addEditor(d, true);
@@ -167,17 +171,27 @@ struct JavascriptLanguageManager : public mcl::LanguageManager
 
 	CodeTokeniser* createCodeTokeniser() override 
 	{
-        
-        
-		return new JavascriptTokeniser();
+        auto js = new JavascriptTokeniser();
+		js->setUseScopeStatements(true);
+		return js;
 	}
 
-    
+    Identifier getLanguageId() const override { return mcl::LanguageIds::HiseScript; }
     
     bool getInplaceDebugValues(Array<InplaceDebugValue>& values) const override
     {
-		values.addArray(jp->inplaceValues);
-        
+		auto sn = jp->getSnippet(callback);
+		
+		for(auto& ip: jp->inplaceValues)
+		{
+			ip.init();
+
+			if(ip.location.getOwner() == sn)
+			{
+				values.add(ip);
+			}
+		}
+
         return true;
     }
     
@@ -214,9 +228,17 @@ struct GLSLLanguageManager : public mcl::LanguageManager
 		
 	}
 
+	Identifier getLanguageId() const override { return mcl::LanguageIds::GLSL; }
+
 	void addTokenProviders(mcl::TokenCollection* t)
 	{
 		t->addTokenProvider(new GLSLKeywordProvider());
+	}
+
+	void setupEditor(mcl::TextEditor* e) override
+	{
+		e->tokenCollection = new mcl::TokenCollection(getLanguageId());
+		addTokenProviders(e->tokenCollection.get());
 	}
 };
 
@@ -363,7 +385,8 @@ void PopupIncludeEditor::runTimeErrorsOccured(PopupIncludeEditor& t, Array<Exter
 				if (matchesFile)
 					asmcl->editor.addWarning(e.toString(), false);
 
-				t.bottomBar->setError("GLSL Compile Error");
+				if(t.bottomBar != nullptr)
+					t.bottomBar->setError("GLSL Compile Error");
 			}
 		}
 
@@ -467,15 +490,29 @@ File PopupIncludeEditor::getFile() const
 
 void PopupIncludeEditor::compileInternal()
 {
-    
-    
 	if (externalFile != nullptr)
 	{
-		externalFile->getFile().replaceWithText(externalFile->getFileDocument().getAllContent());
-		externalFile->getFileDocument().setSavePoint();
+		if(externalFile->getResourceType() == ExternalScriptFile::ResourceType::EmbeddedInSnippet)
+		{
+			debugToConsole(dynamic_cast<Processor*>(getScriptProcessor()), "Skip writing embedded file " + externalFile->getFile().getFileName() + " to disk...");
+		}
+		else
+		{
+            externalFile->saveFile();
+		}
 	}
 
-	jp->compileScript(BIND_MEMBER_FUNCTION_1(PopupIncludeEditor::refreshAfterCompilation));
+    Component::SafePointer<PopupIncludeEditor> safeP(this);
+    
+    auto f = [safeP](const JavascriptProcessor::SnippetResult& r)
+    {
+        if(safeP.getComponent() != nullptr)
+        {
+            safeP->refreshAfterCompilation(r);
+        }
+    };
+    
+	jp->compileScript(f);
 
 	if (auto asmcl = dynamic_cast<mcl::TextEditor*>(editor.get()))
 	{

@@ -89,7 +89,7 @@ JavascriptMidiProcessor::~JavascriptMidiProcessor()
 
 Path JavascriptMidiProcessor::getSpecialSymbol() const
 {
-	Path path; path.loadPathFromData(HiBinaryData::SpecialSymbols::scriptProcessor, sizeof(HiBinaryData::SpecialSymbols::scriptProcessor)); return path;
+	Path path; path.loadPathFromData(HiBinaryData::SpecialSymbols::scriptProcessor, SIZE_OF_PATH(HiBinaryData::SpecialSymbols::scriptProcessor)); return path;
 }
 
 void JavascriptMidiProcessor::suspendStateChanged(bool shouldBeSuspended)
@@ -267,6 +267,7 @@ void JavascriptMidiProcessor::registerApiClasses()
 	scriptEngine->registerApiClass(engineObject.get());
 	scriptEngine->registerApiClass(new ScriptingApi::Settings(this));
 	scriptEngine->registerApiClass(new ScriptingApi::FileSystem(this));
+	scriptEngine->registerApiClass(new ScriptingApi::Threads(this));
 	scriptEngine->registerApiClass(new ScriptingApi::Date(this));
 
 	scriptEngine->registerApiClass(serverObject = new ScriptingApi::Server(this));
@@ -418,7 +419,7 @@ void JavascriptMidiProcessor::runTimerCallback(int /*offsetInBuffer*//*=-1*/)
 
 	if (isDeferred())
 	{
-		sendSynchronousChangeMessage();
+		sendOtherChangeMessage(dispatch::library::ProcessorChangeEvent::OtherUnused, dispatch::sendNotificationSync);
 	}
 
 	BACKEND_ONLY(if (!lastResult.wasOk()) debugError(this, lastResult.getErrorMessage()));
@@ -488,7 +489,7 @@ JavascriptPolyphonicEffect::~JavascriptPolyphonicEffect()
 
 juce::Path JavascriptPolyphonicEffect::getSpecialSymbol() const
 {
-	Path path; path.loadPathFromData(HiBinaryData::SpecialSymbols::scriptProcessor, sizeof(HiBinaryData::SpecialSymbols::scriptProcessor)); return path;
+	Path path; path.loadPathFromData(HiBinaryData::SpecialSymbols::scriptProcessor, SIZE_OF_PATH(HiBinaryData::SpecialSymbols::scriptProcessor)); return path;
 }
 
 hise::ProcessorEditorBody * JavascriptPolyphonicEffect::createEditor(ProcessorEditor *parentEditor)
@@ -547,6 +548,7 @@ void JavascriptPolyphonicEffect::registerApiClasses()
 
 	scriptEngine->registerApiClass(new ScriptingApi::Settings(this));
 	scriptEngine->registerApiClass(new ScriptingApi::FileSystem(this));
+	scriptEngine->registerApiClass(new ScriptingApi::Threads(this));
 
 	scriptEngine->registerNativeObject("Libraries", new DspFactory::LibraryLoader(this));
 	scriptEngine->registerNativeObject("Buffer", new VariantBuffer::Factory(64));
@@ -706,7 +708,7 @@ JavascriptMasterEffect::~JavascriptMasterEffect()
 
 Path JavascriptMasterEffect::getSpecialSymbol() const
 {
-	Path path; path.loadPathFromData(HiBinaryData::SpecialSymbols::scriptProcessor, sizeof(HiBinaryData::SpecialSymbols::scriptProcessor)); return path;
+	Path path; path.loadPathFromData(HiBinaryData::SpecialSymbols::scriptProcessor, SIZE_OF_PATH(HiBinaryData::SpecialSymbols::scriptProcessor)); return path;
 }
 
 void JavascriptMasterEffect::connectionChanged()
@@ -833,6 +835,7 @@ void JavascriptMasterEffect::registerApiClasses()
 
 	scriptEngine->registerApiClass(new ScriptingApi::Settings(this));
 	scriptEngine->registerApiClass(new ScriptingApi::FileSystem(this));
+	scriptEngine->registerApiClass(new ScriptingApi::Threads(this));
 
 	scriptEngine->registerNativeObject("Libraries", new DspFactory::LibraryLoader(this));
 	scriptEngine->registerNativeObject("Buffer", new VariantBuffer::Factory(64));
@@ -905,7 +908,17 @@ void JavascriptMasterEffect::renderWholeBuffer(AudioSampleBuffer &buffer)
 	{
 		if (getActiveNetwork() != nullptr)
 		{
-			getActiveNetwork()->process(buffer, eventBuffer);
+			auto numChannels = channelIndexes.size();
+			auto numSamples = buffer.getNumSamples();
+
+			auto data = (float**)alloca(numChannels * sizeof(float*));
+
+			for(int i = 0; i < numChannels; i++)
+				data[i] = buffer.getWritePointer(channelIndexes[i]);
+
+			ProcessDataDyn pd(data, numSamples, numChannels);
+			pd.setEventBuffer(*eventBuffer);
+			getActiveNetwork()->process(pd);
 			return;
 		}
 
@@ -1018,7 +1031,7 @@ JavascriptVoiceStartModulator::~JavascriptVoiceStartModulator()
 
 Path JavascriptVoiceStartModulator::getSpecialSymbol() const
 {
-	Path path; path.loadPathFromData(HiBinaryData::SpecialSymbols::scriptProcessor, sizeof(HiBinaryData::SpecialSymbols::scriptProcessor)); return path;
+	Path path; path.loadPathFromData(HiBinaryData::SpecialSymbols::scriptProcessor, SIZE_OF_PATH(HiBinaryData::SpecialSymbols::scriptProcessor)); return path;
 }
 
 ProcessorEditorBody * JavascriptVoiceStartModulator::createEditor(ProcessorEditor *parentEditor)
@@ -1173,7 +1186,7 @@ JavascriptTimeVariantModulator::~JavascriptTimeVariantModulator()
 
 Path JavascriptTimeVariantModulator::getSpecialSymbol() const
 {
-	Path path; path.loadPathFromData(HiBinaryData::SpecialSymbols::scriptProcessor, sizeof(HiBinaryData::SpecialSymbols::scriptProcessor)); return path;
+	Path path; path.loadPathFromData(HiBinaryData::SpecialSymbols::scriptProcessor, SIZE_OF_PATH(HiBinaryData::SpecialSymbols::scriptProcessor)); return path;
 }
 
 float JavascriptTimeVariantModulator::getAttribute(int index) const
@@ -1416,7 +1429,7 @@ JavascriptEnvelopeModulator::~JavascriptEnvelopeModulator()
 
 Path JavascriptEnvelopeModulator::getSpecialSymbol() const
 {
-	Path path; path.loadPathFromData(HiBinaryData::SpecialSymbols::scriptProcessor, sizeof(HiBinaryData::SpecialSymbols::scriptProcessor)); return path;
+	Path path; path.loadPathFromData(HiBinaryData::SpecialSymbols::scriptProcessor, SIZE_OF_PATH(HiBinaryData::SpecialSymbols::scriptProcessor)); return path;
 }
 
 bool JavascriptEnvelopeModulator::isPolyphonic() const
@@ -1678,6 +1691,7 @@ void JavascriptEnvelopeModulator::registerApiClasses()
 	scriptEngine->registerApiClass(new ScriptingApi::ModulatorApi(this));
 	scriptEngine->registerApiClass(new ScriptingApi::Settings(this));
 	scriptEngine->registerApiClass(new ScriptingApi::FileSystem(this));
+	scriptEngine->registerApiClass(new ScriptingApi::Threads(this));
 
 	scriptEngine->registerApiClass(synthObject);
 
@@ -1734,7 +1748,7 @@ JavascriptSynthesiser::~JavascriptSynthesiser()
 
 juce::Path JavascriptSynthesiser::getSpecialSymbol() const
 {
-	Path path; path.loadPathFromData(HiBinaryData::SpecialSymbols::scriptProcessor, sizeof(HiBinaryData::SpecialSymbols::scriptProcessor)); return path;
+	Path path; path.loadPathFromData(HiBinaryData::SpecialSymbols::scriptProcessor, SIZE_OF_PATH(HiBinaryData::SpecialSymbols::scriptProcessor)); return path;
 }
 
 hise::ProcessorEditorBody * JavascriptSynthesiser::createEditor(ProcessorEditor *parentEditor)
@@ -1793,6 +1807,7 @@ void JavascriptSynthesiser::registerApiClasses()
 
 	scriptEngine->registerApiClass(new ScriptingApi::Settings(this));
 	scriptEngine->registerApiClass(new ScriptingApi::FileSystem(this));
+	scriptEngine->registerApiClass(new ScriptingApi::Threads(this));
 
 	scriptEngine->registerNativeObject("Libraries", new DspFactory::LibraryLoader(this));
 	scriptEngine->registerNativeObject("Buffer", new VariantBuffer::Factory(64));

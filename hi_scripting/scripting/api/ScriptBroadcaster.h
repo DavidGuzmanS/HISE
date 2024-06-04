@@ -37,7 +37,21 @@ namespace hise { using namespace juce;
 namespace ScriptingObjects
 {
 
+#if PERFETTO
+#define OPEN_BROADCASTER_TRACK(item, root){ dispatch::StringBuilder b; b << metadata.id << ": call " << i->metadata.id; \
+											item->pendingTrack = root.bumpFlowCounter(); \
+											TRACE_EVENT("dispatch", DYNAMIC_STRING_BUILDER(b), perfetto::Flow::ProcessScoped(item->pendingTrack)); }
 
+#define TERMINATE_BROADCASTER_TRACK(x) dispatch::StringBuilder n; n << metadata.id << "(" << getItemId() << ")" << x; \
+			TRACE_EVENT("dispatch", DYNAMIC_STRING_BUILDER(n), perfetto::TerminatingFlow::ProcessScoped(pendingTrack)); 
+
+#define CONTINUE_BROADCASTER_TRACK(x) dispatch::StringBuilder n; n << metadata.id << "(" << getItemId() << ")" << x; \
+			TRACE_EVENT("dispatch", DYNAMIC_STRING_BUILDER(n), perfetto::Flow::ProcessScoped(pendingTrack));
+#else
+#define OPEN_BROADCASTER_TRACK(item, root);
+#define TERMINATE_BROADCASTER_TRACK(x); 
+#define CONTINUE_BROADCASTER_TRACK(x);
+#endif
 
 struct ScriptBroadcaster :  public ConstScriptingObject,
 							public WeakCallbackHolder::CallableObject,
@@ -69,6 +83,7 @@ struct ScriptBroadcaster :  public ConstScriptingObject,
 		Colour c;
 		int priority = 0;
 		Array<Identifier> tags;
+		bool visible;
 	};
 
 	ScriptBroadcaster(ProcessorWithScriptingContent* p, const var& defaultValue);;
@@ -247,6 +262,9 @@ private:
 		Array<var> args;
 		WeakCallbackHolder c;
 		WeakReference<ScriptBroadcaster> bc;
+		uint64_t trackIndex = 0;
+
+		bool busy = false;
 	};
 
 	CriticalSection delayFunctionLock;
@@ -321,6 +339,8 @@ private:
 		var obj;
 		bool enabled = true;
 		DebugableObjectBase::Location location;
+
+		uint64_t pendingTrack = 0;
 
 		JUCE_DECLARE_WEAK_REFERENCEABLE(TargetBase);
 	};
@@ -483,7 +503,7 @@ private:
 	{
 		struct ProcessorListener;
 
-		ModuleParameterListener(ScriptBroadcaster* b, const Array<WeakReference<Processor>>& processors, const Array<int>& parameterIndexes, const var& metadata, const Identifier& specialId, bool useIntegerParameters);
+		ModuleParameterListener(ScriptBroadcaster* b, const Array<WeakReference<Processor>>& processors, const Array<uint16>& parameterIndexes, const var& metadata, const Identifier& specialId, bool useIntegerParameters);
 
 		Identifier getItemId() const override;
 

@@ -46,13 +46,13 @@ namespace envelope
 
 namespace pimpl
 {
-template <typename ParameterType> struct envelope_base: public control::pimpl::parameter_node_base<ParameterType>
+template <typename ParameterType> struct envelope_base: public control::pimpl::parameter_node_base<ParameterType>,
+														public polyphonic_base
 {
-    envelope_base(const Identifier& id): control::pimpl::parameter_node_base<ParameterType>(id)
-	{
-		cppgen::CustomNodeProperties::addNodeIdManually(id, PropertyIds::IsPolyphonic);
-		cppgen::CustomNodeProperties::addNodeIdManually(id, PropertyIds::IsProcessingHiseEvent);
-	}
+    envelope_base(const Identifier& id):
+	  control::pimpl::parameter_node_base<ParameterType>(id),
+	  polyphonic_base(id, true)
+	{}
 
 	virtual ~envelope_base() {};
 
@@ -563,12 +563,12 @@ template <int NV, typename ParameterType> struct simple_ar: public pimpl::envelo
 		auto& s = states.get();
 
 		auto thisActive = s.active;
-		auto thisValue = s.lastValue;
+		auto& thisValue = s.lastValue;
 
-		auto modValue = s.tick();
+        thisValue = s.tick();
 
 		for (auto& v : d)
-			v *= modValue;
+			v *= thisValue;
 
 		this->postProcess(*this, thisActive, thisValue);
 	}
@@ -578,12 +578,16 @@ template <int NV, typename ParameterType> struct simple_ar: public pimpl::envelo
 		auto& s = states.get();
 
 		auto thisActive = s.active;
-		auto thisValue = s.lastValue;
+		auto& thisValue = s.lastValue;
 
 		if (d.getNumChannels() == 1)
 		{
 			for (auto& v : d[0])
-				v *= s.tick();
+            {
+                thisValue = s.tick();
+                v *= thisValue;
+            }
+
 		}
 		else
 		{
@@ -591,9 +595,9 @@ template <int NV, typename ParameterType> struct simple_ar: public pimpl::envelo
 
 			while (fd.next())
 			{
-				auto modValue = s.tick();
+				auto thisValue = s.tick();
 				for (auto& v : fd)
-					v *= modValue;
+					v *= thisValue;
 			}
 		}
 

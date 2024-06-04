@@ -98,6 +98,97 @@ StringArray ApiHelpers::getJustificationNames()
 	return sa;
 }
 
+KeyPress ApiHelpers::getKeyPress(const var& keyPressInformation, Result* r)
+{
+	if(keyPressInformation.isString())
+	{
+		auto x = KeyPress::createFromDescription(keyPressInformation.toString());
+
+		if(x == KeyPress() && r != nullptr)
+			*r = Result::fail("not a valid key press");
+
+		return x;
+	}
+	else if (auto dyn = keyPressInformation.getDynamicObject())
+	{
+		int mods = 0;
+
+		if(keyPressInformation["shift"])
+			mods |= ModifierKeys::shiftModifier;
+
+		if(keyPressInformation["cmd"] || keyPressInformation["ctrl"])
+			mods |= (ModifierKeys::ctrlModifier | ModifierKeys::commandModifier);
+		
+		if(keyPressInformation["alt"])
+			mods |= ModifierKeys::altModifier;
+
+		auto keyCode = (int)keyPressInformation["keyCode"];
+
+		if(keyCode == 0 && r != nullptr)
+			*r = Result::fail("not a valid key code");
+
+		auto character = keyPressInformation["character"].toString();
+
+		juce_wchar c = character.isEmpty() ? 0 : character[0];
+
+		return KeyPress(keyCode, mods, c);
+	}
+	else
+	{
+		if(r != nullptr)
+			*r = Result::fail("invalid keypress information, use a JSON or a string");
+
+		return KeyPress();
+	}
+}
+
+melatonin::ShadowParameters ApiHelpers::getShadowParameters(const var& shadowData, Result* r)
+{
+	if(auto obj = shadowData.getDynamicObject())
+	{
+		melatonin::ShadowParameters sp;
+		sp.color = getColourFromVar(shadowData.getProperty("Colour", var(0xFF000000)));
+
+		Array<var> zero;
+		zero.add(0); zero.add(0);
+
+		sp.offset = getPointFromVar(shadowData.getProperty("Offset", var(zero))).toInt();
+		sp.inner = shadowData.getProperty("Inner", false);
+		sp.radius = shadowData.getProperty("Radius", 0);
+		sp.spread = shadowData.getProperty("Spread", 0);
+
+		return sp;
+	}
+	else
+	{
+		if(r != nullptr)
+		{
+			*r = Result::fail("shadowData needs to be a JSON object with the shadow parameters");
+		}
+
+		return {};
+	}
+}
+
+Colour ApiHelpers::getColourFromVar(const var& value)
+{
+	int64 colourValue = 0;
+
+	if (value.isInt64() || value.isInt())
+		colourValue = (int64)value;
+	else if (value.isString())
+	{
+		auto string = value.toString();
+
+		if (string.startsWith("0x"))
+			colourValue = string.getHexValue64();
+		else
+			colourValue = string.getLargeIntValue();
+	}
+
+	return Colour((uint32)colourValue);
+}
+
 Justification ApiHelpers::getJustification(const String& justificationName, Result* r/*=nullptr*/)
 {
 	static Array<Justification::Flags> justifications;
@@ -259,6 +350,15 @@ struct ScriptingApi::Message::Wrapper
 	API_METHOD_WRAPPER_0(Message, getEventId);
 	API_METHOD_WRAPPER_0(Message, getChannel);
 	API_VOID_METHOD_WRAPPER_1(Message, setChannel);
+
+	API_METHOD_WRAPPER_0(Message, isMonophonicAfterTouch);
+	API_METHOD_WRAPPER_0(Message, getMonophonicAftertouchPressure);
+	API_VOID_METHOD_WRAPPER_1(Message, setMonophonicAfterTouchPressure);
+	API_METHOD_WRAPPER_0(Message, isPolyAftertouch);
+	API_METHOD_WRAPPER_0(Message, getPolyAfterTouchNoteNumber);
+	API_METHOD_WRAPPER_0(Message, getPolyAfterTouchPressureValue);
+	API_VOID_METHOD_WRAPPER_2(Message, setPolyAfterTouchNoteNumberAndPressureValue);
+
 	API_VOID_METHOD_WRAPPER_1(Message, setTransposeAmount);
 	API_METHOD_WRAPPER_0(Message, getTransposeAmount);
 	API_VOID_METHOD_WRAPPER_1(Message, setCoarseDetune);
@@ -272,6 +372,7 @@ struct ScriptingApi::Message::Wrapper
 	API_METHOD_WRAPPER_0(Message, getTimestamp);
 	API_VOID_METHOD_WRAPPER_1(Message, store);
 	API_METHOD_WRAPPER_0(Message, makeArtificial);
+	API_METHOD_WRAPPER_0(Message, makeArtificialOrLocal);
 	API_METHOD_WRAPPER_0(Message, isArtificial);
 	API_VOID_METHOD_WRAPPER_0(Message, sendToMidiOut);
 	API_VOID_METHOD_WRAPPER_1(Message, setAllNotesOffCallback);
@@ -281,7 +382,7 @@ struct ScriptingApi::Message::Wrapper
 
 ScriptingApi::Message::Message(ProcessorWithScriptingContent *p) :
 ScriptingObject(p),
-ApiClass(2),
+ApiClass(11),
 messageHolder(nullptr),
 constMessageHolder(nullptr),
 allNotesOffCallback(p, nullptr, var(), 0)
@@ -289,12 +390,32 @@ allNotesOffCallback(p, nullptr, var(), 0)
 	addConstant("PITCH_BEND_CC", HiseEvent::PitchWheelCCNumber);
 	addConstant("AFTERTOUC_CC", HiseEvent::AfterTouchCCNumber);
 
+	addConstant("Empty ", (int)HiseEvent::Type::Empty );
+	addConstant("NoteOn", (int)HiseEvent::Type::NoteOn);
+	addConstant("NoteOff", (int)HiseEvent::Type::NoteOff);
+	addConstant("Controller", (int)HiseEvent::Type::Controller);
+	addConstant("PitchBend", (int)HiseEvent::Type::PitchBend);
+	addConstant("Aftertouch", (int)HiseEvent::Type::Aftertouch);
+	addConstant("AllNotesOff", (int)HiseEvent::Type::AllNotesOff);
+	addConstant("VolumeFade", (int)HiseEvent::Type::VolumeFade);
+	addConstant("PitchFade", (int)HiseEvent::Type::PitchFade);
+	
 	memset(artificialNoteOnIds, 0, sizeof(uint16) * 128);
 
-	ADD_API_METHOD_1(setNoteNumber);
-	ADD_API_METHOD_1(setVelocity);
-	ADD_API_METHOD_1(setControllerNumber);
-	ADD_API_METHOD_1(setControllerValue);
+	ADD_TYPED_API_METHOD_1(setNoteNumber, VarTypeChecker::Number);
+	ADD_TYPED_API_METHOD_1(setVelocity, VarTypeChecker::Number);
+	ADD_TYPED_API_METHOD_1(setControllerNumber, VarTypeChecker::Number);
+	ADD_TYPED_API_METHOD_1(setControllerValue, VarTypeChecker::Number);
+    ADD_TYPED_API_METHOD_1(delayEvent, VarTypeChecker::Number);
+    ADD_TYPED_API_METHOD_1(setChannel, VarTypeChecker::Number);
+    ADD_TYPED_API_METHOD_1(setGain, VarTypeChecker::Number);
+    ADD_TYPED_API_METHOD_1(setTransposeAmount, VarTypeChecker::Number);
+    ADD_TYPED_API_METHOD_1(setCoarseDetune, VarTypeChecker::Number);
+    ADD_TYPED_API_METHOD_1(setFineDetune, VarTypeChecker::Number);
+    ADD_TYPED_API_METHOD_1(setStartOffset, VarTypeChecker::Number);
+    ADD_TYPED_API_METHOD_1(store, VarTypeChecker::ScriptObject);
+    ADD_TYPED_API_METHOD_1(setAllNotesOffCallback, VarTypeChecker::Function);
+    
 	ADD_API_METHOD_0(getControllerNumber);
 	ADD_API_METHOD_0(getControllerValue);
 	ADD_API_METHOD_0(isProgramChange);
@@ -302,25 +423,32 @@ allNotesOffCallback(p, nullptr, var(), 0)
 	ADD_API_METHOD_0(getNoteNumber);
 	ADD_API_METHOD_0(getVelocity);
 	ADD_API_METHOD_1(ignoreEvent);
-	ADD_API_METHOD_1(delayEvent);
+	
 	ADD_API_METHOD_0(getEventId);
 	ADD_API_METHOD_0(getChannel);
-	ADD_API_METHOD_1(setChannel);
+
+	ADD_API_METHOD_0(isMonophonicAfterTouch);
+	ADD_API_METHOD_0(getMonophonicAftertouchPressure);
+	ADD_API_METHOD_1(setMonophonicAfterTouchPressure);
+	ADD_API_METHOD_0(isPolyAftertouch);
+	ADD_API_METHOD_0(getPolyAfterTouchNoteNumber);
+	ADD_API_METHOD_0(getPolyAfterTouchPressureValue);
+	ADD_API_METHOD_2(setPolyAfterTouchNoteNumberAndPressureValue);
+
 	ADD_API_METHOD_0(getGain);
-	ADD_API_METHOD_1(setGain);
-	ADD_API_METHOD_1(setTransposeAmount);
+	
 	ADD_API_METHOD_0(getTransposeAmount);
-	ADD_API_METHOD_1(setCoarseDetune);
+	
 	ADD_API_METHOD_0(getCoarseDetune);
-	ADD_API_METHOD_1(setFineDetune);
+    
 	ADD_API_METHOD_0(getFineDetune);
 	ADD_API_METHOD_0(getTimestamp);
 	ADD_API_METHOD_0(getStartOffset);
-	ADD_API_METHOD_1(setStartOffset);
-	ADD_API_METHOD_1(store);
+    
 	ADD_API_METHOD_0(makeArtificial);
+	ADD_API_METHOD_0(makeArtificialOrLocal);
 	ADD_API_METHOD_0(isArtificial);
-	ADD_API_METHOD_1(setAllNotesOffCallback);
+	
 	ADD_API_METHOD_0(sendToMidiOut);
 }
 
@@ -506,7 +634,100 @@ int ScriptingApi::Message::getVelocity() const
 #endif
 
 	return constMessageHolder->getVelocity();
+}
+
+//               ================================================================================================ AFTERTOUCH BEGIN
+
+bool ScriptingApi::Message::isMonophonicAfterTouch() const
+{
+#if ENABLE_SCRIPTING_SAFE_CHECKS
+	if (constMessageHolder == nullptr)
+	{
+		reportIllegalCall("isMonophonicAfterTouch()", "midi event");
+		RETURN_IF_NO_THROW(false);
+	}
+#endif
+
+	return constMessageHolder->isChannelPressure(); 
+}
+
+int ScriptingApi::Message::getMonophonicAftertouchPressure() const
+{
+#if ENABLE_SCRIPTING_SAFE_CHECKS
+	if (constMessageHolder == nullptr || !constMessageHolder->isChannelPressure())
+	{
+		reportIllegalCall("getMonophonicAftertouchPressure()", "midi event");
+		RETURN_IF_NO_THROW(-1)
+	}
+#endif
+
+	return constMessageHolder->getChannelPressureValue(); 
+}
+
+void ScriptingApi::Message::setMonophonicAfterTouchPressure(int pressure)
+{
+#if ENABLE_SCRIPTING_SAFE_CHECKS
+	if (messageHolder == nullptr || !messageHolder->isChannelPressure())
+	{
+		reportIllegalCall("setMonophonicAfterTouchPressure()", "midi event");
+		RETURN_VOID_IF_NO_THROW()
+	}
+#endif
+
+	messageHolder->setChannelPressureValue((uint8)pressure); 
+}
+
+bool ScriptingApi::Message::isPolyAftertouch() const
+{
+#if ENABLE_SCRIPTING_SAFE_CHECKS
+	if (constMessageHolder == nullptr)
+	{
+		reportIllegalCall("isPolyAftertouch()", "midi event");
+		RETURN_IF_NO_THROW(false);
+	}
+#endif
+
+	return constMessageHolder->isAftertouch(); 
+}
+
+int ScriptingApi::Message::getPolyAfterTouchNoteNumber() const
+{
+#if ENABLE_SCRIPTING_SAFE_CHECKS
+	if (constMessageHolder == nullptr || !constMessageHolder->isAftertouch())
+	{
+		reportIllegalCall("getPolyAfterTouchNoteNumber()", "midi event");
+		RETURN_IF_NO_THROW(-1);
+	}
+#endif
+
+	return messageHolder->getAfterTouchNumber(); 
+}
+
+int ScriptingApi::Message::getPolyAfterTouchPressureValue() const
+{
+#if ENABLE_SCRIPTING_SAFE_CHECKS
+	if (constMessageHolder == nullptr || !constMessageHolder->isAftertouch())
+	{
+		reportIllegalCall("getPolyAfterTouchPressureValue()", "midi event");
+		RETURN_IF_NO_THROW(-1);
+	}
+#endif
+
+	return messageHolder->getAfterTouchValue(); 
+}
+
+void ScriptingApi::Message::setPolyAfterTouchNoteNumberAndPressureValue(int noteNumber, int aftertouchAmount)
+{
+	if (messageHolder == nullptr || !constMessageHolder->isAftertouch())
+	{
+		reportIllegalCall("setPolyAfterTouchNoteNumberAndPressureValue()", "midi event");
+		RETURN_VOID_IF_NO_THROW()
+	}
+
+	messageHolder->setAfterTouchValue(noteNumber, aftertouchAmount); 
 };
+
+//               ================================================================================================ AFTERTOUCH END
 
 void ScriptingApi::Message::ignoreEvent(bool shouldBeIgnored/*=true*/)
 {
@@ -514,6 +735,14 @@ void ScriptingApi::Message::ignoreEvent(bool shouldBeIgnored/*=true*/)
 	{
 		reportIllegalCall("ignoreEvent()", "midi event");
 		RETURN_VOID_IF_NO_THROW()
+	}
+
+	// If we call make artificial and then later ignore the note off, we need
+	// to reintroduce the note on event so that it can be killed later.
+	if(shouldBeIgnored && isArtificial() && messageHolder->isNoteOff() && (artificialNoteOnThatWasKilled.getEventId() == messageHolder->getEventId())) 
+	{
+		getScriptProcessor()->getMainController_()->getEventHandler().reinsertArtificialNoteOn(artificialNoteOnThatWasKilled);
+		pushArtificialNoteOn(artificialNoteOnThatWasKilled);
 	}
 
 	messageHolder->ignoreEvent(shouldBeIgnored);
@@ -735,11 +964,19 @@ void ScriptingApi::Message::store(var messageEventHolder) const
 
 int ScriptingApi::Message::makeArtificial()
 {
+	return makeArtificialInternal(false);
+}
+
+int ScriptingApi::Message::makeArtificialInternal(bool makeLocal)
+{
+	artificialNoteOnThatWasKilled = {};
+
 	if (messageHolder != nullptr)
 	{
-		if (messageHolder->isArtificial()) return messageHolder->getEventId();
-
 		HiseEvent copy(*messageHolder);
+
+		if (!makeLocal && copy.isArtificial())
+			return copy.getEventId();
 
 		copy.setArtificial();
 
@@ -751,6 +988,9 @@ int ScriptingApi::Message::makeArtificial()
 		else if (copy.isNoteOff())
 		{
 			HiseEvent e = getScriptProcessor()->getMainController_()->getEventHandler().popNoteOnFromEventId(artificialNoteOnIds[copy.getNoteNumber()]);
+
+			// keep this alive
+			artificialNoteOnThatWasKilled = e;
 
 			if (e.isEmpty())
 			{
@@ -767,6 +1007,11 @@ int ScriptingApi::Message::makeArtificial()
 	}
 
 	return 0;
+}
+
+int ScriptingApi::Message::makeArtificialOrLocal()
+{
+	return makeArtificialInternal(true);
 }
 
 bool ScriptingApi::Message::isArtificial() const
@@ -890,7 +1135,9 @@ struct ScriptingApi::Engine::Wrapper
 	API_METHOD_WRAPPER_1(Engine, createAndRegisterAudioFile);
 	API_METHOD_WRAPPER_1(Engine, createAndRegisterRingBuffer);
 	API_METHOD_WRAPPER_0(Engine, createMidiList);
+	API_METHOD_WRAPPER_0(Engine, createBeatportManager);
 	API_METHOD_WRAPPER_0(Engine, createUnorderedStack);
+	API_METHOD_WRAPPER_0(Engine, createThreadSafeStorage);
 	API_METHOD_WRAPPER_0(Engine, createTimerObject);
 	API_METHOD_WRAPPER_0(Engine, createMessageHolder);
 	API_METHOD_WRAPPER_0(Engine, createTransportHandler);
@@ -898,6 +1145,8 @@ struct ScriptingApi::Engine::Wrapper
 	API_METHOD_WRAPPER_0(Engine, getPlayHead);
 	API_VOID_METHOD_WRAPPER_2(Engine, dumpAsJSON);
 	API_METHOD_WRAPPER_1(Engine, loadFromJSON);
+	API_METHOD_WRAPPER_1(Engine, compressJSON);
+	API_METHOD_WRAPPER_1(Engine, uncompressJSON);
 	API_VOID_METHOD_WRAPPER_1(Engine, setCompileProgress);
 	API_METHOD_WRAPPER_2(Engine, matchesRegex);
 	API_METHOD_WRAPPER_2(Engine, getRegexMatches);
@@ -928,6 +1177,7 @@ struct ScriptingApi::Engine::Wrapper
 	API_METHOD_WRAPPER_1(Engine, createDspNetwork);
 	API_METHOD_WRAPPER_0(Engine, createExpansionHandler);
 	API_METHOD_WRAPPER_0(Engine, createFFT);
+	API_METHOD_WRAPPER_1(Engine, createNeuralNetwork);
 	API_METHOD_WRAPPER_0(Engine, getExpansionList);
 	API_METHOD_WRAPPER_1(Engine, setCurrentExpansion);
 	API_METHOD_WRAPPER_0(Engine, createGlobalScriptLookAndFeel);
@@ -935,6 +1185,7 @@ struct ScriptingApi::Engine::Wrapper
     API_METHOD_WRAPPER_1(Engine, createFixObjectFactory);
 	API_METHOD_WRAPPER_0(Engine, createErrorHandler);
 	API_METHOD_WRAPPER_1(Engine, createModulationMatrix);
+	API_METHOD_WRAPPER_0(Engine, createMacroHandler);
 	API_METHOD_WRAPPER_0(Engine, getWavetableList);
 	API_VOID_METHOD_WRAPPER_3(Engine, showYesNoWindow);
 	API_VOID_METHOD_WRAPPER_1(Engine, addModuleStateToUserPreset);
@@ -986,33 +1237,34 @@ parentMidiProcessor(dynamic_cast<ScriptBaseMidiProcessor*>(p))
 	ADD_API_METHOD_0(allNotesOff);
 	ADD_API_METHOD_0(getUptime);
 	ADD_API_METHOD_0(getHostBpm);
-	ADD_API_METHOD_1(setHostBpm);
+	ADD_TYPED_API_METHOD_1(setHostBpm, VarTypeChecker::Number);
 	ADD_API_METHOD_0(getCpuUsage);
 	ADD_API_METHOD_0(getNumVoices);
 	ADD_API_METHOD_0(getMemoryUsage);
 	ADD_API_METHOD_1(getTempoName);
-	ADD_API_METHOD_1(getMilliSecondsForTempo);
-	ADD_API_METHOD_1(getSamplesForMilliSeconds);
-	ADD_API_METHOD_1(getMilliSecondsForSamples);
-	ADD_API_METHOD_1(getQuarterBeatsForMilliSeconds);
-	ADD_API_METHOD_1(getQuarterBeatsForSamples);
-	ADD_API_METHOD_1(getSamplesForQuarterBeats);
-	ADD_API_METHOD_1(getMilliSecondsForQuarterBeats);
+	ADD_TYPED_API_METHOD_1(getMilliSecondsForTempo, VarTypeChecker::Number);
+	ADD_TYPED_API_METHOD_1(getSamplesForMilliSeconds, VarTypeChecker::Number);
+	ADD_TYPED_API_METHOD_1(getMilliSecondsForSamples, VarTypeChecker::Number);
+	ADD_TYPED_API_METHOD_1(getQuarterBeatsForMilliSeconds, VarTypeChecker::Number);
+	ADD_TYPED_API_METHOD_1(getQuarterBeatsForSamples, VarTypeChecker::Number);
+	ADD_TYPED_API_METHOD_1(getSamplesForQuarterBeats, VarTypeChecker::Number);
+	ADD_TYPED_API_METHOD_1(getMilliSecondsForQuarterBeats, VarTypeChecker::Number);
 	ADD_API_METHOD_2(getQuarterBeatsForMilliSecondsWithTempo);
 	ADD_API_METHOD_2(getQuarterBeatsForSamplesWithTempo);
 	ADD_API_METHOD_2(getSamplesForQuarterBeatsWithTempo);
 	ADD_API_METHOD_2(getMilliSecondsForQuarterBeatsWithTempo);
-	ADD_API_METHOD_1(getGainFactorForDecibels);
-	ADD_API_METHOD_1(getDecibelsForGainFactor);
-	ADD_API_METHOD_1(getFrequencyForMidiNoteNumber);
-	ADD_API_METHOD_1(getPitchRatioFromSemitones);
-	ADD_API_METHOD_1(getSemitonesFromPitchRatio);
+	ADD_TYPED_API_METHOD_1(getGainFactorForDecibels, VarTypeChecker::Number);
+	ADD_TYPED_API_METHOD_1(getDecibelsForGainFactor, VarTypeChecker::Number);
+	ADD_TYPED_API_METHOD_1(getFrequencyForMidiNoteNumber, VarTypeChecker::Number);
+	ADD_TYPED_API_METHOD_1(getPitchRatioFromSemitones, VarTypeChecker::Number);
+	ADD_TYPED_API_METHOD_1(getSemitonesFromPitchRatio, VarTypeChecker::Number);
 	ADD_API_METHOD_1(addModuleStateToUserPreset);
 	ADD_API_METHOD_0(getSampleRate);
 	ADD_API_METHOD_0(getBufferSize);
 	ADD_API_METHOD_0(getNumPluginChannels);
-	ADD_API_METHOD_1(setMinimumSampleRate);
-	ADD_API_METHOD_1(setMaximumBlockSize);
+	ADD_TYPED_API_METHOD_1(setMinimumSampleRate, VarTypeChecker::Number);
+	ADD_TYPED_API_METHOD_1(setMaximumBlockSize, VarTypeChecker::Number);
+	ADD_API_METHOD_0(createThreadSafeStorage);
 	ADD_API_METHOD_1(getMidiNoteName);
 	ADD_API_METHOD_1(getMidiNoteFromName);
 	ADD_API_METHOD_1(getMacroName);
@@ -1026,6 +1278,7 @@ parentMidiProcessor(dynamic_cast<ScriptBaseMidiProcessor*>(p))
   ADD_API_METHOD_1(openWebsite);
 	ADD_API_METHOD_0(createUserPresetHandler);
 	ADD_API_METHOD_0(createMidiAutomationHandler);
+	ADD_API_METHOD_0(createMacroHandler);
   ADD_API_METHOD_1(loadNextUserPreset);
 	ADD_API_METHOD_1(loadPreviousUserPreset);
 	ADD_API_METHOD_1(isUserPresetReadOnly);
@@ -1043,6 +1296,7 @@ parentMidiProcessor(dynamic_cast<ScriptBaseMidiProcessor*>(p))
 	ADD_API_METHOD_0(createUnorderedStack);
 	ADD_API_METHOD_1(createBackgroundTask);
 	ADD_API_METHOD_0(createFFT);
+	ADD_API_METHOD_1(createNeuralNetwork);
 	ADD_API_METHOD_1(createBroadcaster);
 	ADD_API_METHOD_0(getPlayHead);
 	ADD_API_METHOD_2(dumpAsJSON);
@@ -1080,6 +1334,7 @@ parentMidiProcessor(dynamic_cast<ScriptBaseMidiProcessor*>(p))
 	ADD_API_METHOD_1(createAndRegisterRingBuffer);
 	ADD_API_METHOD_0(getGlobalRoutingManager);
     ADD_API_METHOD_0(getLorisManager);
+	ADD_API_METHOD_0(createBeatportManager);
 	ADD_API_METHOD_1(loadFont);
 	ADD_API_METHOD_2(loadFontAs);
 	ADD_API_METHOD_1(loadAudioFileIntoBufferArray);
@@ -1091,7 +1346,7 @@ parentMidiProcessor(dynamic_cast<ScriptBaseMidiProcessor*>(p))
 	ADD_API_METHOD_0(undo);
 	ADD_API_METHOD_0(redo);
     ADD_API_METHOD_0(clearUndoHistory);
-	ADD_API_METHOD_2(performUndoAction);
+	ADD_TYPED_API_METHOD_2(performUndoAction, VarTypeChecker::JSON, VarTypeChecker::Function);
 	ADD_API_METHOD_0(getExtraDefinitionsInBackend);
 	ADD_API_METHOD_0(loadAudioFilesIntoPool);
 	ADD_API_METHOD_0(clearMidiFilePool);
@@ -1118,6 +1373,8 @@ parentMidiProcessor(dynamic_cast<ScriptBaseMidiProcessor*>(p))
 	ADD_API_METHOD_1(decodeBase64ValueTree);
 	ADD_API_METHOD_2(renderAudio);
 	ADD_API_METHOD_3(playBuffer);
+	ADD_API_METHOD_1(compressJSON);
+	ADD_API_METHOD_1(uncompressJSON);
 }
 
 
@@ -1340,7 +1597,7 @@ double ScriptingApi::Engine::getQuarterBeatsForMilliSecondsWithTempo(double mill
 
 double ScriptingApi::Engine::getSamplesForQuarterBeatsWithTempo(double quarterBeats, double bpm)
 {
-	auto samplesPerQuarter = (double)TempoSyncer::getTempoInSamples(bpm, getSampleRate(), TempoSyncer::Quarter);
+	auto samplesPerQuarter = TempoSyncer::getTempoInSamples(bpm, getSampleRate(), TempoSyncer::Quarter);
 
 	return samplesPerQuarter * quarterBeats;
 }
@@ -1511,7 +1768,7 @@ void ScriptingApi::Engine::reloadAllSamples()
 	
 
 
-	mc->getKillStateHandler().killVoicesAndCall(mc->getMainSynthChain(), f, MainController::KillStateHandler::SampleLoadingThread);
+	mc->getKillStateHandler().killVoicesAndCall(mc->getMainSynthChain(), f, MainController::KillStateHandler::TargetThread::SampleLoadingThread);
 }
 
 double ScriptingApi::Engine::getPreloadProgress()
@@ -1732,16 +1989,19 @@ var ScriptingApi::Engine::createGlobalScriptLookAndFeel()
 	}
 }
 
-struct ScriptUndoableAction : public UndoableAction
+struct ScriptUndoableAction : public UndoableAction,
+							  public ControlledObject
 {
 	ScriptUndoableAction(ProcessorWithScriptingContent* p, var f, var thisObject_):
 		UndoableAction(),
+	    ControlledObject(p->getMainController_()),
 		callback(p, nullptr, f, 1),
 		thisObject(thisObject_)
 	{
 		// ensure it's called synchronously if possible...
 		callback.setHighPriority();
 		callback.incRefCount();
+		callback.setThisObjectRefCounted(thisObject);
 	}
 
 	bool undo() override
@@ -1749,8 +2009,8 @@ struct ScriptUndoableAction : public UndoableAction
 		if (callback)
 		{
 			var a(true);
-			var::NativeFunctionArgs args(thisObject, &a, 1);
-			callback.callSync(args);
+
+			callSyncIfScriptingThread(a);
 			return true;
 		}
 
@@ -1762,12 +2022,37 @@ struct ScriptUndoableAction : public UndoableAction
 		if (callback)
 		{
 			var a(false);
-			var::NativeFunctionArgs args(thisObject, &a, 1);
-			callback.callSync(args);
+			
+			callSyncIfScriptingThread(a);
 			return true;
 		}
 
 		return false;
+	}
+
+	void callSyncIfScriptingThread(const var& a)
+	{
+		auto currentThread = getMainController()->getKillStateHandler().getCurrentThread();
+
+		var::NativeFunctionArgs args(thisObject, &a, 1);
+
+		switch(currentThread)
+		{
+		case MainController::KillStateHandler::TargetThread::ScriptingThread:
+		case MainController::KillStateHandler::TargetThread::SampleLoadingThread:
+		{
+			auto ok = callback.callSync(args);
+
+			if(!ok.wasOk())
+				throw ok.getErrorMessage();
+
+			break;
+		}
+		case MainController::KillStateHandler::TargetThread::MessageThread:
+		{
+			callback.call(args);
+		}
+		}
 	}
 
 	var thisObject;
@@ -1776,7 +2061,6 @@ struct ScriptUndoableAction : public UndoableAction
 
 bool ScriptingApi::Engine::performUndoAction(var thisObject, var undoAction)
 {
-	getScriptProcessor()->getMainController_()->getControlUndoManager()->beginNewTransaction("%SCRIPT_TRANSACTION%");
 	return getScriptProcessor()->getMainController_()->getControlUndoManager()->perform(new ScriptUndoableAction(getScriptProcessor(), undoAction, thisObject));
 }
 
@@ -1790,73 +2074,59 @@ var ScriptingApi::Engine::createFixObjectFactory(var layoutData)
     return var(new fixobj::Factory(getScriptProcessor(), layoutData));
 }
 
+var ScriptingApi::Engine::createThreadSafeStorage()
+{
+	return var (new ScriptingObjects::ScriptThreadSafeStorage(getScriptProcessor()));
+}
+
 juce::var ScriptingApi::Engine::createLicenseUnlocker()
 {
 	return var(new ScriptUnlocker::RefObject(getScriptProcessor()));
 }
 
-struct AudioRenderer : public Thread,
-					   public ControlledObject
+var ScriptingApi::Engine::createBeatportManager()
 {
-	static constexpr int NumThrowAwayBuffers = 4;
+	return var(new BeatportManager(getScriptProcessor()));
+}
 
+
+
+struct AudioRenderer : public AudioRendererBase
+{
 	AudioRenderer(ProcessorWithScriptingContent* pwsc, var eventList_, var finishCallback_):
-		Thread("AudioExportThread"),
-		ControlledObject(pwsc->getMainController_()),
+		AudioRendererBase(pwsc->getMainController_()),
 		finishCallback(pwsc, nullptr, finishCallback_, 1)
 	{
 		finishCallback.incRefCount();
 		finishCallback.setHighPriority();
-		
+
 		if (auto a = eventList_.getArray())
 		{
+			eventBuffers.add(new HiseEventBuffer());
+
 			for (const auto& e : *a)
 			{
 				if (auto me = dynamic_cast<ScriptingObjects::ScriptingMessageHolder*>(e.getObject()))
 				{
-					events.addEvent(me->getMessageCopy());
+					eventBuffers.getLast()->addEvent(me->getMessageCopy());
+
+					if(eventBuffers.getLast()->getNumUsed() == HISE_EVENT_BUFFER_SIZE)
+					{
+						eventBuffers.add(new HiseEventBuffer());
+					}
 				}
 			}
 		}
 
-		if (!events.isEmpty())
-		{
-			if ((bufferSize = getMainController()->getMainSynthChain()->getLargestBlockSize()) != 0)
-			{
-				numSamplesToRender = (int)events.getEvent(events.getNumUsed() - 1).getTimeStamp();
-
-				// we'll trim it later
-				numActualSamples = numSamplesToRender;
-
-				auto leftOver = numSamplesToRender % bufferSize;
-
-				if (leftOver != 0)
-				{
-					// pad to blocksize
-					numSamplesToRender += (bufferSize - leftOver);
-				}
-
-				numChannelsToRender = getMainController()->getMainSynthChain()->getMatrix().getNumSourceChannels();
-
-				events.subtractFromTimeStamps(-bufferSize * NumThrowAwayBuffers);
-
-				events.template alignEventsToRaster<HISE_EVENT_RASTER>(numSamplesToRender);
-
-				for (int i = 0; i < numChannelsToRender; i++)
-					channels.add(new VariantBuffer(numSamplesToRender));
-
-				Thread::startThread(8);
-			}
-		}
+		initAfterFillingEventBuffer();
 	}
 
 	~AudioRenderer()
 	{
-		stopThread(1000);
-		cleanup();
+		
 	}
 
-	void callUpdateCallback(bool isFinished, double progress)
+	void callUpdateCallback(bool isFinished, double progress) override
 	{
 		if (finishCallback)
 		{
@@ -1879,148 +2149,8 @@ struct AudioRenderer : public Thread,
 		}
 	}
 
-	bool renderAudio()
-	{
-        // Stop all clocks...
-        getMainController()->getMasterClock().changeState(0, true, false);
-        getMainController()->getMasterClock().changeState(0, false, false);
-        
-		SuspendHelpers::ScopedTicket st(getMainController());
-
-		callUpdateCallback(false, 0.0);
-
-        
-        
-		while (getMainController()->getKillStateHandler().isAudioRunning())
-		{
-			if (threadShouldExit())
-				return false;
-
-			Thread::wait(400);
-		}
-
-		jassert(!getMainController()->getKillStateHandler().isAudioRunning());
-
-		getMainController()->getKillStateHandler().setCurrentExportThread(getCurrentThreadId());
-
-		dynamic_cast<AudioProcessor*>(getMainController())->setNonRealtime(true);
-		getMainController()->getSampleManager().handleNonRealtimeState();
-		
-		{
-			LockHelpers::SafeLock sl(getMainController(), LockHelpers::AudioLock);
-
-			int numTodo = numSamplesToRender;
-			int pos = 0;
-
-			int numThrowAway = NumThrowAwayBuffers;
-
-			AudioSampleBuffer nirvana(numChannelsToRender, bufferSize);
-
-			auto startTime = Time::getMillisecondCounter();
-
-			while (numTodo > 0)
-			{
-				if (threadShouldExit())
-					return false;
-
-				int numThisTime = jmin<int>(bufferSize, numTodo);
-
-				AudioSampleBuffer ab = getChunk(pos, numThisTime);
-				HiseEventBuffer thisBuffer;
-				events.moveEventsBelow(thisBuffer, pos + numThisTime);
-				thisBuffer.subtractFromTimeStamps(pos);
-
-				MidiBuffer mb;
-
-				for (const auto& e : thisBuffer)
-					mb.addEvent(e.toMidiMesage(), e.getTimeStamp());
-
-				auto& bufferToUse = numThrowAway > 0 ? nirvana : ab;
-
-				dynamic_cast<AudioProcessor*>(getMainController())->processBlock(bufferToUse, mb);
-
-				if (numThrowAway > 0)
-				{
-					--numThrowAway;
-					events.subtractFromTimeStamps(numThisTime);
-				}
-				else
-				{
-					pos += numThisTime;
-					numTodo -= numThisTime;
-				}
-
-				auto now = Time::getMillisecondCounter();
-
-				if (now - startTime > 90)
-				{
-					auto p = (double)numTodo / (double)numSamplesToRender;
-					callUpdateCallback(false, 1.0 - p);
-					startTime = now;
-					Thread::wait(60);
-				}
-			}
-
-			MidiBuffer emptyBuffer;
-
-			for (int i = 0; i < 50; i++)
-			{
-				dynamic_cast<AudioProcessor*>(getMainController())->processBlock(nirvana, emptyBuffer);
-			}
-		}
-
-        for (int i = 0; i < numChannelsToRender; i++)
-		{
-			VariantBuffer* b = channels[i].get();
-			b->size = numActualSamples;
-		}
-
-        getMainController()->getKillStateHandler().setCurrentExportThread(nullptr);
-		dynamic_cast<AudioProcessor*>(getMainController())->setNonRealtime(false);
-		getMainController()->getSampleManager().handleNonRealtimeState();
-		return true;
-	}
-
-	void run() override
-	{
-		if (!renderAudio())
-		{
-			cleanup();
-			return;
-		}
-		
-		callUpdateCallback(true, 1.0);
-
-		cleanup();
-	}
-
-	void cleanup()
-	{
-        getMainController()->getKillStateHandler().setCurrentExportThread(nullptr);
-		channels.clear();
-		memset(splitData, 0, sizeof(float*) * NUM_MAX_CHANNELS);
-		events.clear();
-	}
-
-	AudioSampleBuffer getChunk(int startSample, int numSamples)
-	{
-		for (int i = 0; i < numChannelsToRender; i++)
-			splitData[i] = channels[i]->buffer.getWritePointer(0, startSample);
-
-		jassert(isPositiveAndBelow(startSample + numSamples, numSamplesToRender + 1));
-
-		return AudioSampleBuffer(splitData, numChannelsToRender, numSamples);
-	}
-
-	Array<VariantBuffer::Ptr> channels;
-
-	HiseEventBuffer events;
 	WeakCallbackHolder finishCallback;
-	int numSamplesToRender = 0;
-	int numChannelsToRender = 0;
-	int numActualSamples = 0;
-	float* splitData[NUM_MAX_CHANNELS];
-	int bufferSize = 0;
+	
 };
 
 void ScriptingApi::Engine::renderAudio(var eventList, var updateCallback)
@@ -2262,7 +2392,7 @@ juce::var ScriptingApi::Engine::getGlobalRoutingManager()
 
 juce::var ScriptingApi::Engine::getLorisManager()
 {
-#if USE_BACKEND || HISE_ENABLE_LORIS_ON_FRONTEND
+#if HISE_INCLUDE_LORIS
     return var(new ScriptLorisManager(getScriptProcessor()));
 #else
     return var();
@@ -2426,7 +2556,6 @@ void ScriptingApi::Engine::saveUserPreset(var presetName)
 {
 	if (auto sf = dynamic_cast<ScriptingObjects::ScriptFile*>(presetName.getObject()))
 	{
-		getProcessor()->getMainController()->getUserPresetHandler().setCurrentlyLoadedFile(sf->f);
 		UserPresetHelpers::saveUserPreset(getProcessor()->getMainController()->getMainSynthChain(), sf->f.getFullPathName());
 	}
 	else
@@ -2464,12 +2593,15 @@ struct ScriptingApi::Settings::Wrapper
 	API_VOID_METHOD_WRAPPER_2(Settings, toggleMidiInput);
 	API_METHOD_WRAPPER_1(Settings, isMidiInputEnabled);
 	API_VOID_METHOD_WRAPPER_2(Settings, toggleMidiChannel);
-	
+	API_VOID_METHOD_WRAPPER_1(Settings, setSampleFolder);
 	API_METHOD_WRAPPER_1(Settings, isMidiChannelEnabled);
 	API_METHOD_WRAPPER_0(Settings, getUserDesktopSize);
 	API_METHOD_WRAPPER_0(Settings, isOpenGLEnabled);
 	API_VOID_METHOD_WRAPPER_1(Settings, setEnableOpenGL);
 	API_VOID_METHOD_WRAPPER_1(Settings, setEnableDebugMode);
+	API_VOID_METHOD_WRAPPER_0(Settings, startPerfettoTracing);
+	API_VOID_METHOD_WRAPPER_1(Settings, stopPerfettoTracing);
+	API_VOID_METHOD_WRAPPER_0(Settings, crashAndBurn);
 };
 
 ScriptingApi::Settings::Settings(ProcessorWithScriptingContent* s) :
@@ -2512,6 +2644,10 @@ ScriptingApi::Settings::Settings(ProcessorWithScriptingContent* s) :
 	ADD_API_METHOD_0(isOpenGLEnabled);
 	ADD_API_METHOD_1(setEnableOpenGL);
 	ADD_API_METHOD_1(setEnableDebugMode);
+	ADD_API_METHOD_1(setSampleFolder);
+	ADD_API_METHOD_0(startPerfettoTracing);
+	ADD_API_METHOD_1(stopPerfettoTracing);
+	ADD_API_METHOD_0(crashAndBurn);
 }
 
 var ScriptingApi::Settings::getUserDesktopSize()
@@ -2541,6 +2677,79 @@ void ScriptingApi::Settings::setEnableDebugMode(bool shouldBeEnabled)
 	shouldBeEnabled ? mc->getDebugLogger().startLogging() : mc->getDebugLogger().stopLogging();	
 }
 
+void ScriptingApi::Settings::setSampleFolder(var sampleFolder)
+{
+	if(auto sf = dynamic_cast<ScriptingObjects::ScriptFile*>(sampleFolder.getObject()))
+	{
+		auto newLocation = sf->f;
+
+		if(newLocation.isDirectory())
+		{
+#if USE_BACKEND
+			getScriptProcessor()->getMainController_()->getCurrentFileHandler().createLinkFile(FileHandlerBase::Samples, newLocation);
+#else
+			FrontendHandler::setSampleLocation(newLocation);
+#endif
+		}
+	}
+}
+
+void ScriptingApi::Settings::startPerfettoTracing()
+{
+#if PERFETTO
+	auto& mp = MelatoninPerfetto::get();
+	mp.beginSession();
+#else
+	reportScriptError("Perfetto is not enabled, make sure to compile your project / HISE with PERFETTO=1");
+#endif
+}
+
+void ScriptingApi::Settings::stopPerfettoTracing(var traceFileToUse)
+{
+#if PERFETTO
+	if(auto sf = dynamic_cast<ScriptingObjects::ScriptFile*>(traceFileToUse.getObject()))
+	{
+		auto extension = sf->f.getFileExtension();
+
+		auto& mp = MelatoninPerfetto::get();
+
+		mp.customFileLocation = sf->f;
+		mp.endSession(true);
+		mp.customFileLocation = File();
+
+		if(extension != ".pftrace")
+		{
+			reportScriptError("The file needs the extension .pftrace");
+		}
+	}
+	else
+	{
+		reportScriptError("Not a valid file supplied");
+	}
+#else
+	reportScriptError("Perfetto is not enabled, make sure to compile your project / HISE with PERFETTO=1");
+#endif
+}
+
+void ScriptingApi::Settings::crashAndBurn()
+{
+#if USE_BACKEND
+	auto includeSymbols = GET_HISE_SETTING(dynamic_cast<Processor*>(getScriptProcessor()), HiseSettings::Project::CompileWithDebugSymbols);
+
+	if(!includeSymbols)
+	{
+		// don't crash, you're not ready yet...
+		reportScriptError("You need to enable CompileWithDebugSymbols for your project to get a meaningful stack trace");
+	}
+#endif
+	
+	// There you go...
+	volatile int* x = nullptr;
+	*x = 90;
+
+	// If that didn't work, try this...
+	abort();
+}
 
 double ScriptingApi::Settings::getZoomLevel() const
 {
@@ -2854,7 +3063,6 @@ void ScriptingApi::Engine::loadUserPreset(var file)
     else if (userPresetToLoad.existsAsFile())
 	{
 		getProcessor()->getMainController()->getUserPresetHandler().loadUserPreset(userPresetToLoad);
-		getProcessor()->getMainController()->getUserPresetHandler().setCurrentlyLoadedFile(userPresetToLoad);
 	}
 	else
 	{
@@ -3148,6 +3356,11 @@ ScriptingObjects::ScriptingMessageHolder* ScriptingApi::Engine::createMessageHol
 	return new ScriptingObjects::ScriptingMessageHolder(getScriptProcessor());
 }
 
+ScriptingObjects::ScriptNeuralNetwork* ScriptingApi::Engine::createNeuralNetwork(String id)
+{
+	return new ScriptingObjects::ScriptNeuralNetwork(getScriptProcessor(), id);
+}
+
 var ScriptingApi::Engine::createTransportHandler()
 {
 	return new TransportHandler(getScriptProcessor());
@@ -3156,6 +3369,11 @@ var ScriptingApi::Engine::createTransportHandler()
 juce::var ScriptingApi::Engine::createModulationMatrix(String containerId)
 {
 	return new ScriptingObjects::ScriptModulationMatrix(getScriptProcessor(), containerId);
+}
+
+var ScriptingApi::Engine::createMacroHandler()
+{
+	return new ScriptingObjects::ScriptedMacroHandler(getScriptProcessor());
 }
 
 void ScriptingApi::Engine::dumpAsJSON(var object, String fileName)
@@ -3175,6 +3393,39 @@ void ScriptingApi::Engine::dumpAsJSON(var object, String fileName)
 
 	f.replaceWithText(JSON::toString(object, false, DOUBLE_TO_STRING_DIGITS));
 
+}
+
+String ScriptingApi::Engine::compressJSON(var object)
+{
+	auto x = JSON::toString(object, true);
+
+	zstd::ZDefaultCompressor comp;
+	
+	MemoryBlock data;
+	comp.compress(x, data);
+
+	return data.toBase64Encoding();
+}
+
+var ScriptingApi::Engine::uncompressJSON(const String& b64)
+{
+	MemoryBlock mb;
+	mb.fromBase64Encoding(b64);
+
+	String json;
+
+	zstd::ZDefaultCompressor comp;
+	comp.expand(mb, json);
+
+	var value;
+	auto r = JSON::parse(json, value);
+
+	if(!r.wasOk())
+	{
+		reportScriptError(r.getErrorMessage());
+	}
+
+	return value;
 }
 
 var ScriptingApi::Engine::loadFromJSON(String fileName)
@@ -3263,9 +3514,8 @@ String ScriptingApi::Engine::doubleToString(double value, int digits)
 
 float ScriptingApi::Engine::getStringWidth(String text, String fontName, float fontSize, float fontSpacing)
 {
-	auto f = getScriptProcessor()->getMainController_()->getFontFromString(fontName, fontSize).withExtraKerningFactor(fontSpacing);
-
-	return f.getStringWidthFloat(text);
+	auto mc = getScriptProcessor()->getMainController_();
+	return mc->getStringWidthFromEmbeddedFont(text, fontName, fontSize, fontSpacing);
 }
 
 void ScriptingApi::Engine::quit()
@@ -3403,8 +3653,11 @@ struct ScriptingApi::Sampler::Wrapper
 {
 	API_VOID_METHOD_WRAPPER_1(Sampler, enableRoundRobin);
 	API_VOID_METHOD_WRAPPER_1(Sampler, setActiveGroup);
-	API_VOID_METHOD_WRAPPER_2(Sampler, setMultiGroupIndex);
+	API_VOID_METHOD_WRAPPER_2(Sampler, setMultiGroupIndex)
 	API_METHOD_WRAPPER_0(Sampler, getActiveRRGroup);
+	API_VOID_METHOD_WRAPPER_2(Sampler, setActiveGroupForEventId);
+	API_METHOD_WRAPPER_1(Sampler, getActiveRRGroupForEventId);
+	API_VOID_METHOD_WRAPPER_3(Sampler, setMultiGroupIndexForEventId);
 	API_METHOD_WRAPPER_2(Sampler, getRRGroupsForMessage);
 	API_VOID_METHOD_WRAPPER_0(Sampler, refreshRRMap);
 	API_VOID_METHOD_WRAPPER_1(Sampler, selectSounds);
@@ -3460,6 +3713,9 @@ sampler(sampler_)
 	ADD_API_METHOD_1(enableRoundRobin);
 	ADD_API_METHOD_1(setActiveGroup);
 	ADD_API_METHOD_0(getActiveRRGroup);
+	ADD_API_METHOD_2(setActiveGroupForEventId);
+	ADD_API_METHOD_1(getActiveRRGroupForEventId);
+	ADD_API_METHOD_3(setMultiGroupIndexForEventId);
 	ADD_API_METHOD_2(setRRGroupVolume);
 	ADD_API_METHOD_2(setMultiGroupIndex);
 	ADD_API_METHOD_2(getRRGroupsForMessage);
@@ -3480,17 +3736,17 @@ sampler(sampler_)
     ADD_API_METHOD_0(getCurrentSampleMapId);
 	ADD_API_METHOD_0(getSampleMapList);
 	ADD_API_METHOD_0(getNumAttributes);
-    ADD_API_METHOD_1(getAttribute);
-    ADD_API_METHOD_1(getAttributeId);
-		ADD_API_METHOD_1(getAttributeIndex);
-    ADD_API_METHOD_2(setAttribute);
+    ADD_TYPED_API_METHOD_1(getAttribute, VarTypeChecker::Number);
+    ADD_TYPED_API_METHOD_1(getAttributeId, VarTypeChecker::Number);
+    ADD_TYPED_API_METHOD_1(getAttributeIndex, VarTypeChecker::String);
+    ADD_TYPED_API_METHOD_2(setAttribute, VarTypeChecker::Number, VarTypeChecker::Number);
 	ADD_API_METHOD_1(isNoteNumberMapped);
     ADD_API_METHOD_1(loadSampleForAnalysis);
 	ADD_API_METHOD_1(loadSfzFile);
 	ADD_API_METHOD_1(setUseStaticMatrix);
 	ADD_API_METHOD_1(setSortByRRGroup);
 	ADD_API_METHOD_1(createSelection);
-	ADD_API_METHOD_1(createSelectionFromIndexes);
+	ADD_TYPED_API_METHOD_1(createSelectionFromIndexes, VarTypeChecker::Array);
 	ADD_API_METHOD_1(createSelectionWithFilter);
 	ADD_API_METHOD_0(createListFromGUISelection);
 	ADD_API_METHOD_0(createListFromScriptSelection);
@@ -3556,29 +3812,10 @@ void ScriptingApi::Sampler::enableRoundRobin(bool shouldUseRoundRobin)
 
 void ScriptingApi::Sampler::setActiveGroup(int activeGroupIndex)
 {
-	ModulatorSampler *s = static_cast<ModulatorSampler*>(sampler.get());
-
-	if (s == nullptr)
-	{
-		reportScriptError("setActiveGroup() only works with Samplers.");
-		return;
-	}
-
-	if (s->isRoundRobinEnabled())
-	{
-		reportScriptError("Round Robin is not disabled. Call 'Synth.enableRoundRobin(false)' before calling this method.");
-		return;
-	}
-
-	bool ok = s->setCurrentGroupIndex(activeGroupIndex);
-
-	if (!ok)
-	{
-		reportScriptError(String(activeGroupIndex) + " is not a valid group index.");
-	}
+	setActiveGroupForEventId(-1, activeGroupIndex);
 }
 
-void ScriptingApi::Sampler::setMultiGroupIndex(var groupIndex, bool enabled)
+void ScriptingApi::Sampler::setActiveGroupForEventId(int eventId, int activeGroupIndex)
 {
 	ModulatorSampler *s = static_cast<ModulatorSampler*>(sampler.get());
 
@@ -3593,13 +3830,43 @@ void ScriptingApi::Sampler::setMultiGroupIndex(var groupIndex, bool enabled)
 		reportScriptError("Round Robin is not disabled. Call 'Synth.enableRoundRobin(false)' before calling this method.");
 		return;
 	}
+	
+	if(eventId != -1 && s->getMainController()->getKillStateHandler().getCurrentThread() != MainController::KillStateHandler::TargetThread::AudioThread)
+	{
+		reportScriptError("This method is only available in the onNoteOnCallback");
+		return;
+	}
 
+	bool ok = s->setCurrentGroupIndex(activeGroupIndex, eventId);
+
+	if (!ok)
+	{
+		reportScriptError(String(activeGroupIndex) + " is not a valid group index.");
+	}
+}
+
+void ScriptingApi::Sampler::setMultiGroupIndexForEventId(int eventId, var groupIndex, bool enabled)
+{
+	ModulatorSampler *s = static_cast<ModulatorSampler*>(sampler.get());
+
+	if (s == nullptr)
+	{
+		reportScriptError("setActiveGroup() only works with Samplers.");
+		return;
+	}
+
+	if (s->isRoundRobinEnabled())
+	{
+		reportScriptError("Round Robin is not disabled. Call 'Synth.enableRoundRobin(false)' before calling this method.");
+		return;
+	}
+	
 	if (groupIndex.isArray())
 	{
 		for (const auto& v : *groupIndex.getArray())
 		{
 			auto gIndex = (int)v;
-			auto ok = s->setMultiGroupState(gIndex, enabled);
+			auto ok = s->setMultiGroupState(gIndex, enabled, eventId);
 
 			if (!ok)
 				reportScriptError(String(gIndex) + " is not a valid group index.");
@@ -3608,18 +3875,21 @@ void ScriptingApi::Sampler::setMultiGroupIndex(var groupIndex, bool enabled)
 	else if (groupIndex.isObject())
 	{
 		if (auto ml = dynamic_cast<ScriptingObjects::MidiList*>(groupIndex.getObject()))
-			s->setMultiGroupState(ml->getRawDataPointer(), ml->getNumSetValues());
+			s->setMultiGroupState(ml->getRawDataPointer(), ml->getNumSetValues(), eventId);
 	}
 	else
 	{
-		auto ok = s->setMultiGroupState(groupIndex, enabled);
+		auto ok = s->setMultiGroupState(groupIndex, enabled, eventId);
 
 		if (!ok)
 			reportScriptError(groupIndex.toString() + " is not a valid group index.");
 	}
 }
 
-
+void ScriptingApi::Sampler::setMultiGroupIndex(var groupIndex, bool enabled)
+{
+	setMultiGroupIndexForEventId(-1, groupIndex, enabled);
+}
 
 void ScriptingApi::Sampler::setRRGroupVolume(int groupIndex, int gainInDecibels)
 {
@@ -3634,7 +3904,8 @@ void ScriptingApi::Sampler::setRRGroupVolume(int groupIndex, int gainInDecibels)
 	s->setRRGroupVolume(groupIndex, Decibels::decibelsToGain((float)gainInDecibels));
 }
 
-int ScriptingApi::Sampler::getActiveRRGroup()
+
+int ScriptingApi::Sampler::getActiveRRGroupForEventId(int eventId)
 {
 	ModulatorSampler *s = static_cast<ModulatorSampler*>(sampler.get());
 
@@ -3644,7 +3915,12 @@ int ScriptingApi::Sampler::getActiveRRGroup()
 		return 0;
 	}
 
-	return s->getCurrentRRGroup();
+	return s->getCurrentRRGroup(eventId);
+}
+
+int ScriptingApi::Sampler::getActiveRRGroup()
+{
+	return getActiveRRGroupForEventId(-1);
 }
 
 int ScriptingApi::Sampler::getNumActiveGroups() const
@@ -4233,7 +4509,7 @@ void ScriptingApi::Sampler::refreshInterface()
 		RETURN_VOID_IF_NO_THROW()
 	}
 
-	s->sendChangeMessage();
+	s->sendOtherChangeMessage(dispatch::library::ProcessorChangeEvent::Custom, dispatch::sendNotificationAsync);
 	s->getMainController()->getSampleManager().getModulatorSamplerSoundPool2()->sendChangeMessage();
 }
 
@@ -4241,7 +4517,7 @@ void ScriptingApi::Sampler::loadSampleMap(const String &fileName)
 {
 	WARN_IF_AUDIO_THREAD(true, ScriptGuard::IllegalApiCall);
 
-	jassert(LockHelpers::isLockedBySameThread(getScriptProcessor()->getMainController_(), LockHelpers::ScriptLock));
+	jassert(LockHelpers::isLockedBySameThread(getScriptProcessor()->getMainController_(), LockHelpers::Type::ScriptLock));
 
 	if (fileName.isEmpty())
 		reportScriptError("Trying to load a empty sample map...");
@@ -4425,7 +4701,7 @@ var ScriptingApi::Sampler::loadSfzFile(var sfzFile)
 {
 	WARN_IF_AUDIO_THREAD(true, ScriptGuard::IllegalApiCall);
 
-	jassert(LockHelpers::isLockedBySameThread(getScriptProcessor()->getMainController_(), LockHelpers::ScriptLock));
+	jassert(LockHelpers::isLockedBySameThread(getScriptProcessor()->getMainController_(), LockHelpers::Type::ScriptLock));
 
 	ModulatorSampler *s = static_cast<ModulatorSampler*>(sampler.get());
 
@@ -4846,10 +5122,12 @@ struct ScriptingApi::Synth::Wrapper
 	API_METHOD_WRAPPER_1(Synth, getAttribute);
 	API_METHOD_WRAPPER_4(Synth, addNoteOn);
 	API_VOID_METHOD_WRAPPER_3(Synth, addNoteOff);
+	API_VOID_METHOD_WRAPPER_1(Synth, setFixNoteOnAfterNoteOff);
 	API_VOID_METHOD_WRAPPER_3(Synth, addVolumeFade);
 	API_VOID_METHOD_WRAPPER_4(Synth, addPitchFade);
 	API_VOID_METHOD_WRAPPER_4(Synth, addController);
 	API_METHOD_WRAPPER_1(Synth, addMessageFromHolder);
+	API_METHOD_WRAPPER_2(Synth, attachNote);
 	API_VOID_METHOD_WRAPPER_2(Synth, setVoiceGainValue);
 	API_VOID_METHOD_WRAPPER_2(Synth, setVoicePitchValue);
 	API_VOID_METHOD_WRAPPER_1(Synth, startTimer);
@@ -4919,7 +5197,9 @@ ScriptingApi::Synth::Synth(ProcessorWithScriptingContent *p, Message* messageObj
 	ADD_API_METHOD_2(playNote);
 	ADD_API_METHOD_4(playNoteWithStartOffset);
     ADD_API_METHOD_3(playNoteFromUI);
+	ADD_API_METHOD_2(attachNote);
     ADD_API_METHOD_2(noteOffFromUI);
+	ADD_API_METHOD_1(setFixNoteOnAfterNoteOff);
 	ADD_API_METHOD_2(setAttribute);
 	ADD_API_METHOD_1(getAttribute);
 	ADD_API_METHOD_4(addNoteOn);
@@ -5020,7 +5300,7 @@ void ScriptingApi::Synth::noteOffDelayedByEventId(int eventId, int timestamp)
 
 #if HISE_USE_BACKWARDS_COMPATIBLE_TIMESTAMPS
 
-		if (getProcessor()->getMainController()->getKillStateHandler().getCurrentThread() == MainController::KillStateHandler::AudioThread)
+		if (getProcessor()->getMainController()->getKillStateHandler().getCurrentThread() == MainController::KillStateHandler::TargetThread::AudioThread)
 		{
 			// Apparently there was something wrong with the timestamp calculation.
 		// This restores the old behaviour by removing one block from the timestamps.
@@ -5096,6 +5376,25 @@ int ScriptingApi::Synth::playNoteWithStartOffset(int channel, int number, int ve
 	}
 
 	return internalAddNoteOn(channel, number, velocity, 0, offset); // the timestamp will be added from the current event
+}
+
+bool ScriptingApi::Synth::attachNote(int originalNoteId, int artificialNoteId)
+{
+	if (parentMidiProcessor != nullptr)
+	{
+		if(!owner->midiProcessorChain->hasAttachedNoteBuffer())
+			reportScriptError("You must call setFixNoteOnAfterNoteOff() before calling this method");
+
+		return owner->midiProcessorChain->attachNote(originalNoteId, artificialNoteId);
+	}
+
+	return false;
+}
+
+void ScriptingApi::Synth::setFixNoteOnAfterNoteOff(bool shouldBeFixed)
+{
+	if (parentMidiProcessor != nullptr)
+		owner->midiProcessorChain->setFixNoteOnAfterNoteOff(shouldBeFixed);
 }
 
 void ScriptingApi::Synth::addVolumeFade(int eventId, int fadeTimeMilliseconds, int targetVolume)
@@ -5836,7 +6135,7 @@ int ScriptingApi::Synth::internalAddNoteOn(int channel, int noteNumber, int velo
 
 #if HISE_USE_BACKWARDS_COMPATIBLE_TIMESTAMPS
 
-						if (getProcessor()->getMainController()->getKillStateHandler().getCurrentThread() == MainController::KillStateHandler::AudioThread)
+						if (getProcessor()->getMainController()->getKillStateHandler().getCurrentThread() == MainController::KillStateHandler::TargetThread::AudioThread)
 						{
 							// Apparently there was something wrong with the timestamp calculation.
 						// This restores the old behaviour by removing one block from the timestamps.
@@ -6053,10 +6352,9 @@ void ScriptingApi::Synth::setModulatorAttribute(int chain, int modulatorIndex, i
 		}
 	}
 	else if(attributeIndex == -13) modulator->setBypassed(newValue == 1.0f);
-
 	else modulator->setAttribute(attributeIndex, newValue, dontSendNotification);
 
-	modulator->sendChangeMessage();
+	modulator->sendOtherChangeMessage(dispatch::library::ProcessorChangeEvent::Attribute);
 
 
 }
@@ -6202,13 +6500,12 @@ startTime(0.0)
 
 void ScriptingApi::Console::print(var x)
 {
-	
-
 #if USE_BACKEND
 
 	AudioThreadGuard::Suspender suspender;
 	ignoreUnused(suspender);
-    
+	
+
     auto jp = dynamic_cast<JavascriptProcessor*>(getScriptProcessor());
     jp->addInplaceDebugValue(id, lineNumber, x.toString());
     
@@ -6247,9 +6544,9 @@ void ScriptingApi::Console::stop(bool condition)
 
 	auto c = getScriptProcessor()->getMainController_()->getKillStateHandler().getCurrentThread();
 
-	if (c == MainController::KillStateHandler::ScriptingThread ||
-		c == MainController::KillStateHandler::SampleLoadingThread ||
-		c == MainController::KillStateHandler::AudioThread)
+	if (c == MainController::KillStateHandler::TargetThread::ScriptingThread ||
+		c == MainController::KillStateHandler::TargetThread::SampleLoadingThread ||
+		c == MainController::KillStateHandler::TargetThread::AudioThread)
 	{
 		auto n = Time::getMillisecondCounter();
 
@@ -6287,8 +6584,8 @@ void ScriptingApi::Console::blink()
 #if USE_BACKEND && HISE_USE_NEW_CODE_EDITOR
 	if (auto e = getProcessor()->getMainController()->getLastActiveEditor())
 	{
-		Identifier i = id;
-		int l = lineNumber;
+        auto i = id;
+        auto l = lineNumber;
 
 		MessageManager::callAsync([e, i, l]()
 		{
@@ -6715,6 +7012,7 @@ struct ScriptingApi::FileSystem::Wrapper
     API_METHOD_WRAPPER_2(FileSystem, encryptWithRSA);
     API_METHOD_WRAPPER_0(FileSystem, findFileSystemRoots);
     API_METHOD_WRAPPER_2(FileSystem, decryptWithRSA);
+	API_VOID_METHOD_WRAPPER_0(FileSystem, loadExampleAssets);
 };
 
 ScriptingApi::FileSystem::FileSystem(ProcessorWithScriptingContent* pwsc):
@@ -6747,6 +7045,7 @@ ScriptingApi::FileSystem::FileSystem(ProcessorWithScriptingContent* pwsc):
     ADD_API_METHOD_2(encryptWithRSA);
     ADD_API_METHOD_2(decryptWithRSA);
     ADD_API_METHOD_0(findFileSystemRoots);
+	ADD_API_METHOD_0(loadExampleAssets);
 }
 
 ScriptingApi::FileSystem::~FileSystem()
@@ -6780,7 +7079,13 @@ juce::var ScriptingApi::FileSystem::fromReferenceString(String referenceStringOr
 
 	PoolReference ref(getScriptProcessor()->getMainController_(), referenceStringOrFullPath, sub);
 
-	if (ref.isValid() && !ref.isEmbeddedReference())
+	// also return a file object for missing files...
+	if(ref.isAbsoluteFile())
+	{
+		return var(new ScriptingObjects::ScriptFile(getScriptProcessor(), File(referenceStringOrFullPath)));
+	}
+	
+	if ((ref.isValid()) && !ref.isEmbeddedReference())
 	{
 		auto f = ref.getFile();
 		return var(new ScriptingObjects::ScriptFile(getScriptProcessor(), File(f)));
@@ -6802,7 +7107,12 @@ var ScriptingApi::FileSystem::findFiles(var directory, String wildcard, bool rec
 			auto list = root->f.findChildFiles(File::findFilesAndDirectories | File::ignoreHiddenFiles, recursive, wildcard);
 
 			for (auto sf : list)
-                l.add(new ScriptingObjects::ScriptFile(p, sf));
+			{
+				if(sf.getFileName() == ".DS_Store")
+					continue;
+
+				l.add(new ScriptingObjects::ScriptFile(p, sf));
+			}
 		}
 	}
 
@@ -6950,6 +7260,14 @@ String ScriptingApi::FileSystem::decryptWithRSA(const String& dataToDecrypt, con
     return {};
 }
 
+void ScriptingApi::FileSystem::loadExampleAssets()
+{
+#if USE_BACKEND
+	auto am = dynamic_cast<BackendProcessor*>(getMainController())->getAssetManager();
+	am->initialise();
+#endif
+}
+
 
 juce::File ScriptingApi::FileSystem::getFile(SpecialLocations l)
 {
@@ -7044,6 +7362,144 @@ hise::FileHandlerBase::SubDirectories ScriptingApi::FileSystem::getSubdirectory(
 	}
 }
 
+struct ScriptingApi::Threads::Wrapper
+{
+    API_METHOD_WRAPPER_0(ScriptingApi::Threads, getCurrentThread);
+    API_METHOD_WRAPPER_0(ScriptingApi::Threads, isAudioRunning);
+	API_METHOD_WRAPPER_0(ScriptingApi::Threads, isCurrentlyExporting);
+    API_METHOD_WRAPPER_1(ScriptingApi::Threads, isLockedByCurrentThread);
+    API_METHOD_WRAPPER_1(ScriptingApi::Threads, getLockerThread);
+    API_METHOD_WRAPPER_1(ScriptingApi::Threads, isLocked);
+	API_METHOD_WRAPPER_1(ScriptingApi::Threads, toString);
+	API_METHOD_WRAPPER_0(ScriptingApi::Threads, getCurrentThreadName);
+    API_METHOD_WRAPPER_1(ScriptingApi::Threads, killVoicesAndCall);
+};
+
+ScriptingApi::Threads::Threads(ProcessorWithScriptingContent* p):
+	ApiClass(6),
+	ScriptingObject(p)
+{
+	addConstant("Audio", (int)LockHelpers::Type::AudioLock);
+	addConstant("Scripting", (int)LockHelpers::Type::ScriptLock);
+	addConstant("Loading", (int)LockHelpers::Type::SampleLock);
+	addConstant("UI", (int)LockHelpers::Type::MessageLock);
+	addConstant("Unknown", (int)LockHelpers::Type::numLockTypes);
+	addConstant("Free", (int)LockHelpers::Type::unused);
+
+	ADD_API_METHOD_0(getCurrentThread);
+    ADD_API_METHOD_0(isAudioRunning);
+	ADD_API_METHOD_0(isCurrentlyExporting);
+    ADD_API_METHOD_1(isLockedByCurrentThread);
+    ADD_API_METHOD_1(getLockerThread);
+    ADD_API_METHOD_1(isLocked);
+    ADD_API_METHOD_1(killVoicesAndCall);
+	ADD_API_METHOD_1(toString);
+	ADD_API_METHOD_0(getCurrentThreadName);
+}
+
+int ScriptingApi::Threads::getCurrentThread() const
+{
+	auto s = getScriptProcessor()->getMainController_()->getKillStateHandler().getCurrentThread();
+
+	MainController::KillStateHandler::getLockTypeForThread(s);
+
+	switch(s)
+	{
+	case TargetThreadId::MessageThread:		  return (int)LockId::MessageLock;
+	case TargetThreadId::SampleLoadingThread: return (int)LockId::SampleLock;
+	case TargetThreadId::AudioThread:		  return (int)LockId::AudioLock;
+	case TargetThreadId::AudioExportThread:	  return (int)LockId::AudioLock;
+	case TargetThreadId::ScriptingThread:	  return (int)LockId::ScriptLock;
+	case TargetThreadId::UnknownThread:		  return (int)LockId::numLockTypes;
+	case TargetThreadId::Free:				  return (int)LockId::unused;
+	default:								  return -1;
+	}
+}
+
+bool ScriptingApi::Threads::isAudioRunning() const
+{
+	return getScriptProcessor()->getMainController_()->getKillStateHandler().isAudioRunning();
+}
+
+bool ScriptingApi::Threads::isCurrentlyExporting() const
+{
+	return getKillStateHandler().isCurrentlyExporting();
+}
+
+bool ScriptingApi::Threads::isLockedByCurrentThread(int thread) const
+{
+	return getKillStateHandler().currentThreadHoldsLock(getAsLockId(thread));
+}
+
+int ScriptingApi::Threads::getLockerThread(int threadThatIsLocked) const
+{
+	return (int)getKillStateHandler().getLockTypeForThread(getAsThreadId(threadThatIsLocked));
+}
+
+bool ScriptingApi::Threads::isLocked(int thread) const
+{
+	auto t = (LockId)getLockerThread(thread);
+	return t != LockId::unused;
+}
+
+String ScriptingApi::Threads::toString(int thread) const
+{
+	switch(getAsLockId(thread))
+	{
+	case LockHelpers::Type::MessageLock:	return "Message Thread";
+	case LockHelpers::Type::ScriptLock:		return "Scripting Thread";
+	case LockHelpers::Type::SampleLock:		return "Sample Thread";
+	case LockHelpers::Type::IteratorLock:	return "Iterator Thread (never used)";
+	case LockHelpers::Type::AudioLock:		return "Audio Thread";
+	case LockHelpers::Type::numLockTypes:	return "Unknown Thread";
+	case LockHelpers::Type::unused:			return "Free (unlocked)";
+	default:								return "Unknown Thread";
+	}
+}
+
+bool ScriptingApi::Threads::killVoicesAndCall(const var& functionToExecute)
+{
+	WeakCallbackHolder wc(getScriptProcessor(), this, functionToExecute, 0);
+
+	return getKillStateHandler().killVoicesAndCall(dynamic_cast<Processor*>(getScriptProcessor()), [wc](Processor* p)
+	{
+		WeakCallbackHolder copy = std::move(wc);
+
+		if(copy)
+		{
+			LockHelpers::SafeLock sl(p->getMainController(), LockId::ScriptLock);
+			auto ok = copy.callSync(nullptr, 0, nullptr);
+
+			if(!ok.wasOk())
+			{
+				debugError(p, ok.getErrorMessage());
+			}
+
+			return SafeFunctionCall::OK;
+		}
+		else
+		{
+			return SafeFunctionCall::nullPointerCall;
+		}
+	}, TargetThreadId::SampleLoadingThread);
+}
+
+ScriptingApi::Threads::TargetThreadId ScriptingApi::Threads::getAsThreadId(int x)
+{
+	return MainController::KillStateHandler::getThreadForLockType(getAsLockId(x));
+}
+
+ScriptingApi::Threads::LockId ScriptingApi::Threads::getAsLockId(int x)
+{
+	return (LockId)x;
+}
+
+MainController::KillStateHandler& ScriptingApi::Threads::getKillStateHandler()
+{ return getScriptProcessor()->getMainController_()->getKillStateHandler(); }
+
+const MainController::KillStateHandler& ScriptingApi::Threads::getKillStateHandler() const
+{ return getScriptProcessor()->getMainController_()->getKillStateHandler(); }
+
 struct ScriptingApi::Server::Wrapper
 {
 	API_VOID_METHOD_WRAPPER_1(Server, setBaseURL);
@@ -7079,10 +7535,10 @@ ScriptingApi::Server::Server(JavascriptProcessor* jp_):
 	addConstant("StatusAuthenticationFail", StatusAuthenticationFail);
 
 	ADD_API_METHOD_1(setBaseURL);
-	ADD_API_METHOD_3(callWithPOST);
-	ADD_API_METHOD_3(callWithGET);
-	ADD_API_METHOD_1(setHttpHeader);
-	ADD_API_METHOD_4(downloadFile);
+	ADD_TYPED_API_METHOD_3(callWithPOST, VarTypeChecker::String, VarTypeChecker::JSON, VarTypeChecker::Function);
+	ADD_TYPED_API_METHOD_3(callWithGET, VarTypeChecker::String, VarTypeChecker::JSON, VarTypeChecker::Function);
+	ADD_TYPED_API_METHOD_1(setHttpHeader, VarTypeChecker::String);
+    ADD_TYPED_API_METHOD_4(downloadFile, VarTypeChecker::String, VarTypeChecker::JSON, VarTypeChecker::ScriptObject, VarTypeChecker::Function);
 	ADD_API_METHOD_0(getPendingDownloads);
 	ADD_API_METHOD_0(getPendingCalls);
 	ADD_API_METHOD_0(isOnline);
@@ -7312,7 +7768,12 @@ bool ScriptingApi::TransportHandler::Callback::matches(const var& f) const
 
 void ScriptingApi::TransportHandler::Callback::callSync()
 {
-	callback.callSync(args, numArgs);
+	auto ok = callback.callSync(args, numArgs);
+
+#if USE_BACKEND
+	if(!ok.wasOk())
+		debugError(dynamic_cast<Processor*>(jp), ok.getErrorMessage());
+#endif
 }
 
 struct ScriptingApi::TransportHandler::Wrapper
@@ -7323,12 +7784,14 @@ struct ScriptingApi::TransportHandler::Wrapper
 	API_VOID_METHOD_WRAPPER_2(TransportHandler, setOnGridChange);
 	API_VOID_METHOD_WRAPPER_2(TransportHandler, setOnSignatureChange);
 	API_VOID_METHOD_WRAPPER_2(TransportHandler, setOnTransportChange);
+	API_VOID_METHOD_WRAPPER_1(TransportHandler, setOnBypass);
 	API_VOID_METHOD_WRAPPER_1(TransportHandler, setSyncMode);
 	API_VOID_METHOD_WRAPPER_2(TransportHandler, setEnableGrid);
 	API_VOID_METHOD_WRAPPER_1(TransportHandler, startInternalClock);
 	API_VOID_METHOD_WRAPPER_1(TransportHandler, stopInternalClock);
 	API_VOID_METHOD_WRAPPER_0(TransportHandler, sendGridSyncOnNextCallback);
 	API_VOID_METHOD_WRAPPER_1(TransportHandler, setLinkBpmToSyncMode);
+	API_METHOD_WRAPPER_0(TransportHandler, isNonRealtime);
 };
 
 ScriptingApi::TransportHandler::TransportHandler(ProcessorWithScriptingContent* sp) :
@@ -7344,11 +7807,12 @@ ScriptingApi::TransportHandler::TransportHandler(ProcessorWithScriptingContent* 
 
 	getMainController()->addTempoListener(this);
 
-	ADD_API_METHOD_2(setOnTempoChange);
-	ADD_API_METHOD_2(setOnBeatChange);
-	ADD_API_METHOD_2(setOnGridChange);
-	ADD_API_METHOD_2(setOnSignatureChange);
-	ADD_API_METHOD_2(setOnTransportChange);
+	ADD_TYPED_API_METHOD_2(setOnTempoChange, VarTypeChecker::Number, VarTypeChecker::Function);
+	ADD_TYPED_API_METHOD_2(setOnBeatChange, VarTypeChecker::Number, VarTypeChecker::Function);
+	ADD_TYPED_API_METHOD_2(setOnGridChange, VarTypeChecker::Number, VarTypeChecker::Function);
+	ADD_TYPED_API_METHOD_2(setOnSignatureChange, VarTypeChecker::Number, VarTypeChecker::Function);
+	ADD_TYPED_API_METHOD_2(setOnTransportChange, VarTypeChecker::Number, VarTypeChecker::Function);
+	ADD_TYPED_API_METHOD_1(setOnBypass, VarTypeChecker::Function);
 	ADD_API_METHOD_1(setSyncMode);
 	ADD_API_METHOD_1(startInternalClock);
 	ADD_API_METHOD_1(stopInternalClock);
@@ -7356,10 +7820,12 @@ ScriptingApi::TransportHandler::TransportHandler(ProcessorWithScriptingContent* 
 	ADD_API_METHOD_0(sendGridSyncOnNextCallback);
     ADD_API_METHOD_1(stopInternalClockOnExternalStop);
 	ADD_API_METHOD_1(setLinkBpmToSyncMode);
+	ADD_API_METHOD_0(isNonRealtime);
 }
 
 ScriptingApi::TransportHandler::~TransportHandler()
 {
+	getMainController()->getPluginBypassHandler().listeners.removeListener(*this);
 	getMainController()->removeTempoListener(this);
 	getMainController()->removeMusicalUpdateListener(this);
 }
@@ -7537,6 +8003,13 @@ void ScriptingApi::TransportHandler::setOnGridChange(var sync, var f)
 	}
 }
 
+void ScriptingApi::TransportHandler::setOnBypass(var f)
+{
+	bypassCallback = new Callback(this, "onGridChange", f, false, 1);
+
+	getMainController()->getPluginBypassHandler().listeners.addListener(*this, TransportHandler::onBypassUpdate, true);
+}
+
 void ScriptingApi::TransportHandler::setEnableGrid(bool shouldBeEnabled, int tempoFactor)
 {
 	if (isPositiveAndBelow(tempoFactor, (int)TempoSyncer::numTempos))
@@ -7552,12 +8025,32 @@ void ScriptingApi::TransportHandler::setEnableGrid(bool shouldBeEnabled, int tem
 
 void ScriptingApi::TransportHandler::startInternalClock(int timestamp)
 {
-	getMainController()->getMasterClock().changeState(timestamp, true, true);
+	auto& clock = getMainController()->getMasterClock();
+
+	if(clock.changeState(timestamp, true, true))
+	{
+		if(getMainController()->isInsideAudioRendering())
+		{
+			auto gi = clock.processAndCheckGrid(getMainController()->getBufferSizeForCurrentBlock(), {});
+			auto ph = clock.createInternalPlayHead();
+			getMainController()->handleTransportCallbacks(ph, gi);
+		}
+	}
 }
 
 void ScriptingApi::TransportHandler::stopInternalClock(int timestamp)
 {
-	getMainController()->getMasterClock().changeState(timestamp, true, false);
+	auto& clock = getMainController()->getMasterClock();
+
+	if(clock.changeState(timestamp, true, false))
+	{
+		if(getMainController()->isInsideAudioRendering())
+		{
+			auto gi = clock.processAndCheckGrid(getMainController()->getBufferSizeForCurrentBlock(), {});
+			auto ph = clock.createInternalPlayHead();
+			getMainController()->handleTransportCallbacks(ph, gi);
+		}
+	}
 }
 
 void ScriptingApi::TransportHandler::setSyncMode(int syncMode)
@@ -7575,4 +8068,14 @@ void ScriptingApi::TransportHandler::setLinkBpmToSyncMode(bool shouldPrefer)
 	getMainController()->getMasterClock().setLinkBpmToSyncMode(shouldPrefer);
 }
 
+bool ScriptingApi::TransportHandler::isNonRealtime() const
+{
+	return getScriptProcessor()->getMainController_()->getSampleManager().isNonRealtime();
+}
+
+void ScriptingApi::TransportHandler::onBypassUpdate(TransportHandler& handler, bool state)
+{
+	if(handler.bypassCallback != nullptr)
+		handler.bypassCallback->call(state, {}, {}, true);
+}
 } // namespace hise

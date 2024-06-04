@@ -244,13 +244,14 @@ FileBrowser::FileBrowser(BackendRootWindow* rootWindow_) :
 
     auto vp = fileTreeComponent->getViewport();
     
-    vp->setScrollBarThickness(14);
+    vp->setScrollBarThickness(13);
     
     sf.addScrollBarToAnimate(vp->getVerticalScrollBar());
 
 #if HISE_IOS
 #else
-    goToDirectory(GET_PROJECT_HANDLER(rootWindow->getMainSynthChain()).getWorkDirectory());
+
+	resetToRoot();
 #endif
 
 	browseUndoManager->clearUndoHistory();
@@ -354,8 +355,7 @@ bool FileBrowser::perform(const InvocationInfo &info)
 	{
 	case ShowFavoritePopup:
 	{
-		goToDirectory(GET_PROJECT_HANDLER(rootWindow->getMainSynthChain()).getWorkDirectory());
-
+		resetToRoot();
 		return true;
 	}
 	case HardDisks:
@@ -762,6 +762,14 @@ void FileBrowser::previewFile(const File& f)
 	rootWindow->getRootFloatingTile()->showComponentInRootPopup(content, fileTreeComponent, bounds.getCentre(), wrapInViewport);
 }
 
+void FileBrowser::resetToRoot()
+{
+	if(auto am = rootWindow->getBackendProcessor()->assetManager)
+		goToDirectory(am->getRootFolder());
+	else
+		goToDirectory(GET_PROJECT_HANDLER(rootWindow->getMainSynthChain()).getWorkDirectory());
+}
+
 FileBrowser::~FileBrowser()
 {
 	//GET_PROJECT_HANDLER(rootWindow->getMainSynthChain()).removeListener(this);
@@ -1021,5 +1029,6 @@ bool FileBrowser::HiseFileBrowserFilter::isDirectorySuitable(const File& directo
 
 	return true;
 }
+
 
 } // namespace hise

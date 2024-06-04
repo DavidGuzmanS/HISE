@@ -351,6 +351,7 @@ public:
 			DspNodeParameterEditor,
             DspFaustEditorPanel,
 			ScriptBroadcasterMap,
+			PerfettoViewer,
 			ExpansionEditBar,
 			ModuleBrowser,
 			PatchBrowser,
@@ -361,7 +362,6 @@ public:
 			SamplePoolTable,
 			SampleMapPoolTable,
 			MidiFilePoolTable,
-			PopoutButton,
 			PerformanceStatistics,
 			ActivityLed,
             MatrixPeakMeterPanel,
@@ -423,11 +423,17 @@ public:
 
 		void handlePopupMenu(PopupMenu& m, FloatingTile* parent);
 
+		bool handleBackendMenu(PopupMenuOptions r, FloatingTile* parent);
+
 		void registerLayoutPanelTypes();
 
 		void registerAllPanelTypes();
 
 		void registerFrontendPanelTypes();
+
+#if USE_BACKEND
+		void registerBackendPanelTypes();
+#endif
 
 #if HI_ENABLE_EXTERNAL_CUSTOM_TILES
 		void registerExternalPanelTypes();
@@ -588,6 +594,8 @@ namespace FloatingTileKeyPressIds
 	DECLARE_ID(focus_browser)
 	DECLARE_ID(cycle_editor);
 	DECLARE_ID(cycle_browser)
+	DECLARE_ID(save_hip);
+	DECLARE_ID(save_xml);
 }
 
 #undef DECLARE_ID

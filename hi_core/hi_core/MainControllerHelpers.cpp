@@ -123,7 +123,7 @@ int MidiControllerAutomationHandler::getMidiControllerNumber(Processor *interfac
 void MidiControllerAutomationHandler::refreshAnyUsedState()
 {
 	AudioThreadGuard::Suspender suspender;
-	LockHelpers::SafeLock sl(mc, LockHelpers::AudioLock);
+	LockHelpers::SafeLock sl(mc, LockHelpers::Type::AudioLock);
 
 	ignoreUnused(suspender);
 
@@ -161,7 +161,7 @@ void MidiControllerAutomationHandler::removeMidiControlledParameter(Processor *i
 {
 	{
 		AudioThreadGuard audioGuard(&(mc->getKillStateHandler()));
-		LockHelpers::SafeLock sl(mc, LockHelpers::AudioLock);
+		LockHelpers::SafeLock sl(mc, LockHelpers::Type::AudioLock);
 
 		for (int i = 0; i < 128; i++)
 		{
@@ -366,7 +366,7 @@ struct MidiControllerAutomationHandler::MPEData::Data: public Processor::DeleteL
 			{
 				c->removeDeleteListener(this);
 				c->setBypassed(true);
-				c->sendChangeMessage();
+				c->sendOtherChangeMessage(dispatch::library::ProcessorChangeEvent::Custom);
 			}
 			else
 				jassertfalse;
@@ -440,7 +440,7 @@ void MidiControllerAutomationHandler::MPEData::restoreFromValueTree(const ValueT
         return SafeFunctionCall::OK;
 	};
 
-	getMainController()->getKillStateHandler().killVoicesAndCall(getMainController()->getMainSynthChain(), f, MainController::KillStateHandler::SampleLoadingThread);
+	getMainController()->getKillStateHandler().killVoicesAndCall(getMainController()->getMainSynthChain(), f, MainController::KillStateHandler::TargetThread::SampleLoadingThread);
 
 	asyncRestorer.restore(v);
 }
@@ -934,7 +934,7 @@ bool MidiControllerAutomationHandler::handleControllerMessage(const HiseEvent& e
 					if (uph.isUsingCustomDataModel())
 					{
 						if (auto ad = uph.getCustomAutomationData(a.attribute))
-							ad->call(snappedValue);
+							ad->call(snappedValue, dispatch::DispatchType::sendNotificationSync);
 					}
 					else
 					{
@@ -1332,13 +1332,22 @@ void DelayedRenderer::processWrapped(AudioSampleBuffer& buffer, MidiBuffer& midi
 
 		while (numToDo > 0)
 		{
+            mc->setSampleOffsetWithinProcessBuffer(start);
+            
 			auto numThisTime = jmin(numToDo, maxBlockSize);
 
 			AudioSampleBuffer chunk(ptrs, numChannels, numThisTime);
 			
+            auto thisOffset = start;
+            
 			delayedMidiBuffer.clear();
-			delayedMidiBuffer.addEvents(midiMessages, start, numThisTime, -start);
+			delayedMidiBuffer.addEvents(midiMessages, thisOffset, numThisTime, -thisOffset);
 			
+#if HISE_MIDIFX_PLUGIN
+            midiMessages.clear(thisOffset, numThisTime);
+#endif
+
+            
 			start += numThisTime;
 			numToDo -= numThisTime;
 
@@ -1346,7 +1355,13 @@ void DelayedRenderer::processWrapped(AudioSampleBuffer& buffer, MidiBuffer& midi
 				ptrs[i] += numThisTime;
 
 			processWrapped(chunk, delayedMidiBuffer);
+            
+#if HISE_MIDIFX_PLUGIN
+            midiMessages.addEvents(delayedMidiBuffer, 0, numThisTime, thisOffset);
+#endif
 		}
+        
+        mc->setSampleOffsetWithinProcessBuffer(0);
 
 		return;
 	}
@@ -1498,6 +1513,202 @@ void DelayedRenderer::prepareToPlayWrapped(double sampleRate, int samplesPerBloc
         samplesPerBlock += HISE_EVENT_RASTER - (samplesPerBlock % HISE_EVENT_RASTER);
 
 	mc->prepareToPlay(sampleRate, jmin(samplesPerBlock, mc->getMaximumBlockSize()));
+}
+
+AudioRendererBase::AudioRendererBase(MainController* mc):
+	Thread("AudioExportThread"),
+	ControlledObject(mc)
+{}
+
+AudioRendererBase::~AudioRendererBase()
+{
+	stopThread(1000);
+	cleanup();
+}
+
+void AudioRendererBase::initAfterFillingEventBuffer()
+{
+	if (!eventBuffers.isEmpty() && !eventBuffers.getLast()->isEmpty())
+	{
+		if ((bufferSize = getMainController()->getMainSynthChain()->getLargestBlockSize()) != 0)
+		{
+			auto numSamplesTill80Ms = getMainController()->getMainSynthChain()->getSampleRate() * 0.08;
+
+			auto numBuffersTill80Ms = roundToInt(numSamplesTill80Ms / (double)bufferSize);
+
+			thisNumThrowAway = jmax(NumThrowAwayBuffers, numBuffersTill80Ms);
+
+			auto& lb = *eventBuffers.getLast();
+			numSamplesToRender = (int)lb.getEvent(lb.getNumUsed() - 1).getTimeStamp();
+
+			// we'll trim it later
+			numActualSamples = numSamplesToRender;
+
+			auto leftOver = numSamplesToRender % bufferSize;
+
+			if (leftOver != 0)
+			{
+				// pad to blocksize
+				numSamplesToRender += (bufferSize - leftOver);
+			}
+
+			numChannelsToRender = getMainController()->getMainSynthChain()->getMatrix().getNumSourceChannels();
+
+			for(auto events: eventBuffers)
+			{
+				events->subtractFromTimeStamps(-bufferSize * thisNumThrowAway);
+				events->alignEventsToRaster<HISE_EVENT_RASTER>(numSamplesToRender);
+			}
+			
+			for (int i = 0; i < numChannelsToRender; i++)
+				channels.add(new VariantBuffer(numSamplesToRender));
+
+			Thread::startThread(8);
+		}
+	}
+}
+
+void AudioRendererBase::cleanup()
+{
+	getMainController()->getKillStateHandler().setCurrentExportThread(nullptr);
+	channels.clear();
+	memset(splitData, 0, sizeof(float*) * NUM_MAX_CHANNELS);
+	eventBuffers.clear();
+}
+
+void AudioRendererBase::run()
+{
+	if (!renderAudio())
+	{
+		cleanup();
+		return;
+	}
+		
+	callUpdateCallback(true, 1.0);
+	cleanup();
+}
+
+bool AudioRendererBase::renderAudio()
+{
+	// Stop all clocks...
+	getMainController()->getMasterClock().changeState(0, true, false);
+	getMainController()->getMasterClock().changeState(0, false, false);
+        
+	SuspendHelpers::ScopedTicket st(getMainController());
+
+	callUpdateCallback(false, 0.0);
+		
+	while (getMainController()->getKillStateHandler().isAudioRunning())
+	{
+		if (threadShouldExit())
+			return false;
+
+		Thread::wait(400);
+	}
+
+	jassert(!getMainController()->getKillStateHandler().isAudioRunning());
+
+	getMainController()->getKillStateHandler().setCurrentExportThread(getCurrentThreadId());
+	
+	dynamic_cast<AudioProcessor*>(getMainController())->setNonRealtime(true);
+	getMainController()->getSampleManager().handleNonRealtimeState();
+
+	if(sendArtificialTransportMessages)
+		getMainController()->sendArtificialTransportMessage(true);
+
+	{
+		LockHelpers::SafeLock sl(getMainController(), LockHelpers::Type::AudioLock);
+
+		int numTodo = numSamplesToRender;
+		int pos = 0;
+
+		int numThrowAway = thisNumThrowAway;
+
+		AudioSampleBuffer nirvana(numChannelsToRender, bufferSize);
+
+		auto startTime = Time::getMillisecondCounter();
+
+		while (numTodo > 0)
+		{
+			if (threadShouldExit())
+				return false;
+
+			int numThisTime = jmin<int>(bufferSize, numTodo);
+
+			AudioSampleBuffer ab = getChunk(pos, numThisTime);
+			HiseEventBuffer thisBuffer;
+
+			for(auto events: eventBuffers)
+				events->moveEventsBelow(thisBuffer, pos + numThisTime);
+
+			thisBuffer.subtractFromTimeStamps(pos);
+
+			MidiBuffer mb;
+
+			for (const auto& e : thisBuffer)
+				mb.addEvent(e.toMidiMesage(), e.getTimeStamp());
+
+			auto& bufferToUse = numThrowAway > 0 ? nirvana : ab;
+
+			// call this directly to avoid messing with the logic that copes with
+			// weird buffer lenghts (this is not multithread-safe like the internal audio rendering)...
+			getMainController()->processBlockCommon(bufferToUse, mb);
+			
+			if (numThrowAway > 0)
+			{
+				--numThrowAway;
+
+				for(auto events: eventBuffers)
+					events->subtractFromTimeStamps(numThisTime);
+			}
+			else
+			{
+				pos += numThisTime;
+				numTodo -= numThisTime;
+			}
+
+			auto now = Time::getMillisecondCounter();
+
+			if (!skipCallbacks || (now - startTime > 90))
+			{
+				auto p = (double)numTodo / (double)numSamplesToRender;
+				callUpdateCallback(false, 1.0 - p);
+				startTime = now;
+				Thread::wait(skipCallbacks ? 60 : 5);
+			}
+		}
+
+		MidiBuffer emptyBuffer;
+
+		for (int i = 0; i < 50; i++)
+		{
+			dynamic_cast<AudioProcessor*>(getMainController())->processBlock(nirvana, emptyBuffer);
+		}
+	}
+
+	for (int i = 0; i < numChannelsToRender; i++)
+	{
+		VariantBuffer* b = channels[i].get();
+		b->size = numActualSamples;
+	}
+
+	if(sendArtificialTransportMessages)
+		getMainController()->sendArtificialTransportMessage(false);
+
+	getMainController()->getKillStateHandler().setCurrentExportThread(nullptr);
+	dynamic_cast<AudioProcessor*>(getMainController())->setNonRealtime(false);
+	getMainController()->getSampleManager().handleNonRealtimeState();
+	return true;
+}
+
+AudioSampleBuffer AudioRendererBase::getChunk(int startSample, int numSamples)
+{
+	for (int i = 0; i < numChannelsToRender; i++)
+		splitData[i] = channels[i]->buffer.getWritePointer(0, startSample);
+
+	jassert(isPositiveAndBelow(startSample + numSamples, numSamplesToRender + 1));
+
+	return AudioSampleBuffer(splitData, numChannelsToRender, numSamples);
 }
 
 

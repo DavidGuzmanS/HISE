@@ -60,6 +60,37 @@ struct HiseJavascriptEngine::RootObject::TokenIterator
 
 	String lastComment;
 
+    Identifier parseIdentifier()
+    {
+        Identifier i;
+        if (currentType == TokenTypes::identifier)
+            i = currentValue.toString();
+
+        match(TokenTypes::identifier);
+        return i;
+    }
+    
+    VarTypeChecker::VarTypes matchVarType()
+    {
+        if(matchIf(TokenTypes::colon))
+        {
+            auto id = parseIdentifier();
+            
+            VarTypeChecker::VarTypes t = VarTypeChecker::Undefined;
+            
+#if ENABLE_SCRIPTING_SAFE_CHECKS
+            t = VarTypeChecker::getTypeFromString(id);
+            
+            if(t == VarTypeChecker::Undefined)
+                location.throwError("Unknown type " + id.toString());
+#endif
+            
+            return t;
+        }
+        
+        return VarTypeChecker::Undefined;
+    }
+    
 	void skipWhitespaceAndComments()
 	{
 		for (;;)
@@ -285,6 +316,8 @@ struct HiseJavascriptEngine::RootObject::ExpressionTreeBuilder : private TokenIt
 	{
 		ScopedPointer<BlockStatement> b(new BlockStatement(location));
 
+		bool allowScopedBlockStatements = true;
+
 		while (currentType != TokenTypes::closeBrace && currentType != TokenTypes::eof)
 		{
 #if ENABLE_SCRIPTING_BREAKPOINTS
@@ -335,14 +368,27 @@ struct HiseJavascriptEngine::RootObject::ExpressionTreeBuilder : private TokenIt
 			ScopedPointer<Statement> s = parseStatement();
 #endif
 
-			if (LockStatement* ls = dynamic_cast<LockStatement*>(s.get()))
+			if (auto sbs = dynamic_cast<ScopedBlockStatement*>(s.get()))
 			{
-				b->lockStatements.add(ls);
-				s.release();
+				if(!allowScopedBlockStatements)
+				{
+					location.throwError("Scoped block statements must be added at the scope start.");
+				}
+
+				if(auto shouldBeUsed = (USE_BACKEND || !sbs->isDebugStatement()))
+				{
+					b->scopedBlockStatements.add(sbs);
+					s.release();
+				}
+				else
+				{
+					s = nullptr;
+				}
 			}
 			else
 			{
 				b->statements.add(s.release());
+				allowScopedBlockStatements = false;
 			}
 		}
 
@@ -518,6 +564,7 @@ private:
 
 	Statement* parseStatement()
 	{
+		if (matchIf(TokenTypes::dot))			   return parseScopedBlockStatement();
 		if (matchIf(TokenTypes::include_))		   return parseExternalFile();
 		if (matchIf(TokenTypes::inline_))		   return parseInlineFunction(getCurrentNamespace());
 
@@ -541,8 +588,6 @@ private:
 		if (matchIf(TokenTypes::semicolon))        return new Statement(location);
 		if (matchIf(TokenTypes::plusplus))         return parsePreIncDec<AdditionOp>();
 		if (matchIf(TokenTypes::minusminus))       return parsePreIncDec<SubtractionOp>();
-		if (matchIf(TokenTypes::rLock_))		   return parseLockStatement(true);
-		if (matchIf(TokenTypes::wLock_))		   return parseLockStatement(false);
 
 		if (matchesAny(TokenTypes::openParen, TokenTypes::openBracket))
 			return matchEndOfStatement(parseFactor());
@@ -555,6 +600,174 @@ private:
 
 		throwError("Found " + getTokenName(currentType) + " when expecting a statement");
 		return nullptr;
+	}
+
+	Statement* parseScopedBlockStatement()
+	{
+		ExpPtr condition;
+
+		if(matchIf(TokenTypes::if_))
+		{
+			match(TokenTypes::openParen);
+			condition = parseExpression();
+			match(TokenTypes::closeParen);
+			match(TokenTypes::colon);
+		}
+
+		auto typeId = parseIdentifier();
+		
+		if(typeId == ScopedSetter::getStaticId())
+		{
+			ScopedPointer<ScopedSetter> n = new ScopedSetter(location, condition);
+
+			match(TokenTypes::openParen);
+			n->lhs = parseExpression();
+			match(TokenTypes::comma);
+			n->rhs = parseExpression();
+			match(TokenTypes::closeParen);
+
+			return n.release();
+		}
+		else if(typeId == ScopedSuspender::getStaticId())
+		{
+			match(TokenTypes::openParen);
+			auto name = Identifier(currentValue.toString());
+			dispatch::HashedCharPtr p(name);
+
+			try
+			{
+				auto path = dispatch::HashedPath(p);
+				match(TokenTypes::literal);
+				match(TokenTypes::closeParen);
+				return new ScopedSuspender(location, condition, path);
+			}
+			catch(Result& r)
+			{
+				location.throwError(r.getErrorMessage());
+			}
+		}
+		else if(typeId == ScopedBypasser::getStaticId())
+		{
+			match(TokenTypes::openParen);
+			auto b = parseExpression();
+			match(TokenTypes::closeParen);
+
+			return new ScopedBypasser(location, condition, b);
+		}
+		else if(typeId == ScopedTracer::getStaticId())
+		{
+			match(TokenTypes::openParen);
+			auto name = currentValue.toString();
+			match(TokenTypes::literal);
+			match(TokenTypes::closeParen);
+
+			return new ScopedTracer(location, condition, name);
+		}
+		else if(typeId == ScopedProfiler::getStaticId())
+		{
+			match(TokenTypes::openParen);
+			auto name = currentValue.toString();
+			match(TokenTypes::literal);
+			match(TokenTypes::closeParen);
+
+			return new ScopedProfiler(location, condition, name);
+		}
+		else if(typeId == ScopedCounter::getStaticId())
+		{
+			match(TokenTypes::openParen);
+			auto name = currentValue.toString();
+			match(TokenTypes::literal);
+			match(TokenTypes::closeParen);
+
+			return new ScopedCounter(location, condition, name);
+		}
+		else if(typeId == ScopedDumper::getStaticId())
+		{
+			match(TokenTypes::openParen);
+
+			OwnedArray<Expression> expressions;
+
+			while(true)
+			{
+				if(matchIf(TokenTypes::closeParen))
+					break;
+				if(matchIf(TokenTypes::eof))
+					break;
+
+				expressions.add(parseExpression());
+				matchIf(TokenTypes::comma);
+			}
+
+			if(expressions.isEmpty())
+				location.throwError("expected expressions");
+
+			auto n = new ScopedDumper(location, condition);
+			n->dumpObjects.swapWith(expressions);
+			return n;
+		}
+		else if (typeId == ScopedNoop::getStaticId())
+		{
+			match(TokenTypes::openParen);
+
+			while(true)
+			{
+				if(matchIf(TokenTypes::closeParen))
+					break;
+				if(matchIf(TokenTypes::eof))
+					break;
+
+				ExpPtr unused = parseExpression();
+				matchIf(TokenTypes::comma);
+			}
+
+			matchIf(TokenTypes::closeParen);
+
+			return new ScopedNoop(location, condition);
+		}
+		else if(typeId == ScopedPrinter::getStaticId())
+		{
+			match(TokenTypes::openParen);
+			auto name = currentValue.toString();
+			match(TokenTypes::literal);
+			match(TokenTypes::closeParen);
+
+			return new ScopedPrinter(location, condition, name);
+		}
+		else if(typeId == ScopedLocker::getStaticId())
+		{
+			match(TokenTypes::openParen);
+			auto l = (int)parseExpression()->getResult(Scope(nullptr, nullptr, nullptr));
+			match(TokenTypes::closeParen);
+
+			return new ScopedLocker(location, condition, (LockHelpers::Type)l);
+		}
+		else if(typeId == ScopedBefore::getStaticId())
+		{
+			ScopedPointer<ScopedBefore> n = new ScopedBefore(location, condition);
+
+			match(TokenTypes::openParen);
+			n->expected = parseExpression();
+			match(TokenTypes::comma);
+			n->actual = parseExpression();
+			match(TokenTypes::closeParen);
+
+			return n.release();
+		}
+		else if(typeId == ScopedAfter::getStaticId())
+		{
+			ScopedPointer<ScopedAfter> n = new ScopedAfter(location, condition);
+
+			match(TokenTypes::openParen);
+			n->expected = parseExpression();
+			match(TokenTypes::comma);
+			n->actual = parseExpression();
+			match(TokenTypes::closeParen);
+
+			return n.release();
+		}
+
+		location.throwError("unknown scope statement type " + typeId.toString());
+		RETURN_IF_NO_THROW(nullptr);
 	}
 
 	String getFileContent(const String &fileNameInScript, String &refFileName, bool allowMultipleIncludes = false)
@@ -587,9 +800,18 @@ private:
 		File f(refFileName);
 		const String shortFileName = f.getFileName();
 
-		if (!f.existsAsFile())
-			throwError("File " + refFileName + " not found");
+		auto mc = dynamic_cast<Processor*>(hiseSpecialData->processor)->getMainController();
+		auto ef = mc->getExternalScriptFile(f, false);
 
+		String code;
+
+		if(ef != nullptr)
+			code = ef->getFileDocument().getAllContent();
+		else if (f.existsAsFile())
+			code = f.loadFileAsString();
+		else
+			throwError("File " + refFileName + " not found");
+		
 		if (!allowMultipleIncludes)
 		{
 			for (int i = 0; i < hiseSpecialData->includedFiles.size(); i++)
@@ -602,7 +824,7 @@ private:
 			}
 		}
 
-		return f.loadFileAsString();
+		return code;
 
 #else
 
@@ -810,6 +1032,14 @@ private:
 	{
 		matchIf(TokenTypes::var);
 
+		if(currentlyParsingInlineFunction || 
+		   currentFunctionObject != nullptr ||
+		   currentInlineFunction != nullptr ||
+		   outerInlineFunction != nullptr)
+		{
+			location.throwError("Can't declare const var statement inside function body");
+		}
+
 		ScopedPointer<ConstVarStatement> s(new ConstVarStatement(location));
 
 		s->name = parseIdentifier();
@@ -843,9 +1073,11 @@ private:
 	{
 		if (preparser)
 		{
+            auto varType = preparser->matchVarType();
+            
 			Identifier name = preparser->currentValue.toString();
 
-			ns->varRegister.addRegister(name, var::undefined());
+			ns->varRegister.addRegister(name, var::undefined(), varType);
             ns->registerLocations.add(preparser->createDebugLocation());
 
 			ns->comments.set(name, preparser->lastComment);
@@ -869,6 +1101,8 @@ private:
 		{
 			ScopedPointer<RegisterVarStatement> s(new RegisterVarStatement(location));
 
+            matchVarType();
+            
 			s->name = parseIdentifier();
 			hiseSpecialData->checkIfExistsInOtherStorage(HiseSpecialData::VariableStorageType::Register, s->name, location);
 			s->varRegister = &ns->varRegister;
@@ -886,22 +1120,7 @@ private:
 			return s.release();
 		}
 	}
-
-	Statement* parseLockStatement(bool isReadLock)
-	{
 	
-		ScopedPointer<LockStatement> ls = new LockStatement(location, isReadLock);
-
-		match(TokenTypes::openParen);
-
-		ls->lockedObj = parseFactor();
-
-		match(TokenTypes::closeParen);
-		match(TokenTypes::semicolon);
-
-		return ls.release();
-	}
-
 	Statement* parseGlobalAssignment()
 	{
 		ScopedPointer<GlobalVarStatement> s(new GlobalVarStatement(location));
@@ -1014,6 +1233,10 @@ private:
 	{
         auto prevLoc = location;
 		Identifier namespaceId = parseIdentifier();
+
+		dispatch::StringBuilder b;
+		b << "parse namespace " << namespaceId;
+		TRACE_SCRIPTING(DYNAMIC_STRING_BUILDER(b));
 
         static const Array<Identifier> illegalIds =
         {
@@ -1232,16 +1455,23 @@ private:
 
 			preparser->match(TokenTypes::function);
 			
+            auto returnType = preparser->matchVarType();
+            
 			Identifier name = preparser->currentValue.toString();
 			preparser->match(TokenTypes::identifier);
 			preparser->match(TokenTypes::openParen);
 
-			Array<Identifier> inlineArguments;
+			InlineFunction::Object::ArgumentList inlineArguments;
 
 			while (preparser->currentType != TokenTypes::closeParen)
 			{
-				inlineArguments.add(preparser->currentValue.toString());
+                Identifier pid =preparser->currentValue.toString();
 				preparser->match(TokenTypes::identifier);
+                
+                auto argType = preparser->matchVarType();
+                
+                inlineArguments.add({argType, pid});
+                
 				if (preparser->currentType != TokenTypes::closeParen)
 					preparser->match(TokenTypes::comma);
 			}
@@ -1251,6 +1481,7 @@ private:
 			ScopedPointer<InlineFunction::Object> o = new InlineFunction::Object(name, inlineArguments);
 
 			o->location = loc;
+            o->returnType = returnType;
 
 			ns->inlineFunctions.add(o.release());
 			preparser->matchIf(TokenTypes::semicolon);
@@ -1263,6 +1494,8 @@ private:
 
 			match(TokenTypes::function);
 
+            matchVarType();
+            
 			Identifier name = parseIdentifier();
 
 			match(TokenTypes::openParen);
@@ -1557,16 +1790,6 @@ private:
 		return s.release();
 	}
 
-	Identifier parseIdentifier()
-	{
-		Identifier i;
-		if (currentType == TokenTypes::identifier)
-			i = currentValue.toString();
-
-		match(TokenTypes::identifier);
-		return i;
-	}
-
 	var parseFunctionDefinition(Identifier& functionName)
 	{
 		
@@ -1649,7 +1872,10 @@ private:
 		const String prettyName = apiClass->getObjectName() + "." + functionName.toString();
 
 		if (functionIndex < 0) throwError("Function / constant not found: " + prettyName); // Handle also missing constants here
-		ScopedPointer<ApiCall> s = new ApiCall(location, apiClass, numArgs, functionIndex);
+        
+        auto pt = apiClass->getForcedParameterTypes(functionName);
+        
+		ScopedPointer<ApiCall> s = new ApiCall(location, apiClass, numArgs, functionIndex, pt);
 
 		match(TokenTypes::openParen);
 
@@ -1854,8 +2080,10 @@ private:
 					VarRegister* rootRegister = &regNamespace->varRegister;
 
 					const int registerIndex = rootRegister->getRegisterIndex(id);
+                    
+                    auto type = rootRegister->getRegisterVarType(registerIndex);
 
-					return parseSuffixes(new RegisterName(location, parseIdentifier(), rootRegister, registerIndex, getRegisterData(registerIndex, regNamespace)));
+					return parseSuffixes(new RegisterName(location, parseIdentifier(), rootRegister, registerIndex, getRegisterData(registerIndex, regNamespace), type));
 				}
 
 				const int apiClassIndex = hiseSpecialData->apiIds.indexOf(id);
@@ -2024,7 +2252,7 @@ private:
 	Expression* parseNewOperator()
 	{
 		location.throwError("new is not supported anymore");
-		return nullptr;
+		RETURN_IF_NO_THROW(nullptr);
 	}
 
 	Expression* parseIsDefined()
@@ -2157,6 +2385,10 @@ private:
 void HiseJavascriptEngine::RootObject::ExpressionTreeBuilder::preprocessCode(const String& codeToPreprocess, const String& externalFileName)
 {
 	if (codeToPreprocess.isEmpty()) return;
+
+	dispatch::StringBuilder b;
+	b << "preprocess " << externalFileName;
+	TRACE_SCRIPTING(DYNAMIC_STRING_BUILDER(b));
 
 	static const var undeclared("undeclared");
 
@@ -2432,12 +2664,23 @@ void HiseJavascriptEngine::RootObject::execute(const String& code, bool allowCon
 
 	tb.setupApiData(hiseSpecialData, allowConstDeclarations ? code : String());
 
-	auto sl = ScopedPointer<BlockStatement>(tb.parseStatementList());
+	ScopedPointer<BlockStatement> sl;
+
+	{
+		TRACE_SCRIPTING("parse script");
+		sl = tb.parseStatementList();
+	}
+	
 	
 	if(shouldUseCycleCheck)
 		prepareCycleReferenceCheck();
 
-	sl->perform(Scope(nullptr, this, this), nullptr);
+	{
+		TRACE_SCRIPTING("run onInit callback");
+		sl->perform(Scope(nullptr, this, this), nullptr);
+	}
+
+	
 
 	Array<OptimizationPass::OptimizationResult> results;
 

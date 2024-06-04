@@ -57,6 +57,9 @@ void MarkdownRenderer::draw(Graphics& g, Rectangle<float> totalArea, Rectangle<i
 
 float MarkdownRenderer::getHeightForWidth(float width, bool forceUpdate/*=false*/)
 {
+	if(width == 0.0f && lastHeight > 0.0f)
+		return lastHeight;
+
 	if (width == lastWidth && !forceUpdate)
 		return lastHeight;
 
@@ -363,16 +366,22 @@ SimpleMarkdownDisplay::SimpleMarkdownDisplay():
 	vp.setViewedComponent(&canvas, false);
 	addAndMakeVisible(vp);
 	vp.setScrollOnDragEnabled(true);
-        
+	vp.setScrollBarsShown(true, false);
+
 	sf.addScrollBarToAnimate(vp.getVerticalScrollBar());
-	vp.setScrollBarThickness(14);
+	vp.setScrollBarThickness(13);
 }
 
 void SimpleMarkdownDisplay::setText(const String& text)
 {
 	r.setNewText(text);
 	r.setTargetComponent(&canvas);
-		
+
+	if(resizeToFit)
+	{
+		auto h = r.getHeightForWidth(getWidth(), true);
+		setSize(getWidth(), h + 1);
+	}
 
 	resized();
 	r.updateCreatedComponents();
@@ -381,20 +390,36 @@ void SimpleMarkdownDisplay::setText(const String& text)
 void SimpleMarkdownDisplay::resized()
 {
 	auto b = getLocalBounds();
+
+	if(b.isEmpty())
+		return;
+
 	vp.setBounds(b);
+	
+	if(resizeToFit)
+	{
+		totalHeight = r.getHeightForWidth((float)b.getWidth(), true);
+		canvas.setSize(b.getWidth(), (int)totalHeight);
+	}
+	else
+	{
+		auto w = b.getWidth();
+		w -= vp.getScrollBarThickness();
+		totalHeight = r.getHeightForWidth(w, true);
+		canvas.setSize(w, totalHeight);
+	}
 		
-	auto w = b.getWidth() - vp.getScrollBarThickness();
 
-	totalHeight = r.getHeightForWidth(w, true);
+	
 
-	canvas.setSize(w, totalHeight);
+	
 	repaint();
 }
 
 MarkdownPreview::MarkdownPreview(MarkdownDatabaseHolder& holder) :
 	MarkdownContentProcessor(holder),
 	layoutCache(),
-	renderer("", &layoutCache),
+	renderer("", {}, &layoutCache),
 	toc(*this),
 	viewport(*this),
 	internalComponent(*this),
@@ -1884,6 +1909,8 @@ MarkdownPreview::MarkdownDatabaseTreeview::MarkdownDatabaseTreeview(MarkdownPrev
 	tree.setRootItemVisible(false);
 
 	tree.getViewport()->setScrollBarsShown(true, false);
+    tree.getViewport()->setScrollBarThickness(13);
+    sf.addScrollBarToAnimate(tree.getViewport()->getVerticalScrollBar());
 	databaseWasRebuild();
 }
 
@@ -2050,6 +2077,249 @@ void MarkdownPreview::MarkdownDatabaseTreeview::databaseWasRebuild()
 	};
 
 	MessageManager::callAsync(f);
+}
+
+struct MarkdownHelpButton::MarkdownHelp : public Component
+{
+    MarkdownHelp(MarkdownRenderer* renderer, int lineWidth)
+    {
+        setWantsKeyboardFocus(false);
+
+        img = Image(Image::ARGB, lineWidth, (int)renderer->getHeightForWidth((float)lineWidth), true);
+        Graphics g(img);
+
+        renderer->draw(g, { 0.0f, 0.0f, (float)img.getWidth(), (float)img.getHeight() });
+
+        setSize(img.getWidth() + 40, img.getHeight() + 40);
+
+    }
+
+    void mouseDown(const MouseEvent& /*e*/) override
+    {
+        if (auto cb = findParentComponentOfClass<CallOutBox>())
+        {
+            cb->dismiss();
+        }
+    }
+
+    void paint(Graphics& g) override
+    {
+        g.fillAll(Colour(0xFF333333));
+
+        g.drawImageAt(img, 20, 20);
+    }
+
+    Image img;
+};
+
+MarkdownHelpButton::MarkdownHelpButton() :
+    ShapeButton("?", Colours::white.withAlpha(0.7f), Colours::white, Colours::white)
+{
+    setWantsKeyboardFocus(false);
+
+    setShape(getPath(), false, true, true);
+
+    setSize(16, 16);
+    addListener(this);
+}
+
+MarkdownHelpButton::~MarkdownHelpButton()
+{
+    if (ownerComponent != nullptr)
+        ownerComponent->removeComponentListener(this);
+}
+
+void MarkdownHelpButton::setup()
+{
+    parser = new MarkdownRenderer("");
+    parser->setTextColour(Colours::white);
+    parser->setDefaultTextSize(fontSizeToUse);
+    parser->setStyleData(sd);
+}
+
+void MarkdownHelpButton::addImageProvider(MarkdownParser::ImageProvider* newImageProvider)
+{
+    if (parser != nullptr)
+    {
+        parser->setImageProvider(newImageProvider);
+    }
+    else
+    jassertfalse; // you need to call setup before that.
+}
+
+void MarkdownHelpButton::setPopupWidth(int newPopupWidth)
+{
+    popupWidth = newPopupWidth;
+}
+
+void MarkdownHelpButton::setFontSize(float fontSize)
+{
+    fontSizeToUse = fontSize;
+}
+
+
+void MarkdownHelpButton::buttonClicked(Button* /*b*/)
+{
+
+    if (parser != nullptr)
+    {
+        if (currentPopup.getComponent())
+        {
+            currentPopup->dismiss();
+        }
+        else
+        {
+            auto nc = new MarkdownHelp(parser, popupWidth);
+
+            auto window = TopLevelWindowWithOptionalOpenGL::findRoot(this);
+
+            if (window == nullptr)
+                return;
+
+            auto lb = window->getLocalArea(this, getLocalBounds());
+
+            if (nc->getHeight() > 700)
+            {
+                Viewport* viewport = new Viewport();
+
+                viewport->setViewedComponent(nc);
+                viewport->setSize(nc->getWidth() + viewport->getScrollBarThickness(), 700);
+                viewport->setScrollBarsShown(true, false, true, false);
+
+                currentPopup = &CallOutBox::launchAsynchronously(std::unique_ptr<Component>(viewport), lb, window);
+                currentPopup->setAlwaysOnTop(true);
+                currentPopup->setWantsKeyboardFocus(!ignoreKeyStrokes);
+            }
+            else
+            {
+                currentPopup = &CallOutBox::launchAsynchronously(std::unique_ptr<Component>(nc), lb, window);
+                currentPopup->setAlwaysOnTop(true);
+                currentPopup->setWantsKeyboardFocus(!ignoreKeyStrokes);
+            }
+        }
+
+
+
+
+    }
+}
+
+void MarkdownHelpButton::attachTo(Component* componentToAttach, AttachmentType attachmentType_)
+{
+    if (ownerComponent != nullptr)
+        ownerComponent->removeComponentListener(this);
+
+    ownerComponent = componentToAttach;
+    attachmentType = attachmentType_;
+
+    if (ownerComponent != nullptr)
+    {
+        jassert(getParentComponent() == nullptr);
+
+        if (auto parent = ownerComponent->getParentComponent())
+        {
+            parent->addAndMakeVisible(this);
+        }
+        else
+        jassertfalse; // You tried to attach a help button to a component without a parent...
+
+        setVisible(ownerComponent->isVisible());
+        ownerComponent->addComponentListener(this);
+        componentMovedOrResized(*ownerComponent, true, true);
+    }
+}
+
+void MarkdownHelpButton::componentMovedOrResized(Component& c, bool cond, bool cond1)
+{
+    auto cBounds = c.getBoundsInParent();
+
+    switch (attachmentType)
+    {
+    case Overlay:
+        {
+            setBounds(cBounds.withSizeKeepingCentre(16, 16));
+            break;
+        }
+    case OverlayLeft:
+        {
+            auto square = cBounds.removeFromLeft(20);
+
+            setBounds(square.withSizeKeepingCentre(16, 16));
+
+            break;
+        }
+    case OverlayRight:
+        {
+            auto square = cBounds.removeFromRight(20);
+
+            setBounds(square.withSizeKeepingCentre(16, 16));
+
+            break;
+        }
+    case Left:
+        {
+            setBounds(cBounds.getX() - 20, cBounds.getY() + 2, 16, 16);
+            break;
+        }
+    case TopRight:
+        {
+            Rectangle<int> r(cBounds.getRight() - 16, cBounds.getY() - 16, 16, 16);
+            setBounds(r);
+        }
+    default:
+        break;
+    }
+}
+
+void MarkdownHelpButton::componentVisibilityChanged(Component& c)
+{
+    setVisible(c.isVisible());
+}
+
+void MarkdownHelpButton::setIgnoreKeyStrokes(bool shouldIgnoreKeyStrokes)
+{
+    setWantsKeyboardFocus(shouldIgnoreKeyStrokes);
+    ignoreKeyStrokes = shouldIgnoreKeyStrokes;
+
+}
+
+MarkdownHelpButton* MarkdownHelpButton::createAndAddToComponent(Component* c, const String& s, int popupWidth)
+{
+    auto h = new MarkdownHelpButton();
+
+    h->attachTo(c, MarkdownHelpButton::TopRight);
+    h->setHelpText(s);
+    h->setPopupWidth(popupWidth);
+    return h;
+}
+
+void MarkdownHelpButton::componentBeingDeleted(Component& component)
+{
+    component.removeComponentListener(this);
+
+    getParentComponent()->removeChildComponent(this);
+
+    delete this;
+}
+
+void MarkdownHelpButton::setStyleData(const MarkdownLayout::StyleData& newStyleData)
+{
+    sd = newStyleData;
+
+    if (parser != nullptr)
+    {
+        parser->setStyleData(sd);
+        parser->parse();
+    }
+}
+
+
+juce::Path MarkdownHelpButton::getPath()
+{
+    Path path;
+    path.loadPathFromData(MainToolbarIcons::help, MainToolbarIcons::help_Size);
+
+    return path;
 }
 
 

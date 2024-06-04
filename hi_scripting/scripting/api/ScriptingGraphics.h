@@ -500,7 +500,10 @@ namespace ScriptingObjects
 
 		/** Draws a text with the given alignment (see the Label alignment property). */
 		void drawAlignedText(String text, var area, String alignment);
-		
+
+		/** Renders a (blurred) shadow for the text. */
+		void drawAlignedTextShadow(String text, var area, String alignment, var shadowData);
+
 		/** Tries to draw a text string inside a given space. */
 		void drawFittedText(String text, var area, String alignment, int maxLines, float scale);
 
@@ -509,6 +512,9 @@ namespace ScriptingObjects
 
 		/** Draws the text of the given markdown renderer to its specified area. */
 		void drawMarkdownText(var markdownRenderer);
+
+		/** Draws the spectrum of the FFT object to the panel. */
+		void drawFFTSpectrum(var fftObject, var area);
 
 		/** Sets the current gradient via an array [Colour1, x1, y1, Colour2, x2, y2] */
 		void setGradientFill(var gradientData);
@@ -558,6 +564,9 @@ namespace ScriptingObjects
 		/** Adds a drop shadow based on the alpha values of the current image. */
 		void addDropShadowFromAlpha(var colour, int radius);
 
+		/** fills the entire component with a random colour to indicate a UI repaint. */
+		void drawRepaintMarker(const String& label);
+
 		/** Applies an OpenGL shader to the panel. Returns false if the shader could not be compiled. */
 		bool applyShader(var shader, var area);
 
@@ -590,6 +599,9 @@ namespace ScriptingObjects
 		Rectangle<int> getIntRectangleFromVar(const var &data);
 
 		Font currentFont;
+		String currentFontName = "";
+		float currentKerningFactor = 0.0f;
+		float currentFontHeight = 13.0f;
 
 		Result rectangleResult;
 
@@ -677,7 +689,7 @@ namespace ScriptingObjects
 			void drawButtonBackground(Graphics& g, Button& button, const Colour& /*backgroundColour*/,
 				bool isMouseOverButton, bool isButtonDown) override;
 
-			void drawNumberTag(Graphics& g, Colour& c, Rectangle<int> area, int offset, int size, int number) override;
+			void drawNumberTag(Graphics& g, Component& comp, Colour& c, Rectangle<int> area, int offset, int size, int number) override;
 
 			Path createPresetBrowserIcons(const String& id) override;
 			void drawPresetBrowserBackground(Graphics& g, Component* p) override;
@@ -720,7 +732,7 @@ namespace ScriptingObjects
 			void drawSliderPackRightClickLine(Graphics& g, SliderPack& s, Line<float> lineToDraw) override;
 			void drawSliderPackTextPopup(Graphics& g, SliderPack& s, const String& textToDraw) override;
 
-			void drawTableRowBackground(Graphics& g, const ScriptTableListModel::LookAndFeelData& d, int rowNumber, int width, int height, bool rowIsSelected) override;
+			void drawTableRowBackground(Graphics& g, const ScriptTableListModel::LookAndFeelData& d, int rowNumber, int width, int height, bool rowIsSelected, bool rowIsHovered) override;
 
 			void drawTableCell(Graphics& g, const  ScriptTableListModel::LookAndFeelData& d, const String& text, int rowNumber, int columnId, int width, int height, bool rowIsSelected, bool cellIsClicked, bool cellIsHovered) override;
 

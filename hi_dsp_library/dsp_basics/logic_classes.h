@@ -154,6 +154,15 @@ struct midi2freq
     }
 };
 
+struct freq2norm
+{
+    double getValue(double input) const
+    {
+        static constexpr double factor = 1.0 / 20000.0;
+        return input * factor;
+    }
+};
+
 struct db2gain
 {
     double getValue(double input) const
@@ -191,6 +200,25 @@ template <int Unused> struct gate
 
         return false;
     }
+};
+
+template <int Unused> struct random
+{
+    SN_EMPTY_PREPARE;
+    SN_EMPTY_INITIALISE;
+
+    bool getMidiValue(HiseEvent& e, double& v)
+    {
+        if (e.isNoteOn())
+        {
+            v = r.nextDouble();
+            return true;
+        }
+
+        return false;
+    }
+    
+    Random r;
 };
 
 template <int Unused> struct velocity
@@ -251,8 +279,25 @@ template <int Unused> struct frequency
 namespace duplilogic
 {
 
+struct Helpers
+{
+	static bool shouldUpdateNumClones(const String& mode)
+	{
+        // Keep this list up to date with all nodes that return false
+        // at shouldUpdateNumClones();
+		static const StringArray staticModes = 
+        {
+            "toggle"
+		};
+
+        return !staticModes.contains(mode);
+	}
+};
+
 struct spread
 {
+    static constexpr bool shouldUpdateNumClones() { return true; }
+
     double getValue(int index, int numUsed, double inputValue, double gamma)
     {
         if (numUsed == 1)
@@ -275,6 +320,8 @@ struct spread
 
 struct triangle
 {
+    static constexpr bool shouldUpdateNumClones() { return true; }
+
     double getValue(int index, int numUsed, double inputValue, double gamma)
     {
         if (numUsed == 1)
@@ -300,6 +347,8 @@ struct triangle
 
 struct harmonics: public midi_logic::frequency<0>
 {
+    static constexpr bool shouldUpdateNumClones() { return true; }
+
     double getValue(int index, int numUsed, double inputValue, double gamma)
     {
         return (double)(index + 1) * inputValue;
@@ -308,6 +357,8 @@ struct harmonics: public midi_logic::frequency<0>
 
 struct nyquist: public midi_logic::frequency<0>
 {
+    static constexpr bool shouldUpdateNumClones() { return true; }
+
     double getValue(int index, int numUsed, double inputValue, double gamma)
     {
         auto hvalue = harmonics().getValue(index, numUsed, inputValue, gamma);
@@ -317,6 +368,8 @@ struct nyquist: public midi_logic::frequency<0>
 
 struct fixed: public midi_logic::frequency<0>
 {
+    static constexpr bool shouldUpdateNumClones() { return true; }
+
     double getValue(int /*index*/, int /*numUsed*/, double inputValue, double /*gamma*/)
     {
         return inputValue;
@@ -325,6 +378,8 @@ struct fixed: public midi_logic::frequency<0>
 
 struct ducker
 {
+    static constexpr bool shouldUpdateNumClones() { return true; }
+
     double getValue(int /*index*/, int numUsed, double /*inputValue*/, double gamma)
     {
         auto v = 1.0 / jmax(1.0, (double)numUsed);
@@ -338,8 +393,22 @@ struct ducker
     }
 };
 
+
+struct toggle
+{
+    static constexpr bool shouldUpdateNumClones() { return false; }
+
+    double getValue(int index, int numUsed, double inputValue, double /*gamma*/)
+    {
+        auto thisIndex = (double)index / (double)numUsed;
+        return (double)(thisIndex <= inputValue);
+    }
+};
+
 struct random
 {
+    static constexpr bool shouldUpdateNumClones() { return true; }
+
     Random r;
 
 	static constexpr bool IsProcessingHiseEvent() { return true; }
@@ -370,6 +439,8 @@ struct random
 
 struct scale
 {
+    static constexpr bool shouldUpdateNumClones() { return true; }
+
     double getValue(int index, int numUsed, double inputValue, double gamma)
     {
         if (numUsed == 1)
@@ -588,6 +659,38 @@ struct linear
     hmath Math;
 };
 
+struct cosine
+{
+    SN_EMPTY_INITIALISE;
+    
+    template <int Index> double getFadeValue(int numElements, double normalisedInput)
+    {
+        auto lf = linear();
+        
+        auto v = lf.template getFadeValue<Index>(numElements, normalisedInput);
+        
+        return 0.5 * (Math.sin(Math.PI * v - Math.PI / 2.0) + 1.0);
+    }
+    
+    hmath Math;
+};
+
+struct cosine_half
+{
+    SN_EMPTY_INITIALISE;
+    
+    template <int Index> double getFadeValue(int numElements, double normalisedInput)
+    {
+        auto lf = linear();
+        
+        auto v = lf.template getFadeValue<Index>(numElements, normalisedInput);
+        
+        return Math.sin(Math.PI * 0.5 * v);
+    }
+    
+    hmath Math;
+};
+
 struct squared
 {
     SN_EMPTY_INITIALISE;
@@ -744,7 +847,7 @@ private:
 			if (isSmoothing)
 			{
 				auto thisValue = s.smooth(target);
-				isSmoothing = std::abs(thisValue - target) > 0.001f;
+                isSmoothing = FloatSanitizers::isNotSilence(thisValue - target);
 				lastValue = thisValue;
 				return thisValue;
 			}

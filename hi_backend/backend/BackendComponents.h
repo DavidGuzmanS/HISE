@@ -46,7 +46,7 @@ class MacroParameterTable;
 */
 class MacroComponent: public Component,
 					  public ButtonListener,
-					  public SafeChangeListener,
+					  public Processor::OtherListener,
 					  public SliderListener,
 					  public LabelListener
 {
@@ -101,8 +101,15 @@ public:
 
 	}
 
+	void otherChange(Processor* ) override
+	{
+		for(int i = 0; i < macroKnobs.size(); i++)
+		{
+			macroKnobs[i]->setValue(synthChain->getMacroControlData(i)->getCurrentValue(), dontSendNotification);
+		}
 
-	void changeListenerCallback(SafeChangeBroadcaster *);
+		checkActiveButtons();
+	}
 	
 	MacroParameterTable* getMainTable();
 
@@ -234,6 +241,7 @@ class BaseDebugArea;
 *	You can change the parameter range and invert it.
 */
 class MacroParameterTable      :	public Component,
+									public MidiKeyboardFocusTraverser::ParentWithKeyboardFocus,
 									public TableListBoxModel
 {
 public:

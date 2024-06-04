@@ -27,9 +27,12 @@ SimpleDocumentTokenProvider class.
 
 */
 class TokenCollection : public Thread,
-						public AsyncUpdater
+						public AsyncUpdater,
+					    public ReferenceCountedObject
 {
 public:
+
+	using Ptr = ReferenceCountedObjectPtr<TokenCollection>;
 
 	/** A Token is the entry that is being used in the autocomplete popup (or any other IDE tools
 	    that might use that database. */
@@ -70,15 +73,19 @@ public:
 		JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(Token);
 	};
 
-	/** Make it iteratable. */
-	Token* const* begin() const;
-	Token* const* end() const;
-	Token** begin();
-	Token** end();
-
+	
 	using List = ReferenceCountedArray<Token>;
 	using TokenPtr = ReferenceCountedObjectPtr<Token>;
-	
+
+	TokenCollection::List getTokens() const
+	{
+		List l;
+
+		SimpleReadWriteLock::ScopedReadLock sl(buildLock);
+		l.addArray(tokens);
+		return l;
+	}
+
 	/** A provider is a class that adds its tokens to the given list. 
 	
 		In order to use it, subclass from this and override the addTokens() method.
@@ -94,6 +101,11 @@ public:
 		    to keep the UI thread responsive, so make sure you do not interfere with the message thread for longer than necessary. 
 		*/
 		virtual void addTokens(List& tokens) = 0;
+
+        virtual bool shouldAbortTokenRebuild(Thread* t) const
+        {
+            return t != nullptr && t->threadShouldExit();
+        }
 
 		/** Call the TokenCollections rebuild method. This will not be executed synchronously, but on a dedicated thread. */
 		void signalRebuild();
@@ -111,10 +123,13 @@ public:
 		/** This method will be called on the message thread after the list was rebuilt. */
 		virtual void tokenListWasRebuild() = 0;
 
+		/** This method will be called synchronously indicating the state of the token rebuild process. */
+		virtual void threadStateChanged(bool isRunning) {};
+
 		JUCE_DECLARE_WEAK_REFERENCEABLE(Listener);
 	};
 
-	void setEnabled(bool shouldBeEnabled);
+	void setEnabled(bool shouldBeEnabled, bool isDirty);
 
 	void signalRebuild();
 
@@ -124,12 +139,29 @@ public:
 
 	void clearTokenProviders();
 
+	bool hasTokenProviders() const { return !tokenProviders.isEmpty(); }
+
+	void updateIfSync()
+	{
+		if(!useBackgroundThread)
+		{
+			dirty = true;
+			rebuild();
+		}
+	}
+
+	void setUseBackgroundThread(bool shouldUseBackgroundThread)
+	{
+		useBackgroundThread = shouldUseBackgroundThread;
+	}
+
 	/** Register a token provider to this instance. Be aware that you can't register a token provider to multiple instances,
 	    but this shouldn't be a problem. */
 	void addTokenProvider(Provider* ownedProvider);
 
-	TokenCollection();
+	TokenCollection(const Identifier& languageId);
 
+	Identifier getLanguageId() const { return languageId;};
 
 	~TokenCollection();
 
@@ -150,7 +182,16 @@ public:
 
 	struct Sorter
 	{
-		static int compareElements(Token* first, Token* second);
+        struct AbortException: public std::exception
+        {};
+        
+        Sorter(TokenCollection& t):
+          parent(t)
+        {};
+        
+		int compareElements(Token* first, Token* second) const;
+        
+        TokenCollection& parent;
 	};
 
     struct FuzzySorter
@@ -164,7 +205,22 @@ public:
 
     void sortForInput(const String& input);
 
+    bool shouldAbort() const
+    {
+        for(auto p: tokenProviders)
+        {
+            if(p->shouldAbortTokenRebuild(const_cast<TokenCollection*>(this)))
+               return true;
+        }
+
+        return false;
+    }
+    
 private:
+
+	Identifier languageId;
+
+	bool rebuildPending = false;
 
 	bool enabled = true;
 	OwnedArray<Provider> tokenProviders;
@@ -175,6 +231,7 @@ private:
 
 	mutable SimpleReadWriteLock buildLock;
 
+	bool useBackgroundThread = true;
 
 	JUCE_DECLARE_WEAK_REFERENCEABLE(TokenCollection);
 };
@@ -189,6 +246,8 @@ struct SimpleDocumentTokenProvider : public TokenCollection::Provider,
 	void timerCallback() override;
 
 	void codeChanged(bool, int, int) override;
+
+	static void addTokensStatic(TokenCollection::List& tokens, const CodeDocument& doc);
 
 	void addTokens(TokenCollection::List& tokens) override;
 };
@@ -241,7 +300,7 @@ public:
 
 		Autocomplete* ac;
 		SimpleMarkdownDisplay display;
-		ResizableCornerComponent corner;
+		
 	};
 
 	struct Item : public Component
@@ -260,7 +319,7 @@ public:
 		String input;
 	};
 
-	Autocomplete(TokenCollection& tokenCollection_, const String& input, const String& previousToken, int lineNumber, TextEditor* editor_);
+	Autocomplete(TokenCollection::Ptr tokenCollection_, const String& input, const String& previousToken, int lineNumber, TextEditor* editor_);
 
 	~Autocomplete();
 
@@ -308,8 +367,11 @@ public:
 	Range<int> displayedRange;
 	String currentInput;
 
-	TokenCollection& tokenCollection;
+	TokenCollection::List currentList;
+
+	TokenCollection::Ptr tokenCollection;
 	ScrollBar scrollbar;
+	ScrollbarFader fader;
 	bool allowPopup = false;
 
 	ScopedPointer<HelpPopup> helpPopup;

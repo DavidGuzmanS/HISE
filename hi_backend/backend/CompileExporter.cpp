@@ -564,8 +564,18 @@ CompileExporter::ErrorCodes CompileExporter::exportInternal(TargetTypes type, Bu
 		const String directoryPath = tempDirectory.getFullPathName();
 
         JavascriptProcessor::ScopedPreprocessorMerger sm(chainToExport->getMainController());
-        
-		compressValueTree<PresetDictionaryProvider>(exportPresetFile(), directoryPath, "preset");
+
+		try
+		{
+			compressValueTree<PresetDictionaryProvider>(exportPresetFile(), directoryPath, "preset");
+		}
+		catch(Result& r)
+		{
+			std::cout << "Error at exporting preset: " + r.getErrorMessage();
+			return ErrorCodes::CompileError;
+		}
+
+		
 
 #if DONT_EMBED_FILES_IN_FRONTEND
 		const bool embedFiles = false;
@@ -582,9 +592,17 @@ CompileExporter::ErrorCodes CompileExporter::exportInternal(TargetTypes type, Bu
 		// Embed the user presets and extract them on first load
 		compressValueTree<UserPresetDictionaryProvider>(userPresetTree, directoryPath, "userPresets");
 
-		// Always embed scripts and fonts, but don't embed samplemaps
-		compressValueTree<JavascriptDictionaryProvider>(exportEmbeddedFiles(), directoryPath, "externalFiles");
-
+		try
+		{
+			// Always embed scripts and fonts, but don't embed samplemaps
+			compressValueTree<JavascriptDictionaryProvider>(exportEmbeddedFiles(), directoryPath, "externalFiles");
+		}
+		catch(Result& r)
+		{
+			std::cout << "Error at embedding external files: " + r.getErrorMessage();
+			return ErrorCodes::CorruptedPoolFiles;
+		}
+		
 		auto& handler = GET_PROJECT_HANDLER(chainToExport);
 
 		auto iof = handler.getTempFileForPool(FileHandlerBase::Images);
@@ -775,41 +793,70 @@ CompileExporter::ErrorCodes CompileExporter::exportInternal(TargetTypes type, Bu
 
 String checkSampleReferences(ModulatorSynthChain* chainToExport)
 {
-    Processor::Iterator<ModulatorSampler> iter(chainToExport);
-    
-    const File sampleFolder = GET_PROJECT_HANDLER(chainToExport).getSubDirectory(ProjectHandler::SubDirectories::Samples);
-    
-    Array<File> sampleFiles;
-    
-    sampleFolder.findChildFiles(sampleFiles, File::findFiles, true);
-    
-	Array<File> sampleMapFiles;
-
-	auto sampleMapRoot = GET_PROJECT_HANDLER(chainToExport).getSubDirectory(ProjectHandler::SubDirectories::SampleMaps);
-
-	sampleMapRoot.findChildFiles(sampleMapFiles, File::findFiles, true, "*.xml");
-
-	Array<PooledSampleMap> maps;
-
-	for (const auto& f : sampleMapFiles)
 	{
-		PoolReference ref(chainToExport->getMainController(), f.getFullPathName(), FileHandlerBase::SampleMaps);
+		Processor::Iterator<ExternalDataHolder> iter(chainToExport);
 
-		maps.add(chainToExport->getMainController()->getCurrentSampleMapPool()->loadFromReference(ref, PoolHelpers::LoadAndCacheStrong));
-	}
-
-	for (auto d : maps)
-	{
-		if (auto v = d.getData())
+		while(auto p = iter.getNextProcessor())
 		{
-			const String faulty = SampleMap::checkReferences(chainToExport->getMainController(), *v, sampleFolder, sampleFiles);
+			if(auto numAudioSlots = p->getNumDataObjects(ExternalData::DataType::AudioFile))
+			{
+				for(int i = 0; i < numAudioSlots; i++)
+				{
+					auto ref = p->getAudioFile(i)->toBase64String();
 
-			if (faulty.isNotEmpty())
-				return faulty;
+					if(ref.isNotEmpty())
+					{
+						PoolReference r(chainToExport->getMainController(), ref, ProjectHandler::AudioFiles);
+
+						auto f = r.getFile();
+
+						if(!f.existsAsFile())
+							return ref;
+					}
+				}
+			}
+
 		}
 	}
- 
-    return String();
+	{
+		Processor::Iterator<ModulatorSampler> iter(chainToExport);
+    
+	    const File sampleFolder = GET_PROJECT_HANDLER(chainToExport).getSubDirectory(ProjectHandler::SubDirectories::Samples);
+	    
+	    Array<File> sampleFiles;
+	    
+	    sampleFolder.findChildFiles(sampleFiles, File::findFiles, true);
+	    
+		Array<File> sampleMapFiles;
+
+		auto sampleMapRoot = GET_PROJECT_HANDLER(chainToExport).getSubDirectory(ProjectHandler::SubDirectories::SampleMaps);
+
+		sampleMapRoot.findChildFiles(sampleMapFiles, File::findFiles, true, "*.xml");
+
+		Array<PooledSampleMap> maps;
+
+		for (const auto& f : sampleMapFiles)
+		{
+			PoolReference ref(chainToExport->getMainController(), f.getFullPathName(), FileHandlerBase::SampleMaps);
+
+			maps.add(chainToExport->getMainController()->getCurrentSampleMapPool()->loadFromReference(ref, PoolHelpers::LoadAndCacheStrong));
+		}
+
+		for (auto d : maps)
+		{
+			if (auto v = d.getData())
+			{
+				const String faulty = SampleMap::checkReferences(chainToExport->getMainController(), *v, sampleFolder, sampleFiles);
+
+				if (faulty.isNotEmpty())
+					return faulty;
+			}
+		}
+	 
+	    return String();
+	}
+
+    
 }
 
 bool CompileExporter::checkSanity(TargetTypes type, BuildOption option)
@@ -962,18 +1009,7 @@ bool CompileExporter::checkSanity(TargetTypes type, BuildOption option)
 			}
 		}
 	}
-
-    if((type != TargetTypes::EffectPlugin) && !shouldBeSilent() && PresetHandler::showYesNoWindow("Check Sample references", "Do you want to validate all sample references"))
-    {
-        const String faultySample = checkSampleReferences(chainToExport);
-        
-        if(faultySample.isNotEmpty())
-        {
-            printErrorMessage("Wrong / missing sample reference", "The sample " + faultySample + " is missing or an absolute path");
-            return false;
-        }
-    }
-    
+	
 	return true;
 }
 
@@ -1730,6 +1766,21 @@ void CompileExporter::ProjectTemplateHelpers::handleCompilerInfo(CompileExporter
 {
 	handleCompilerWarnings(templateProject);
 
+	const auto includeLoris = (bool)exporter->dataObject.getSetting(HiseSettings::Project::IncludeLorisInFrontend);
+
+	if(includeLoris)
+	{
+		REPLACE_WILDCARD_WITH_STRING("%LORIS_MODULEPATH%", R"(<MODULEPATH id="hi_loris" path="%HISE_PATH%"/>)");
+		REPLACE_WILDCARD_WITH_STRING("%LORIS_MODULEINFO%", R"(<MODULE id="hi_loris" showAllCode="1" useLocalCopy="0" useGlobalPath="0"/>)");
+		REPLACE_WILDCARD_WITH_STRING("%HISE_INCLUDE_LORIS%", "1");
+	}
+	else
+	{
+		REPLACE_WILDCARD_WITH_STRING("%LORIS_MODULEPATH%", "");
+		REPLACE_WILDCARD_WITH_STRING("%LORIS_MODULEINFO%", "");
+		REPLACE_WILDCARD_WITH_STRING("%HISE_INCLUDE_LORIS%", "0");
+	}
+
 	const File jucePath = exporter->hisePath.getChildFile("JUCE/modules");
 
 	REPLACE_WILDCARD_WITH_STRING("%HISE_PATH%", exporter->hisePath.getFullPathName());
@@ -1795,7 +1846,20 @@ void CompileExporter::ProjectTemplateHelpers::handleCompilerInfo(CompileExporter
 		REPLACE_WILDCARD_WITH_STRING("%MACOS_ARCHITECTURE%", "64BitIntel");
 	}
 
-	REPLACE_WILDCARD_WITH_STRING("%COPY_PLUGIN%", isUsingCIMode() ? "0" : "1");
+    auto copyPlugin = !isUsingCIMode();
+    
+#if JUCE_MAC
+    auto macOSVersion = SystemStats::getOperatingSystemType();
+    
+    // deactivate copy step on Sonoma to avoid the cycle dependencies error...
+    if(macOSVersion == SystemStats::MacOS_14)
+    {
+        PresetHandler::showMessageWindow("Copystep diabled", "macOS Sonoma will cause a compile error if the copy step is enabled, so you have to copy the plugin files into the plugin folders manually after compilation");
+        copyPlugin = false;
+    }
+#endif
+    
+	REPLACE_WILDCARD_WITH_STRING("%COPY_PLUGIN%", copyPlugin ? "1" : "0");
 
 #if JUCE_MAC
 	REPLACE_WILDCARD_WITH_STRING("%IPP_COMPILER_FLAGS%", exporter->useIpp ? "/opt/intel/ipp/lib/libippi.a  /opt/intel/ipp/lib/libipps.a /opt/intel/ipp/lib/libippvm.a /opt/intel/ipp/lib/libippcore.a" : String());
@@ -1815,8 +1879,26 @@ void CompileExporter::ProjectTemplateHelpers::handleCompilerInfo(CompileExporter
 	REPLACE_WILDCARD_WITH_STRING("%IPP_LIBRARY%", String());
 #endif
 
-	auto& dataObject = exporter->dataObject;
+	const auto includePerfetto = (bool)exporter->dataObject.getSetting(HiseSettings::Project::CompileWithPerfetto);
 
+	REPLACE_WILDCARD_WITH_STRING("%PERFETTO_INCLUDE_WIN%", includePerfetto ? "\nPERFETTO=1\nNOMINMAX=1\nWIN32_LEAN_AND_MEAN=1" : "");
+	REPLACE_WILDCARD_WITH_STRING("%PERFETTO_COMPILER_FLAGS_WIN%", includePerfetto ? " /Zc:__cplusplus /permissive- /vmg" : "");
+	REPLACE_WILDCARD_WITH_STRING("%PERFETTO_INCLUDE_MACOS%", includePerfetto ? "\nPERFETTO=1" : "");
+
+	const auto dontStripSymbols = (bool)exporter->dataObject.getSetting(HiseSettings::Project::CompileWithDebugSymbols);
+
+	REPLACE_WILDCARD_WITH_STRING("%STRIP_SYMBOLS_WIN%", dontStripSymbols ? " alwaysGenerateDebugSymbols=\"1\" debugInformationFormat=\"ProgramDatabase\"" : "");
+
+    if(dontStripSymbols)
+    {
+        REPLACE_WILDCARD_WITH_STRING("%STRIP_SYMBOLS_MACOS%", "stripLocalSymbols=\"0\" customXcodeFlags=\"STRIP_INSTALLED_PRODUCT=NO,COPY_PHASE_STRIP=NO\"");
+    }
+    else
+    {
+        REPLACE_WILDCARD_WITH_STRING("%STRIP_SYMBOLS_MACOS%", "stripLocalSymbols=\"1\"");
+    }
+    
+	auto& dataObject = exporter->dataObject;
 	auto expansionType = GET_SETTING(HiseSettings::Project::ExpansionType);
 
 	if (expansionType == "Custom" || expansionType == "Full")
@@ -1990,26 +2072,52 @@ void CompileExporter::ProjectTemplateHelpers::handleAdditionalSourceCode(Compile
 		REPLACE_WILDCARD_WITH_STRING("%USE_SPLASH_SCREEN%", "disabled");
 	}
 
+
+	String beatportLibPath = "";
+
+	if(additionalSourceCodeDirectory.getChildFile("beatport").isDirectory())
+	{
+#if JUCE_WINDOWS
+        beatportLibPath << additionalSourceCodeDirectory.getFullPathName() + "/beatport/lib";
+        beatportLibPath << ";";
+        beatportLibPath = beatportLibPath.replaceCharacter('/', '\\');
+        
+        REPLACE_WILDCARD_WITH_STRING("%BEATPORT_DEBUG_LIB%", "");
+        REPLACE_WILDCARD_WITH_STRING("%BEATPORT_RELEASE_LIB%", "");
+        REPLACE_WILDCARD_WITH_STRING("%BEATPORT_LIB_MACOS%", "");
+#else
+        
+        auto df = additionalSourceCodeDirectory.getChildFile("beatport").getChildFile("lib").getChildFile("macos").getChildFile("Debug");
+        auto rf = additionalSourceCodeDirectory.getChildFile("beatport").getChildFile("lib").getChildFile("macos").getChildFile("Release");
+        
+        REPLACE_WILDCARD_WITH_STRING("%BEATPORT_DEBUG_LIB%", df.getFullPathName());
+        REPLACE_WILDCARD_WITH_STRING("%BEATPORT_RELEASE_LIB%", rf.getFullPathName());
+        REPLACE_WILDCARD_WITH_STRING("%BEATPORT_LIB_MACOS%", "Access");
+#endif
+	}
+    else
+    {
+        REPLACE_WILDCARD_WITH_STRING("%BEATPORT_DEBUG_LIB%", "");
+        REPLACE_WILDCARD_WITH_STRING("%BEATPORT_RELEASE_LIB%", "");
+        REPLACE_WILDCARD_WITH_STRING("%BEATPORT_LIB_MACOS%", "");
+    }
+
 #if JUCE_MAC
     const String additionalStaticLibs = exporter->GET_SETTING(HiseSettings::Project::OSXStaticLibs);
     templateProject = templateProject.replace("%OSX_STATIC_LIBS%", additionalStaticLibs);
 #else
 
 	auto additionalStaticLibFolder = exporter->GET_SETTING(HiseSettings::Project::WindowsStaticLibFolder);
-
+	
 	if (additionalStaticLibFolder.isNotEmpty())
 	{
-		REPLACE_WILDCARD_WITH_STRING("%WIN_STATIC_LIB_FOLDER_D64%", additionalStaticLibFolder + "/Debug_x64");
-		REPLACE_WILDCARD_WITH_STRING("%WIN_STATIC_LIB_FOLDER_R64%", additionalStaticLibFolder + "/Release_x64");
-		REPLACE_WILDCARD_WITH_STRING("%WIN_STATIC_LIB_FOLDER_D32%", additionalStaticLibFolder + "/Debug_x86");
-		REPLACE_WILDCARD_WITH_STRING("%WIN_STATIC_LIB_FOLDER_R32%", additionalStaticLibFolder + "/Release_x86");
+		REPLACE_WILDCARD_WITH_STRING("%WIN_STATIC_LIB_FOLDER_D64%", beatportLibPath + additionalStaticLibFolder + "/Debug_x64");
+		REPLACE_WILDCARD_WITH_STRING("%WIN_STATIC_LIB_FOLDER_R64%", beatportLibPath + additionalStaticLibFolder + "/Release_x64");
 	}
 	else
 	{
-		REPLACE_WILDCARD_WITH_STRING("%WIN_STATIC_LIB_FOLDER_D64%", "");
-		REPLACE_WILDCARD_WITH_STRING("%WIN_STATIC_LIB_FOLDER_R64%", "");
-		REPLACE_WILDCARD_WITH_STRING("%WIN_STATIC_LIB_FOLDER_D32%", "");
-		REPLACE_WILDCARD_WITH_STRING("%WIN_STATIC_LIB_FOLDER_R32%", "");
+		REPLACE_WILDCARD_WITH_STRING("%WIN_STATIC_LIB_FOLDER_D64%", beatportLibPath);
+		REPLACE_WILDCARD_WITH_STRING("%WIN_STATIC_LIB_FOLDER_R64%", beatportLibPath);
 	}
 #endif
     

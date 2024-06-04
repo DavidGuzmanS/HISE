@@ -106,21 +106,21 @@ template <class FilterSubType>
 void MultiChannelFilter<FilterSubType>::setFrequency(double newFrequency)
 {
 	targetFreq = FilterLimits::limitFrequency(newFrequency);
-	frequency.setValue(targetFreq);
+	frequency.setValue(targetFreq, !processed);
 }
 
 template <class FilterSubType>
 void MultiChannelFilter<FilterSubType>::setQ(double newQ)
 {
 	targetQ = FilterLimits::limitQ(newQ);
-	q.setValue(targetQ);
+	q.setValue(targetQ, !processed);
 }
 
 template <class FilterSubType>
 void MultiChannelFilter<FilterSubType>::setGain(double newGain)
 {
 	targetGain = FilterLimits::limitGain(newGain);
-	gain.setValue(targetGain);
+	gain.setValue(targetGain, !processed);
 }
 
 template <class FilterSubType>
@@ -154,7 +154,7 @@ Identifier MultiChannelFilter<FilterSubType>::getFilterTypeId()
 }
 
 template <class FilterSubType>
-IIRCoefficients MultiChannelFilter<FilterSubType>::getApproximateCoefficients() const
+std::pair<IIRCoefficients, int> MultiChannelFilter<FilterSubType>::getApproximateCoefficients() const
 {
 	auto cType = internalFilter.getCoefficientTypeList();
 
@@ -166,15 +166,16 @@ IIRCoefficients MultiChannelFilter<FilterSubType>::getApproximateCoefficients() 
 
 	switch (m)
 	{
-	case FilterHelpers::AllPass: return IIRCoefficients::makeAllPass(sampleRate, f_, q_);
-	case FilterHelpers::LowPassReso: return IIRCoefficients::makeLowPass(sampleRate, f_, q_);
-	case FilterHelpers::LowPass: return IIRCoefficients::makeLowPass(sampleRate, f_);
-	case FilterHelpers::BandPass: return IIRCoefficients::makeBandPass(sampleRate, f_);
-	case FilterHelpers::LowShelf: return IIRCoefficients::makeLowShelf(sampleRate, f_, q_, g_);
-	case FilterHelpers::HighShelf: return IIRCoefficients::makeHighShelf(sampleRate, f_, q_, g_);
-	case FilterHelpers::Peak: return IIRCoefficients::makePeakFilter(sampleRate, f_, q_, g_);
-	case FilterHelpers::HighPass: return IIRCoefficients::makeHighPass(sampleRate, f_, q_);
-	default:	return IIRCoefficients::makeLowPass(sampleRate, f_);
+	case FilterHelpers::AllPass:		return { IIRCoefficients::makeAllPass(sampleRate, f_, q_), 1 };
+	case FilterHelpers::LowPassReso:	return { IIRCoefficients::makeLowPass(sampleRate, f_, q_), 1 };
+	case FilterHelpers::Ladder24db:	    return { IIRCoefficients::makeLowPass(sampleRate, f_, q_), 2 };
+	case FilterHelpers::LowPass:		return { IIRCoefficients::makeLowPass(sampleRate, f_), 1 };
+	case FilterHelpers::BandPass:		return { IIRCoefficients::makeBandPass(sampleRate, f_), 1 };
+	case FilterHelpers::LowShelf:		return { IIRCoefficients::makeLowShelf(sampleRate, f_, q_, g_), 1 };
+	case FilterHelpers::HighShelf:		return { IIRCoefficients::makeHighShelf(sampleRate, f_, q_, g_), 1 };
+	case FilterHelpers::Peak:			return { IIRCoefficients::makePeakFilter(sampleRate, f_, q_, g_), 1 };
+	case FilterHelpers::HighPass:		return { IIRCoefficients::makeHighPass(sampleRate, f_, q_), 1 };
+	default:							return { IIRCoefficients::makeLowPass(sampleRate, f_), 1 };
 	}
 }
 
@@ -186,6 +187,8 @@ void MultiChannelFilter<FilterSubType>::reset(int unused/*=0*/)
 	gain.setValueWithoutSmoothing(targetGain);
 	q.setValueWithoutSmoothing(targetQ);
 
+	processed = false;
+
 	internalFilter.reset(numChannels);
 }
 
@@ -193,6 +196,7 @@ template <class FilterSubType>
 void MultiChannelFilter<FilterSubType>::processFrame(float* frameData, int channels)
 {
 	jassert(channels == numChannels);
+	processed = true;
 
 	if (--frameCounter <= 0)
 	{
@@ -218,6 +222,8 @@ void MultiChannelFilter<FilterSubType>::render(FilterHelpers::RenderData& r)
 	{
 		setNumChannels(r.b.getNumChannels());
 	}
+
+	processed = true;
 
 	internalFilter.processSamples(r.b, r.startSample, r.numSamples);
 }
@@ -341,7 +347,7 @@ juce::StringArray MoogFilterSubType::getModes() const
 
 Array<hise::FilterHelpers::CoefficientType> MoogFilterSubType::getCoefficientTypeList() const
 {
-	return { FilterHelpers::LowPassReso, FilterHelpers::LowPassReso, FilterHelpers::LowPassReso };
+	return { FilterHelpers::LowPass, FilterHelpers::LowPassReso, FilterHelpers::Ladder24db };
 }
 
 void MoogFilterSubType::reset(int numChannels)
@@ -803,7 +809,7 @@ juce::Identifier LadderSubType::getStaticId()
 
 Array<hise::FilterHelpers::CoefficientType> LadderSubType::getCoefficientTypeList() const
 {
-	return { FilterHelpers::LowPassReso };
+	return { FilterHelpers::Ladder24db };
 }
 
 juce::StringArray LadderSubType::getModes() const

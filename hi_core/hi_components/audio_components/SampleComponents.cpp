@@ -53,8 +53,6 @@ WaveformComponent::WaveformComponent(Processor* p, int index_) :
 
 	if (p != nullptr)
 	{
-		p->addChangeListener(this);
-
 		if (auto b = dynamic_cast<Broadcaster*>(p))
 		{
 			b->addWaveformListener(this);
@@ -62,8 +60,6 @@ WaveformComponent::WaveformComponent(Processor* p, int index_) :
 		}
 		else
 			jassertfalse; // You have to subclass the processor...
-
-
 	}
 
 	setBufferedToImage(true);
@@ -76,14 +72,8 @@ WaveformComponent::~WaveformComponent()
 	if (processor.get() != nullptr)
 	{
 		dynamic_cast<Broadcaster*>(processor.get())->removeWaveformListener(this);
-		processor->removeChangeListener(this);
 	}
 
-}
-
-void WaveformComponent::changeListenerCallback(SafeChangeBroadcaster*)
-{
-	setBypassed(processor->isBypassed());
 }
 
 void WaveformComponent::setBypassed(bool shouldBeBypassed)
@@ -968,13 +958,13 @@ void SamplerSoundWaveform::mouseDown(const MouseEvent& e)
         {
             value = getThumbnail()->getNextZero(value);
         }
-
-		if (propId == SampleIds::SampleStartMod)
-			value -= (int)currentSound->getSampleProperty(SampleIds::SampleStart);
         
 		if (currentSound == nullptr)
 			return;
 
+        if (propId == SampleIds::SampleStartMod)
+            value -= (int)currentSound->getSampleProperty(SampleIds::SampleStart);
+        
         auto r = currentSound->getPropertyRange(propId);
 
 		if (!r.contains(value))

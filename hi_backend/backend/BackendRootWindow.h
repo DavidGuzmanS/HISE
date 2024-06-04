@@ -47,6 +47,34 @@ namespace hise { using namespace juce;
 
 class BackendProcessorEditor;
 
+class SuspendedOverlay: public Component
+{
+	void paint(Graphics& g) override;
+
+	void mouseDown(const MouseEvent& event) override;
+};
+
+struct SnippetBrowserHelpers
+{
+	enum class Category
+	{
+		Undefined,
+		Modules,
+		MIDI,
+		ScriptingApi,
+		Scriptnode,
+		UI,
+		numCategories
+	};
+
+	static std::map<Identifier, bool> getFoldConfiguration(Category c);
+
+	static StringArray getCategoryNames();
+};
+
+
+
+
 class BackendRootWindow : public TopLevelWindowWithOptionalOpenGL,
 						  public TopLevelWindowWithKeyMappings,
 						  public AudioProcessorEditor,
@@ -59,6 +87,7 @@ class BackendRootWindow : public TopLevelWindowWithOptionalOpenGL,
 						  public DragAndDropContainer,
 						  public ComponentWithHelp::GlobalHandler,
                           public ProjectHandler::Listener,
+						  public GlobalScriptCompileListener,
 						  public MainController::LockFreeDispatcher::PresetLoadListener
 {
 public:
@@ -88,9 +117,18 @@ public:
 	~BackendRootWindow();
 
 	bool isFullScreenMode() const;
+	void deleteThisSnippetInstance(bool sync);
 
-    
-    
+	void toggleSnippetBrowser();
+
+	ScopedPointer<multipage::library::SnippetBrowser> snippetBrowser;
+
+	static mcl::TokenCollection::Ptr getJavascriptTokenCollection(Component* any);
+
+	void rebuildTokenProviders(const Identifier& languageId);
+
+	void scriptWasCompiled(JavascriptProcessor *processor) override;
+
 	File getKeyPressSettingFile() const override;
 
 	void initialiseAllKeyPresses() override;
@@ -213,6 +251,8 @@ public:
 	{
 		popoutWindows.add(new FloatingTileDocumentWindow(this));
 
+        popoutWindows.getLast()->addKeyListener(mainCommandManager->getKeyMappings());
+        
 		return popoutWindows.getLast();
 	}
 
@@ -258,7 +298,17 @@ public:
 		projectIsBeingExtracted = true;
 	}
 
+	Array<Component::SafePointer<BackendRootWindow>> allWindowsAndBrowsers;
+
+	void userTriedToCloseWindow() override;
+
+	void setCurrentlyActiveProcessor();
+
+	SnippetBrowserHelpers::Category currentCategory = SnippetBrowserHelpers::Category::Undefined;
+
 private:
+
+	mcl::TokenCollection::Ptr javascriptTokens;
 
 	bool projectIsBeingExtracted = false;
 
@@ -307,6 +357,8 @@ private:
 	bool resetOnClose = false;
 
 	JUCE_DECLARE_WEAK_REFERENCEABLE(BackendRootWindow);
+
+	ScopedPointer<SuspendedOverlay> suspendedOverlay;
 };
 
 struct BackendPanelHelpers

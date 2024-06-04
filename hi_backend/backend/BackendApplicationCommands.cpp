@@ -39,15 +39,8 @@
 
 
 
-#define ADD_ALL_PLATFORMS(x)(p.addCommandItem(mainCommandManager, x))
 
-#if HISE_IOS
-#define ADD_IOS_ONLY(x)(p.addCommandItem(mainCommandManager, x))
-#define ADD_DESKTOP_ONLY(x)
-#else
-#define ADD_IOS_ONLY(x)()
-#define ADD_DESKTOP_ONLY(x)(p.addCommandItem(mainCommandManager, x))
-#endif
+#define ADD_MENU_ITEM(x) jassert(checkSanity(x)); p.addCommandItem(mainCommandManager, x);
 
 namespace hise { using namespace juce;
 
@@ -90,6 +83,8 @@ void BackendCommandTarget::getAllCommands(Array<CommandID>& commands)
 		WorkspaceScript,
 		WorkspaceSampler,
 		WorkspaceCustom,
+		MenuSnippetFileNew,
+		MenuSnippetClose,
 		MenuNewFile,
 		MenuOpenFile,
 		MenuSaveFile,
@@ -99,30 +94,24 @@ void BackendCommandTarget::getAllCommands(Array<CommandID>& commands)
 		MenuOpenXmlBackup,
 		MenuProjectNew,
 		MenuProjectLoad,
-		MenuCloseProject,
+		MenuFileBrowseExamples,
 		MenuFileCreateRecoveryXml,
-		MenuFileArchiveProject,
-		MenuFileDownloadNewProject,
 		MenuProjectShowInFinder,
-        MenuFileSaveUserPreset,
-		MenuFileSettingsPreset,
-		MenuFileSettingsProject,
-		MenuFileSettingsUser,
-		MenuFileSettingsCompiler,
-		MenuFileSettingCheckSanity,
-		MenuFileSettingsCleanBuildDirectory,
-		MenuFileCreateThirdPartyNode,
-		MenuReplaceWithClipboardContent,
+		MenuFileSettings,
+		MenuExportCleanBuildDirectory,
+		MenuToolsCreateThirdPartyNode,
+		MenuFileExtractEmbeddeSnippetFiles,
+		MenuFileImportSnippet,
 		MenuExportFileAsPlugin,
 		MenuExportFileAsEffectPlugin,
 		MenuExportFileAsMidiFXPlugin,
 		MenuExportFileAsStandaloneApp,
-		MenuExportProject,
+		MenuExportProjectAsExpansion,
 		MenuExportFileAsSnippet,
 		MenuExportSampleDataForInstaller,
 		MenuExportCompileFilesInPool,
 		MenuExportCompileNetworksAsDll,
-		MenuExportWavetablesToMonolith,
+		MenuToolsWavetablesToMonolith,
 		MenuFileQuit,
 		MenuEditUndo,
 		MenuEditRedo,
@@ -134,37 +123,25 @@ void BackendCommandTarget::getAllCommands(Array<CommandID>& commands)
 		MenuEditCreateBase64State,
         MenuEditCloseAllChains,
         MenuEditPlotModulator,
-		MenuViewShowSelectedProcessorInPopup,
 		MenuToolsEditShortcuts,
 		MenuToolsRecompile,
-		MenuToolsCreateInterface,
-        MenuToolsClearConsole,
-		MenuToolsSetCompileTimeOut,
-		MenuToolsUseBackgroundThreadForCompile,
-		MenuToolsRecompileScriptsOnReload,
-		MenuToolsEnableCallStack,
+        MenuViewClearConsole,
 		MenuToolsCheckCyclicReferences,
-        MenuToolsCheckPluginParameterSanity,
+        MenuExportCheckPluginParameters,
 		MenuToolsConvertSVGToPathData,
-		MenuToolsCreateToolbarPropertyDefinition,
-		MenuToolsCreateExternalScriptFile,
-		MenuToolsRestoreToDefault,
-		MenuToolsValidateUserPresets,
-		MenuToolsResolveMissingSamples,
-		MenuToolsDeleteMissingSamples,
-		MenuToolsCheckAllSampleMaps,
-		MenuToolsCheckUnusedImages,
-		MenuToolsGetMissingSampleList,
-		MenuToolsRedirectScriptFolder,
+        MenuToolsBroadcasterWizard,
+		MenuExportRestoreToDefault,
+		MenuExportValidateUserPresets,
+		MenuExportCheckAllSampleMaps,
+		MenuExportCheckUnusedImages,
 		MenuToolsForcePoolSearch,
 		MenuToolsConvertSampleMapToWavetableBanks,
 		MenuToolsConvertAllSamplesToMonolith,
 		MenuToolsUpdateSampleMapIdsBasedOnFileName,
 		MenuToolsConvertSfzToSampleMaps,
-		MenuToolsRemoveAllSampleMaps,
-		MenuToolsUnloadAllAudioFiles,
+		MenuExportUnloadAllSampleMaps,
+		MenuExportUnloadAllAudioFiles,
 		MenuToolsRecordOneSecond,
-		MenuToolsEnableDebugLogging,
 		MenuToolsImportArchivedSamples,
 		MenuToolsCreateRSAKeys,
 		MenuToolsCreateDummyLicenseFile,
@@ -174,25 +151,35 @@ void BackendCommandTarget::getAllCommands(Array<CommandID>& commands)
         MenuToolsCreateRnboTemplate,
 		MenuViewResetLookAndFeel,
 		MenuViewReset,
-        MenuViewFullscreen,
         MenuViewRotate,
 		MenuViewEnableGlobalLayoutMode,
 		MenuViewAddFloatingWindow,
-		MenuViewAddInterfacePreview,
+        MenuViewToggleSnippetBrowser,
         MenuViewGotoUndo,
         MenuViewGotoRedo,
-        MenuOneColumn,
-		MenuTwoColumns,
-		MenuThreeColumns,
-		MenuViewShowPluginPopupPreview,
-        MenuViewIncreaseCodeFontSize,
-        MenuViewDecreaseCodeFontSize,
-        MenuToolsSanityCheck,
 		MenuHelpShowAboutPage,
         MenuHelpCheckVersion,
 		MenuHelpShowDocumentation
 	};
 	commands.addArray(id, numElementsInArray(id));
+
+	commands.sort();
+}
+
+void BackendCommandTarget::setCopyPasteTarget(CopyPasteTarget* newTarget)
+{
+	if (currentCopyPasteTarget.get() != nullptr)
+	{
+		currentCopyPasteTarget->deselect();
+	}
+	else
+	{
+		mainCommandManager->setFirstCommandTarget(this);
+	}
+        
+	currentCopyPasteTarget = newTarget;
+
+	updateCommands();
 }
 
 void BackendCommandTarget::createMenuBarNames()
@@ -243,8 +230,17 @@ void BackendCommandTarget::getCommandInfo(CommandID commandID, ApplicationComman
 	case WorkspaceCustom:
 	{
 		setCommandTarget(result, "Show Custom Workspace", true, bpe->getCurrentWorkspace() == WorkspaceCustom, 'X', false);
+		result.categoryName = "View";
 		break;
 	}
+	case MenuSnippetFileNew:
+		setCommandTarget(result, "Show snippet browser", true, false, 'X', false);
+		result.categoryName = "File";
+		break;
+	case MenuSnippetClose:
+		setCommandTarget(result, "Close this window", true, false, 'X', false);
+		result.categoryName = "File";
+		break;
 	case MenuNewFile:
 		setCommandTarget(result, "New", true, false, 'N');
 		result.categoryName = "File";
@@ -253,18 +249,25 @@ void BackendCommandTarget::getCommandInfo(CommandID commandID, ApplicationComman
 		setCommandTarget(result, "Open Archive", true, false, 'X', false);
 		result.categoryName = "File";
 		break;
-	case MenuSaveFile:
-		setCommandTarget(result, "Save Archive", true, false, 'S');
+	case MenuSaveFile: {
+		setCommandTarget(result, "Save Archive", true, false, 'S', false);
+		auto k = TopLevelWindowWithKeyMappings::getFirstKeyPress(bpe, FloatingTileKeyPressIds::save_hip);
+		result.addDefaultKeypress(k.getKeyCode(), k.getModifiers());
 		result.categoryName = "File";
-		break;
+		break; }
 	case MenuSaveFileAs:
 		setCommandTarget(result, "Save As Archive", true, false, 'X', false);
+
 		result.categoryName = "File";
 		break;
-	case MenuSaveFileXmlBackup:
-	  	setCommandTarget(result, "Save XML", GET_PROJECT_HANDLER(bpe->getMainSynthChain()).isActive(), false, 'S', true, ModifierKeys::commandModifier | ModifierKeys::shiftModifier);
+	case MenuSaveFileXmlBackup: {
+	  	setCommandTarget(result, "Save XML", GET_PROJECT_HANDLER(bpe->getMainSynthChain()).isActive(), false, 'S', false);
+
+		auto k = TopLevelWindowWithKeyMappings::getFirstKeyPress(bpe, FloatingTileKeyPressIds::save_xml);
+		result.addDefaultKeypress(k.getKeyCode(), k.getModifiers());
+
 		result.categoryName = "File";
-		break;
+		break; }
 	case MenuSaveFileAsXmlBackup:
 		setCommandTarget(result, "Save as XML", GET_PROJECT_HANDLER(bpe->getMainSynthChain()).isActive(), false, 'X', false);
 		result.categoryName = "File";
@@ -272,6 +275,10 @@ void BackendCommandTarget::getCommandInfo(CommandID commandID, ApplicationComman
 	case MenuOpenXmlBackup:
 		setCommandTarget(result, "Open XML", GET_PROJECT_HANDLER(bpe->getMainSynthChain()).isActive(), false, 'O');
 		result.categoryName = "File";
+		break;
+	case MenuFileBrowseExamples:
+		setCommandTarget(result, "Browse example snippets", true, false, 'x', false);
+		result.categoryName = "Help";
 		break;
 	case MenuProjectNew:
 		setCommandTarget(result, "Create new Project", true, false, 'X', false);
@@ -281,16 +288,8 @@ void BackendCommandTarget::getCommandInfo(CommandID commandID, ApplicationComman
 		setCommandTarget(result, "Load Project", true, false, 'X', false);
 		result.categoryName = "File";
 		break;
-	case MenuCloseProject:
-		setCommandTarget(result, "Close Project", GET_PROJECT_HANDLER(bpe->getMainSynthChain()).isActive(), false, 'X', false);
-		result.categoryName = "File";
-		break;
-	case MenuFileArchiveProject:
-		setCommandTarget(result, "Archive Project", GET_PROJECT_HANDLER(bpe->getMainSynthChain()).isActive(), false, 'X', false);
-		result.categoryName = "File";
-		break;
-	case MenuFileDownloadNewProject:
-		setCommandTarget(result, "Download archived Project", true, false, 'X', false);
+	case MenuFileExtractEmbeddeSnippetFiles:
+		setCommandTarget(result, "Copy snippet script files to current project", GET_PROJECT_HANDLER(bpe->getMainSynthChain()).isActive(), false, 'X', false);
 		result.categoryName = "File";
 		break;
 	case MenuProjectShowInFinder:
@@ -302,13 +301,9 @@ void BackendCommandTarget::getCommandInfo(CommandID commandID, ApplicationComman
         GET_PROJECT_HANDLER(bpe->getMainSynthChain()).isActive(), false, 'X', false);
 		result.categoryName = "File";
 		break;
-    case MenuFileSaveUserPreset:
-        setCommandTarget(result, "Save current state as new User Preset", true, false, 'X', false);
-		result.categoryName = "File";
-        break;
-	case MenuFileCreateThirdPartyNode:
+	case MenuToolsCreateThirdPartyNode:
 		setCommandTarget(result, "Create C++ third party node template", true, false, 'X', false);
-		result.categoryName = "File";
+		result.categoryName = "Tools";
 		break;
     case MenuExportFileAsPlugin:
         setCommandTarget(result, "Export as Instrument (VSTi / AUi) plugin", true, false, 'X', false);
@@ -322,8 +317,8 @@ void BackendCommandTarget::getCommandInfo(CommandID commandID, ApplicationComman
 		setCommandTarget(result, "Export as Standalone Application", true, false, 'X', false);
 		result.categoryName = "Export";
 		break;
-	case MenuExportProject:
-		setCommandTarget(result, "Export Project", true, false, 'X', false);
+	case MenuExportProjectAsExpansion:
+		setCommandTarget(result, "Export Project as Full Expansion", true, false, 'X', false);
 		result.categoryName = "Export";
 		break;
 	case MenuExportFileAsMidiFXPlugin:
@@ -339,43 +334,30 @@ void BackendCommandTarget::getCommandInfo(CommandID commandID, ApplicationComman
 		result.categoryName = "Export";
 		break;
 	case MenuFileCreateRecoveryXml:
-		setCommandTarget(result, "Create recovery XML from HIP", true, false, 'x', false);
+		setCommandTarget(result, "Create recovery XML from Archive", true, false, 'x', false);
 		result.categoryName = "File";
 		break;
 	case MenuExportSampleDataForInstaller:
-		setCommandTarget(result, "Export Samples as archive", true, false, 'X', false);
+		setCommandTarget(result, "Package sample monolith files", true, false, 'X', false);
 		result.categoryName = "Export";
 		break;
-	case MenuExportWavetablesToMonolith:
+	case MenuToolsWavetablesToMonolith:
 		setCommandTarget(result, "Export Wavetables to monolith", true, false, 'X', false);
-		result.categoryName = "Export";
+		result.categoryName = "Tools";
 		break;
 	case MenuExportCompileFilesInPool:
 		setCommandTarget(result, "Export Pooled Files to Binary Resource", true, false, 'X', false);
 		result.categoryName = "Export";
 		break;
-	case MenuFileSettingsPreset:
-		setCommandTarget(result, "Preset Properties", true, false, 'X', false);
-		
-		break;
-	case MenuFileSettingsProject:
-		setCommandTarget(result, "Preferences", true, false, 'X', false);
+	case MenuFileSettings:
+		setCommandTarget(result, "Settings", true, false, 'X', false);
 		result.categoryName = "File";
 		break;
-	case MenuFileSettingsUser:
-		setCommandTarget(result, "User Settings", true, false, 'X', false);
-		break;
-	case MenuFileSettingsCompiler:
-		setCommandTarget(result, "Compiler Settings", true, false, 'X', false);
-		break;
-	case MenuFileSettingCheckSanity:
-		setCommandTarget(result, "Check for missing properties", true, false, 'X', false);
-		break;
-	case MenuFileSettingsCleanBuildDirectory:
+	case MenuExportCleanBuildDirectory:
 		setCommandTarget(result, "Clean Build directory", true, false, 'X', false);
 		result.categoryName = "Export";
 		break;
-	case MenuReplaceWithClipboardContent:
+	case MenuFileImportSnippet:
 		setCommandTarget(result, "Import HISE Snippet", true, false, 'V', true, ModifierKeys::commandModifier | ModifierKeys::shiftModifier);
 		result.categoryName = "File";
 		break;
@@ -406,7 +388,7 @@ void BackendCommandTarget::getCommandInfo(CommandID commandID, ApplicationComman
 		break;
 	case MenuToolsEditShortcuts:
 		setCommandTarget(result, "Edit Shortcuts", true, false, 'x', false);
-		result.categoryName = "Tools";
+		result.categoryName = "File";
 		break;
 	case MenuEditMoveDown:
 		setCommandTarget(result, "Move down", currentCopyPasteTarget.get() != nullptr, false, 'X', false);
@@ -450,26 +432,11 @@ void BackendCommandTarget::getCommandInfo(CommandID commandID, ApplicationComman
         setCommandTarget(result, "Close all chains", clipBoardNotEmpty(), false, 'X', false);
 		result.categoryName = "Edit";
         break;
-	case MenuToolsCreateInterface:
-		setCommandTarget(result, "Create User Interface", true, false, 'X', false);
-		break;
 	case MenuToolsRecompile:
                          setCommandTarget(result, "Recompile all scripts", true, false, 'X', false);
                          result.addDefaultKeypress(KeyPress::F5Key, ModifierKeys::shiftModifier);
 						 result.categoryName = "Tools";
         break;
-	case MenuToolsSetCompileTimeOut:
-		setCommandTarget(result, "Change compile time out duration", true, false, 'X', false);
-		result.categoryName = "Tools";
-		break;
-	case MenuToolsUseBackgroundThreadForCompile:
-		setCommandTarget(result, "Use background thread for script compiling", true, bpe->getBackendProcessor()->isUsingBackgroundThreadForCompiling(), 'X', false);
-		result.categoryName = "Tools";
-		break;
-	case MenuToolsEnableCallStack:
-		setCommandTarget(result, "Enable Scripting Call Stack ", true, bpe->getBackendProcessor()->isCallStackEnabled(), 'X', false);
-		result.categoryName = "Tools";
-		break;
 	case MenuToolsCheckCyclicReferences:
 		setCommandTarget(result, "Check Javascript objects for cyclic references", true, false, 'X', false);
 		result.categoryName = "Tools";
@@ -479,40 +446,25 @@ void BackendCommandTarget::getCommandInfo(CommandID commandID, ApplicationComman
 
 		result.categoryName = "Tools";
 		break;
-	case MenuToolsRecompileScriptsOnReload:
-		setCommandTarget(result, "Recompile all scripts on preset load", true, bpe->getBackendProcessor()->isCompilingAllScriptsOnPresetLoad(), 'X', false);
+	case MenuToolsBroadcasterWizard:
+		setCommandTarget(result, "Show Broadcaster Wizard", true, false, 'X', false);
 		result.categoryName = "Tools";
-		break;
-	case MenuToolsCreateToolbarPropertyDefinition:
-		setCommandTarget(result, "Create default Toolbar JSON definition", true, false, 'X', false);
 		break;
 	case MenuToolsCreateExternalScriptFile:
 		setCommandTarget(result, "Create external script file", true, false, 'X', false);
 		result.categoryName = "Tools";
 		break;
-	case MenuToolsValidateUserPresets:
-		setCommandTarget(result, "Validate User Presets", true, false, 'X', false);
-		result.categoryName = "Tools";
+	case MenuExportValidateUserPresets:
+		setCommandTarget(result, "Validate user presets", true, false, 'X', false);
+		result.categoryName = "Export";
 		break;
-	case MenuToolsDeleteMissingSamples:
-		setCommandTarget(result, "Delete missing samples", true, false, 'X', false);
-		result.categoryName = "Tools";
+	case MenuExportCheckAllSampleMaps:
+		setCommandTarget(result, "Validate sample maps", GET_PROJECT_HANDLER(bpe->getMainSynthChain()).isActive(), false, 'X', false);
+		result.categoryName = "Export";
 		break;
-	case MenuToolsResolveMissingSamples:
-		setCommandTarget(result, "Resolve missing samples", true, false, 'X', false);
-		result.categoryName = "Tools";
-		break;
-	case MenuToolsGetMissingSampleList:
-		setCommandTarget(result, "Copy list of missing samples to clipboard", true, false, 'X', false);
-		result.categoryName = "Tools";
-		break;
-	case MenuToolsCheckAllSampleMaps:
-		setCommandTarget(result, "Check all sample maps", GET_PROJECT_HANDLER(bpe->getMainSynthChain()).isActive(), false, 'X', false);
-		result.categoryName = "Tools";
-		break;
-     case MenuToolsCheckPluginParameterSanity:
-         setCommandTarget(result, "Check plugin parameters", GET_PROJECT_HANDLER(bpe->getMainSynthChain()).isActive(), false, 'X', false);
-         result.categoryName = "Tools";
+     case MenuExportCheckPluginParameters:
+         setCommandTarget(result, "Validate plugin parameters", GET_PROJECT_HANDLER(bpe->getMainSynthChain()).isActive(), false, 'X', false);
+         result.categoryName = "Export";
          break;
                          
 	case MenuToolsImportArchivedSamples:
@@ -523,14 +475,9 @@ void BackendCommandTarget::getCommandInfo(CommandID commandID, ApplicationComman
 		setCommandTarget(result, "Show DSP Network DLL info", true, false, 'X', false);
 		result.categoryName = "Tools";
 		break;
-	case MenuToolsCheckUnusedImages:
-		setCommandTarget(result, "Check for unreferenced images", GET_PROJECT_HANDLER(bpe->getMainSynthChain()).isActive(), false, 'X', false);
-		result.categoryName = "Tools";
-		break;
-    
-	case MenuToolsRedirectScriptFolder:
-		setCommandTarget(result, "Redirect script folder", true, false, 'X', false);
-		result.categoryName = "Tools";
+	case MenuExportCheckUnusedImages:
+		setCommandTarget(result, "Collect unreferenced images", GET_PROJECT_HANDLER(bpe->getMainSynthChain()).isActive(), false, 'X', false);
+		result.categoryName = "Export";
 		break;
 	case MenuToolsForcePoolSearch:
 		setCommandTarget(result, "Force duplicate search in pool when loading samples", true, bpe->getBackendProcessor()->getSampleManager().getModulatorSamplerSoundPool()->isPoolSearchForced(), 'X', false);
@@ -545,7 +492,7 @@ void BackendCommandTarget::getCommandInfo(CommandID commandID, ApplicationComman
         result.categoryName = "Tools";
         break;
 	case MenuToolsConvertSampleMapToWavetableBanks:
-		setCommandTarget(result, "Convert samplemap to Wavetable Bank", true, false, 'X', false);
+		setCommandTarget(result, "Show Wavetable Creator", true, false, 'X', false);
 		result.categoryName = "Tools";
 		break;
 	case MenuToolsUpdateSampleMapIdsBasedOnFileName:
@@ -556,17 +503,17 @@ void BackendCommandTarget::getCommandInfo(CommandID commandID, ApplicationComman
 		setCommandTarget(result, "Convert SFZ files to SampleMaps", true, false, 'X', false);
 		result.categoryName = "Tools";
 		break;
-	case MenuToolsRemoveAllSampleMaps:
-		setCommandTarget(result, "Clear all Samplemaps", true, false, 'X', false);
-		result.categoryName = "Tools";
+	case MenuExportUnloadAllSampleMaps:
+		setCommandTarget(result, "Unload all Samplemaps", true, false, 'X', false);
+		result.categoryName = "Export";
 		break;
 	case MenuToolsApplySampleMapProperties:
 		setCommandTarget(result, "Apply sample map properties to sample files", true, false, 'X', false);
 		result.categoryName = "Tools";
 		break;
-	case MenuToolsUnloadAllAudioFiles:
+	case MenuExportUnloadAllAudioFiles:
 		setCommandTarget(result, "Unload all audio files", true, false, 'X', false);
-		result.categoryName = "Tools";
+		result.categoryName = "Export";
 		break;
 	case MenuToolsEnableDebugLogging:
 		setCommandTarget(result, "Enable Debug Logger", true, bpe->owner->getDebugLogger().isLogging(), 'X', false);
@@ -581,12 +528,12 @@ void BackendCommandTarget::getCommandInfo(CommandID commandID, ApplicationComman
 		result.categoryName = "Tools";
 		break;
 	case MenuToolsConvertSVGToPathData:
-		setCommandTarget(result, "Convert SVG to Path data", true, false, 'X', false);
+		setCommandTarget(result, "Show SVG to Path Converter", true, false, 'X', false);
 		result.categoryName = "Tools";
 		break;
-	case MenuToolsRestoreToDefault:
-		setCommandTarget(result, "Restore interface to default values", true, false, 'X', false);
-		result.categoryName = "Tools";
+	case MenuExportRestoreToDefault:
+		setCommandTarget(result, "Reset UI controls to default values", true, false, 'X', false);
+		result.categoryName = "Export";
 		break;
 	case MenuToolsCreateDummyLicenseFile:
 		setCommandTarget(result, "Create Dummy License File", true, false, 'X', false);
@@ -596,6 +543,10 @@ void BackendCommandTarget::getCommandInfo(CommandID commandID, ApplicationComman
 		setCommandTarget(result, "Reset custom Look and Feel", true, false, 'X', false);
 		result.categoryName = "View";
 		break;
+    case MenuViewToggleSnippetBrowser:
+        setCommandTarget(result, "Toggle Snippet Browser", true, false, 'X', false);
+        result.categoryName = "View";
+        break;
 	case MenuViewReset:
 		setCommandTarget(result, "Reset Workspaces", true, false, 'X', false);
 		result.categoryName = "View";
@@ -624,12 +575,9 @@ void BackendCommandTarget::getCommandInfo(CommandID commandID, ApplicationComman
         
         break;
     }
-    case MenuViewFullscreen:
-        setCommandTarget(result, "Toggle Fullscreen", true, bpe->isFullScreenMode(), 'X', false);
-		result.categoryName = "View";
-        break;
 	case MenuViewRotate:
         setCommandTarget(result, "Vertical Layout", true, bpe->isRotated(), 'X', false);
+		result.categoryName = "View";
         break;
 	case MenuViewEnableGlobalLayoutMode:
 		setCommandTarget(result, "Enable Layout Mode", true, bpe->getRootFloatingTile()->isLayoutModeEnabled(), 'X', false);
@@ -639,40 +587,9 @@ void BackendCommandTarget::getCommandInfo(CommandID commandID, ApplicationComman
 		setCommandTarget(result, "Add floating window", true, false, 'x', false);
 		result.categoryName = "View";
 		break;
-	case MenuViewAddInterfacePreview:
-		setCommandTarget(result, "Add Interface preview", true, false, 'x', false);
-		result.categoryName = "View";
-		break;
-	case MenuOneColumn:
-		setCommandTarget(result, "One Column", true, currentColumnMode == OneColumn, '1', true, ModifierKeys::altModifier);
-		break;
-	case MenuTwoColumns:
-		setCommandTarget(result, "Two Columns", true, currentColumnMode == TwoColumns, '2', true, ModifierKeys::altModifier);
-		break;
-	case MenuThreeColumns:
-		setCommandTarget(result, "Three Columns", true, currentColumnMode == ThreeColumns, '3', true, ModifierKeys::altModifier);
-		break;
-	case MenuViewShowPluginPopupPreview:
-		setCommandTarget(result, "Open Plugin Preview Window", bpe->mainEditor->isPluginPreviewCreatable(), !bpe->mainEditor->isPluginPreviewShown(), 'X', false);
-		result.categoryName = "View";
-		break;
-    case MenuViewIncreaseCodeFontSize:
-        setCommandTarget(result, "Increase code font size", true, false, 'X', false);
-        break;
-    case MenuViewDecreaseCodeFontSize:
-        setCommandTarget(result, "Decrease code font size", true, false, 'X', false);
-        break;
-    case MenuViewShowSelectedProcessorInPopup:
-		setCommandTarget(result, "Show Processor in full screen", dynamic_cast<ProcessorEditor*>(currentCopyPasteTarget.get()) != nullptr, false, 'X', false);
-		result.addDefaultKeypress(KeyPress::F11Key, ModifierKeys::noModifiers);
-		break;
-    case MenuToolsSanityCheck:
-        setCommandTarget(result, "Validate plugin parameters", true, false, 'X', false);
-		result.categoryName = "Tools";
-        break;
-    case MenuToolsClearConsole:
+    case MenuViewClearConsole:
         setCommandTarget(result, "Clear Console", true, false, 'X', false);
-		result.categoryName = "Tools";
+		result.categoryName = "View";
         break;
 	case MenuHelpShowAboutPage:
 		setCommandTarget(result, "About HISE", true, false, 'X', false);
@@ -701,6 +618,8 @@ bool BackendCommandTarget::perform(const InvocationInfo &info)
 	case WorkspaceScript:
 	case WorkspaceSampler:
 	case WorkspaceCustom:				bpe->showWorkspace(info.commandID); updateCommands(); return true;
+	case MenuViewToggleSnippetBrowser:	bpe->toggleSnippetBrowser(); return true;
+	case MenuSnippetClose:				bpe->deleteThisSnippetInstance(false); return true;
 	case MenuNewFile:                   Actions::newFile(bpe); return true;
 	case MenuOpenFile:                  Actions::openFile(bpe); return true;
 	case MenuSaveFile:                  Actions::saveFile(bpe, false); updateCommands(); return true;
@@ -712,20 +631,14 @@ bool BackendCommandTarget::perform(const InvocationInfo &info)
                                         if (fc.browseForFileToOpen()) Actions::openFileFromXml(bpe, fc.getResult()); return true;}
 	case MenuProjectNew:				Actions::createNewProject(bpe); updateCommands();  return true;
 	case MenuProjectLoad:				Actions::loadProject(bpe); updateCommands(); return true;
-	case MenuCloseProject:				Actions::closeProject(bpe); updateCommands(); return true;
-	case MenuFileArchiveProject:		Actions::archiveProject(bpe); return true;
-	case MenuFileDownloadNewProject:	Actions::downloadNewProject(bpe); return true;
 	case MenuProjectShowInFinder:		Actions::showProjectInFinder(bpe); return true;
+	case MenuFileBrowseExamples:		Actions::showExampleBrowser(bpe); return true;
 	case MenuFileCreateRecoveryXml:		Actions::createRecoveryXml(bpe); return true;
-    case MenuFileSaveUserPreset:        Actions::saveUserPreset(bpe); return true;
-	case MenuFileSettingsPreset:		Actions::showFilePresetSettings(bpe); return true;
-	case MenuFileSettingsProject:		Actions::showFileProjectSettings(bpe); return true;
-	case MenuFileSettingsUser:			Actions::showFileUserSettings(bpe); return true;
-	case MenuFileSettingsCompiler:		Actions::showFileCompilerSettings(bpe); return true;
-	case MenuFileSettingCheckSanity:	Actions::checkSettingSanity(bpe); return true;
-	case MenuFileSettingsCleanBuildDirectory:	Actions::cleanBuildDirectory(bpe); return true;
-	case MenuFileCreateThirdPartyNode:	Actions::createThirdPartyNode(bpe); return true;
-	case MenuReplaceWithClipboardContent: Actions::replaceWithClipboardContent(bpe); return true;
+	case MenuFileSettings:				Actions::showFileProjectSettings(bpe); return true;
+	case MenuExportCleanBuildDirectory:	Actions::cleanBuildDirectory(bpe); return true;
+	case MenuToolsCreateThirdPartyNode:	Actions::createThirdPartyNode(bpe); return true;
+	case MenuFileImportSnippet: Actions::replaceWithClipboardContent(bpe); return true;
+	case MenuFileExtractEmbeddeSnippetFiles: Actions::extractEmbeddedFilesFromSnippet(bpe); return true;
 	case MenuFileQuit:                  if (PresetHandler::showYesNoWindow("Quit Application", "Do you want to quit?"))
                                             JUCEApplicationBase::quit(); return true;
 	case MenuEditUndo:					bpe->owner->getControlUndoManager()->undo(); updateCommands(); return true;
@@ -739,41 +652,37 @@ bool BackendCommandTarget::perform(const InvocationInfo &info)
     case MenuEditPlotModulator:         Actions::plotModulator(currentCopyPasteTarget.get()); updateCommands(); return true;
     case MenuEditCloseAllChains:        Actions::closeAllChains(bpe); return true;
 	case MenuToolsRecompile:            Actions::recompileAllScripts(bpe); return true;
-	case MenuToolsCreateInterface:		Actions::createUserInterface(bpe); return true;
-	case MenuToolsSetCompileTimeOut:	Actions::setCompileTimeOut(bpe); return true;
-	case MenuToolsUseBackgroundThreadForCompile: Actions::toggleUseBackgroundThreadsForCompiling(bpe); updateCommands(); return true;
-	case MenuToolsEnableCallStack:		Actions::toggleCallStackEnabled(bpe); updateCommands(); return true;
 	case MenuToolsCheckCyclicReferences:Actions::checkCyclicReferences(bpe); return true;
-	case MenuToolsRecompileScriptsOnReload: Actions::toggleCompileScriptsOnPresetLoad(bpe); updateCommands(); return true;
 	case MenuToolsCreateExternalScriptFile:	Actions::createExternalScriptFile(bpe); updateCommands(); return true;
-    case MenuToolsSanityCheck:			Actions::validatePluginParameters(bpe); return true;
-	case MenuToolsValidateUserPresets:	Actions::validateUserPresets(bpe); return true;
-	case MenuToolsRestoreToDefault:		Actions::restoreToDefault(bpe); return true;
-	case MenuToolsResolveMissingSamples:Actions::resolveMissingSamples(bpe); return true;
-	case MenuToolsGetMissingSampleList:	Actions::copyMissingSampleListToClipboard(bpe); return true;
-	case MenuToolsCheckUnusedImages:	Actions::checkUnusedImages(bpe); return true;
+	case MenuExportValidateUserPresets:	Actions::validateUserPresets(bpe); return true;
+	case MenuExportRestoreToDefault:		Actions::restoreToDefault(bpe); return true;
+	case MenuExportCheckUnusedImages:	Actions::checkUnusedImages(bpe); return true;
 	case MenuToolsShowDspNetworkDllInfo: Actions::showNetworkDllInfo(bpe); return true;
-	case MenuToolsRedirectScriptFolder: Actions::redirectScriptFolder(bpe); updateCommands(); return true;
 	case MenuToolsForcePoolSearch:		Actions::toggleForcePoolSearch(bpe); updateCommands(); return true;
 	case MenuToolsConvertSampleMapToWavetableBanks:	Actions::convertSampleMapToWavetableBanks(bpe); return true;
 	case MenuToolsConvertAllSamplesToMonolith:	Actions::convertAllSamplesToMonolith(bpe); return true;
 	case MenuToolsUpdateSampleMapIdsBasedOnFileName:	Actions::updateSampleMapIds(bpe); return true;
 	case MenuToolsConvertSfzToSampleMaps:	Actions::convertSfzFilesToSampleMaps(bpe); return true;
-	case MenuToolsRemoveAllSampleMaps:	Actions::removeAllSampleMaps(bpe); return true;
+	case MenuExportUnloadAllSampleMaps:	Actions::removeAllSampleMaps(bpe); return true;
 	case MenuToolsSimulateChangingBufferSize: bpe->getBackendProcessor()->toggleDynamicBufferSize(); return true;
-	case MenuToolsUnloadAllAudioFiles:  Actions::unloadAllAudioFiles(bpe); return true;
+	case MenuExportUnloadAllAudioFiles:  Actions::unloadAllAudioFiles(bpe); return true;
 	case MenuToolsCreateRSAKeys:		Actions::createRSAKeys(bpe); return true;
 	case MenuToolsCreateDummyLicenseFile: Actions::createDummyLicenseFile(bpe); return true;
-	case MenuToolsCheckAllSampleMaps:	Actions::checkAllSamplemaps(bpe); return true;
-    case MenuToolsCheckPluginParameterSanity:    Actions::checkPluginParameterSanity(bpe); return true;
+	case MenuExportCheckAllSampleMaps:	Actions::checkAllSamplemaps(bpe); return true;
+    case MenuExportCheckPluginParameters:    Actions::checkPluginParameterSanity(bpe); return true;
     case MenuToolsCreateRnboTemplate:   Actions::createRnboTemplate(bpe); return true;
 	case MenuToolsImportArchivedSamples: Actions::importArchivedSamples(bpe); return true;
 	case MenuToolsRecordOneSecond:		bpe->owner->getDebugLogger().startRecording(); return true;
     case MenuToolsEnableDebugLogging:	bpe->owner->getDebugLogger().toggleLogging(); updateCommands(); return true;
 	case MenuToolsApplySampleMapProperties: Actions::applySampleMapProperties(bpe); return true;
 	case MenuToolsConvertSVGToPathData:	Actions::convertSVGToPathData(bpe); return true;
+    case MenuToolsBroadcasterWizard:
+    {
+        auto s = new multipage::library::BroadcasterWizard(bpe);
+        s->setModalBaseWindowComponent(bpe);
+        return true;
+    }
 	case MenuToolsEditShortcuts:		Actions::editShortcuts(bpe); return true;
-    case MenuViewFullscreen:            Actions::toggleFullscreen(bpe); updateCommands(); return true;
 	case MenuViewReset:				    bpe->resetInterface(); updateCommands(); return true;
 	case MenuViewRotate:
         bpe->toggleRotate();
@@ -781,10 +690,6 @@ bool BackendCommandTarget::perform(const InvocationInfo &info)
         return true;
 	case MenuViewEnableGlobalLayoutMode: bpe->toggleLayoutMode(); updateCommands(); return true;
 	case MenuViewAddFloatingWindow:		bpe->addFloatingWindow(); return true;
-	case MenuViewAddInterfacePreview:	Actions::addInterfacePreview(bpe); return true;
-	case MenuViewShowPluginPopupPreview: Actions::togglePluginPopupWindow(bpe); updateCommands(); return true;
-    case MenuViewIncreaseCodeFontSize:  Actions::changeCodeFontSize(bpe, true); return true;
-    case MenuViewDecreaseCodeFontSize:   Actions::changeCodeFontSize(bpe, false); return true;
     case MenuViewGotoUndo: bpe->getBackendProcessor()->getLocationUndoManager()->undo(); updateCommands(); return true;
     case MenuViewGotoRedo:  bpe->getBackendProcessor()->getLocationUndoManager()->redo(); updateCommands(); return true;
 	case MenuExportFileAsPlugin:
@@ -812,18 +717,15 @@ bool BackendCommandTarget::perform(const InvocationInfo &info)
         return true;
     }
 	case MenuExportCompileNetworksAsDll: Actions::compileNetworksToDll(bpe); return true;
-    case MenuExportFileAsSnippet:       Actions::exportFileAsSnippet(bpe->getBackendProcessor()); return true;
-	case MenuExportProject:				Actions::exportHiseProject(bpe); return true;
+    case MenuExportFileAsSnippet:        Actions::exportFileAsSnippet(bpe); return true;
+	case MenuExportProjectAsExpansion:				Actions::exportHiseProject(bpe); return true;
 	case MenuExportSampleDataForInstaller: Actions::exportSampleDataForInstaller(bpe); return true;
-	case MenuExportWavetablesToMonolith: Actions::exportWavetablesToMonolith(bpe); return true;
+	case MenuToolsWavetablesToMonolith: Actions::exportWavetablesToMonolith(bpe); return true;
 	case MenuExportCompileFilesInPool:	Actions::exportCompileFilesInPool(bpe); return true;
 	case MenuViewResetLookAndFeel:		Actions::resetLookAndFeel(bpe); return true;
-    case MenuToolsClearConsole:         owner->getConsoleHandler().clearConsole(); return true;
+    case MenuViewClearConsole:         owner->getConsoleHandler().clearConsole(); return true;
 	case MenuHelpShowAboutPage:			Actions::showAboutPage(bpe); return true;
     case MenuHelpCheckVersion:          Actions::checkVersion(bpe); return true;
-	case MenuOneColumn:					Actions::setColumns(bpe, this, OneColumn);  updateCommands(); return true;
-	case MenuTwoColumns:				Actions::setColumns(bpe, this, TwoColumns);  updateCommands(); return true;
-	case MenuThreeColumns:				Actions::setColumns(bpe, this, ThreeColumns);  updateCommands(); return true;
 	case MenuHelpShowDocumentation:		Actions::showDocWindow(bpe); return true;
 	}
 
@@ -832,243 +734,352 @@ bool BackendCommandTarget::perform(const InvocationInfo &info)
 
 
 
-PopupMenu BackendCommandTarget::getMenuForIndex(int topLevelMenuIndex, const String &/*menuName*/)
+PopupMenu BackendCommandTarget::getMenuForIndex(int topLevelMenuIndex, const String &menuName)
 {
 	MenuNames m = (MenuNames)topLevelMenuIndex;
 
+	int lastMenuId = 0;
+
+	
+
+	auto isSnippetBrowser = bpe->getBackendProcessor()->isSnippetBrowser();
+
+	auto categoryIds = mainCommandManager->getCommandsInCategory(menuName.upToFirstOccurrenceOf(" ", false, false));
+
+	jassert(!categoryIds.isEmpty());
+
+	bool allowCheck = true;//
+
+	auto checkSanity = [&](MainToolbarCommands x)
+	{
+		if(!allowCheck)
+			return true;
+
+		// If this hits, then you need to make sure
+		// that the category from getCommandInfo() matches the menu name
+		jassert(categoryIds.contains(x));
+
+		auto prev = (MainToolbarCommands)lastMenuId;
+
+		// If this hits, then the order of the command menu definition
+		// is not correct and needs to be shuffled in the enum definition
+		// to match the menu order
+		jassert(prev < x);
+
+		
+
+		lastMenuId = x;
+		return true;
+	};
+
 	PopupMenu p;
+
+	
 
 	switch (m)
 	{
 	case BackendCommandTarget::FileMenu: {
 
-		p.addSectionHeader("Project Management");
-		ADD_ALL_PLATFORMS(MenuProjectNew);
-		ADD_DESKTOP_ONLY(MenuProjectLoad);
-		
-		ADD_DESKTOP_ONLY(MenuProjectShowInFinder);
-		
-
-		PopupMenu recentProjects;
-
-#if HISE_IOS
-
-		Array<File> results;
-
-		File userDataDirectory = File::getSpecialLocation(File::userDocumentsDirectory);
-
-		userDataDirectory.findChildFiles(results, File::findDirectories, false);
-
-		String currentProject = GET_PROJECT_HANDLER(bpe->getMainSynthChain()).getWorkDirectory().getFullPathName();
-
-		const String menuTitle = "Available Projects";
-
-		for (int i = 0; i < results.size(); i++)
+		if(isSnippetBrowser)
 		{
-			recentProjects.addItem(MenuProjectRecentOffset + i, results[i].getFileName(), true, results[i].getFullPathName() == currentProject);
+			
+			ADD_MENU_ITEM(MenuNewFile);
+			ADD_MENU_ITEM(MenuFileImportSnippet);
+			ADD_MENU_ITEM(MenuFileExtractEmbeddeSnippetFiles);
+			ADD_MENU_ITEM(MenuSnippetClose);
 		}
-
-#else
-
-		StringArray recentProjectDirectories = GET_PROJECT_HANDLER(bpe->getMainSynthChain()).getRecentWorkDirectories();
-
-		const String menuTitle = "Recent Projects";
-
-		String currentProject = GET_PROJECT_HANDLER(bpe->getMainSynthChain()).getWorkDirectory().getFullPathName();
-
-		for (int i = 0; i < recentProjectDirectories.size(); i++)
+		else
 		{
-			recentProjects.addItem(MenuProjectRecentOffset + i, recentProjectDirectories[i], true, currentProject == recentProjectDirectories[i]);
-		}
+			p.addSectionHeader("Project Management");
+			ADD_MENU_ITEM(MenuProjectNew);
+			ADD_MENU_ITEM(MenuProjectLoad);
+			
+			ADD_MENU_ITEM(MenuProjectShowInFinder);
+			
 
-#endif
+			PopupMenu recentProjects;
 
-		p.addSubMenu(menuTitle, recentProjects);
+	#if HISE_IOS
 
-		p.addSeparator();
+			Array<File> results;
 
-		p.addSectionHeader("File Management");
+			File userDataDirectory = File::getSpecialLocation(File::userDocumentsDirectory);
 
-		ADD_ALL_PLATFORMS(MenuNewFile);
-		ADD_ALL_PLATFORMS(MenuFileCreateThirdPartyNode);
-		
+			userDataDirectory.findChildFiles(results, File::findDirectories, false);
 
-		
-		
-		ADD_ALL_PLATFORMS(MenuOpenXmlBackup);
-		ADD_ALL_PLATFORMS(MenuSaveFileXmlBackup);
-		ADD_ALL_PLATFORMS(MenuSaveFileAsXmlBackup);
+			String currentProject = GET_PROJECT_HANDLER(bpe->getMainSynthChain()).getWorkDirectory().getFullPathName();
 
-		PopupMenu xmlBackups;
-		Array<File> xmlBackupFiles = GET_PROJECT_HANDLER(bpe->getMainSynthChain()).getFileList(ProjectHandler::SubDirectories::XMLPresetBackups);
+			const String menuTitle = "Available Projects";
 
-		for (int i = 0; i < xmlBackupFiles.size(); i++)
-		{
-			xmlBackups.addItem(i + MenuFileXmlBackupMenuOffset, xmlBackupFiles[i].getFileName());
-		}
-
-		p.addSubMenu("Open recent XML", xmlBackups);
-
-		p.addSeparator();
-
-		ADD_DESKTOP_ONLY(MenuOpenFile);
-		ADD_ALL_PLATFORMS(MenuSaveFile);
-		
-
-		PopupMenu filesInProject;
-
-		if (GET_PROJECT_HANDLER(bpe->getMainSynthChain()).isActive())
-		{
-			recentFileList = GET_PROJECT_HANDLER(bpe->getMainSynthChain()).getFileList(ProjectHandler::SubDirectories::Presets, true);
-
-			for (int i = 0; i < recentFileList.size(); i++)
+			for (int i = 0; i < results.size(); i++)
 			{
-				filesInProject.addItem(MenuOpenFileFromProjectOffset+i, recentFileList[i].getFileNameWithoutExtension(), true, false);
+				recentProjects.addItem(MenuProjectRecentOffset + i, results[i].getFileName(), true, results[i].getFullPathName() == currentProject);
 			}
+
+	#else
+
+			StringArray recentProjectDirectories = GET_PROJECT_HANDLER(bpe->getMainSynthChain()).getRecentWorkDirectories();
+
+			const String menuTitle = "Recent Projects";
+
+			String currentProject = GET_PROJECT_HANDLER(bpe->getMainSynthChain()).getWorkDirectory().getFullPathName();
+
+			for (int i = 0; i < recentProjectDirectories.size(); i++)
+			{
+				recentProjects.addItem(MenuProjectRecentOffset + i, recentProjectDirectories[i], true, currentProject == recentProjectDirectories[i]);
+			}
+
+	#endif
+
+			p.addSubMenu(menuTitle, recentProjects);
+
+			p.addSeparator();
+
+			p.addSectionHeader("File Management");
+
+			ADD_MENU_ITEM(MenuNewFile);
+			
+			
+
+			
+			
+			ADD_MENU_ITEM(MenuOpenXmlBackup);
+			ADD_MENU_ITEM(MenuSaveFileXmlBackup);
+			ADD_MENU_ITEM(MenuSaveFileAsXmlBackup);
+
+			PopupMenu xmlBackups;
+			Array<File> xmlBackupFiles = GET_PROJECT_HANDLER(bpe->getMainSynthChain()).getFileList(ProjectHandler::SubDirectories::XMLPresetBackups);
+
+			for (int i = 0; i < xmlBackupFiles.size(); i++)
+			{
+				xmlBackups.addItem(i + MenuFileXmlBackupMenuOffset, xmlBackupFiles[i].getFileName());
+			}
+
+			p.addSubMenu("Open recent XML", xmlBackups);
+
+			p.addSeparator();
+
+			
+
+			
+
+			ADD_MENU_ITEM(MenuOpenFile);
+			ADD_MENU_ITEM(MenuSaveFile);
+			
+
+			PopupMenu filesInProject;
+
+			if (GET_PROJECT_HANDLER(bpe->getMainSynthChain()).isActive())
+			{
+				recentFileList = GET_PROJECT_HANDLER(bpe->getMainSynthChain()).getFileList(ProjectHandler::SubDirectories::Presets, true);
+
+				for (int i = 0; i < recentFileList.size(); i++)
+				{
+					filesInProject.addItem(MenuOpenFileFromProjectOffset+i, recentFileList[i].getFileNameWithoutExtension(), true, false);
+				}
+			}
+
+			p.addSubMenu("Open recent Archive", filesInProject, filesInProject.getNumItems() != 0);
+
+			p.addSeparator();
+
+			ADD_MENU_ITEM(MenuFileImportSnippet);
+			ADD_MENU_ITEM(MenuFileCreateRecoveryXml);
+
+	#if HISE_IOS
+	#else
+
+			p.addSeparator();
+
+			ADD_MENU_ITEM(MenuFileSettings);
+			ADD_MENU_ITEM(MenuToolsEditShortcuts);
+
+			p.addSeparator();
+			ADD_MENU_ITEM(MenuFileQuit);
+	#endif
 		}
 
-		p.addSubMenu("Open recent Archive", filesInProject, filesInProject.getNumItems() != 0);
+		break;
+		}
+		case BackendCommandTarget::EditMenu:
+			{
 
-		p.addSeparator();
+			ADD_MENU_ITEM(MenuEditUndo);
+			ADD_MENU_ITEM(MenuEditRedo);
+			p.addSeparator();
+
+	        if(dynamic_cast<JavascriptCodeEditor*>(bpe->currentCopyPasteTarget.get()))
+	        {
+	            dynamic_cast<JavascriptCodeEditor*>(bpe->currentCopyPasteTarget.get())->addPopupMenuItems(p, nullptr);
+	            
+	        }
+	        else
+	        {
+	            ADD_MENU_ITEM(MenuEditCopy);
+	            ADD_MENU_ITEM(MenuEditPaste);
+	            p.addSeparator();
+
+	            ADD_MENU_ITEM(MenuEditCreateScriptVariable);
+				ADD_MENU_ITEM(MenuEditCreateBase64State);
+	        }
+		}
 
 		
-		ADD_ALL_PLATFORMS(MenuReplaceWithClipboardContent);
-		ADD_ALL_PLATFORMS(MenuFileCreateRecoveryXml);
-		
-
-
-#if HISE_IOS
-#else
-
-		p.addSeparator();
-
-		ADD_ALL_PLATFORMS(MenuFileSettingsProject);
-		ADD_DESKTOP_ONLY(MenuToolsEditShortcuts);
-
-		p.addSeparator();
-		ADD_ALL_PLATFORMS(MenuFileQuit);
-#endif
-
-		break; }
-	case BackendCommandTarget::EditMenu:
-
-		ADD_ALL_PLATFORMS(MenuEditUndo);
-		ADD_ALL_PLATFORMS(MenuEditRedo);
-		p.addSeparator();
-
-        if(dynamic_cast<JavascriptCodeEditor*>(bpe->currentCopyPasteTarget.get()))
-        {
-            dynamic_cast<JavascriptCodeEditor*>(bpe->currentCopyPasteTarget.get())->addPopupMenuItems(p, nullptr);
-            
-        }
-        else
-        {
-            ADD_ALL_PLATFORMS(MenuEditCopy);
-            ADD_ALL_PLATFORMS(MenuEditPaste);
-            p.addSeparator();
-
-            ADD_ALL_PLATFORMS(MenuEditCreateScriptVariable);
-			ADD_ALL_PLATFORMS(MenuEditCreateBase64State);
-        }
 		break;
 	case BackendCommandTarget::ExportMenu:
 	{
-		p.addSectionHeader("Export As");
-		ADD_DESKTOP_ONLY(MenuExportFileAsPlugin);
-		ADD_DESKTOP_ONLY(MenuExportFileAsEffectPlugin);
-		ADD_DESKTOP_ONLY(MenuExportFileAsMidiFXPlugin);
-		ADD_DESKTOP_ONLY(MenuExportFileAsStandaloneApp);
-		
-		p.addSeparator();
+		if(isSnippetBrowser)
+		{
+			ADD_MENU_ITEM(MenuExportFileAsSnippet);
+		}
+		else 
+		{
+			p.addSectionHeader("Export As");
+			ADD_MENU_ITEM(MenuExportFileAsPlugin);
+			ADD_MENU_ITEM(MenuExportFileAsEffectPlugin);
+			ADD_MENU_ITEM(MenuExportFileAsMidiFXPlugin);
+			ADD_MENU_ITEM(MenuExportFileAsStandaloneApp);
+			
+			p.addSeparator();
 
-		ADD_DESKTOP_ONLY(MenuExportFileAsSnippet);
-		ADD_DESKTOP_ONLY(MenuExportProject);
-		ADD_DESKTOP_ONLY(MenuExportSampleDataForInstaller);
-		ADD_DESKTOP_ONLY(MenuExportWavetablesToMonolith);
+			ADD_MENU_ITEM(MenuExportFileAsSnippet);
+			ADD_MENU_ITEM(MenuExportProjectAsExpansion);
 
-		p.addSectionHeader("Export Tools");
-		
-		ADD_DESKTOP_ONLY(MenuFileSettingsCleanBuildDirectory);
-		ADD_DESKTOP_ONLY(MenuExportCompileFilesInPool);
-		ADD_DESKTOP_ONLY(MenuExportCompileNetworksAsDll);
+			p.addSeparator();
+
+			p.addSectionHeader("Validation Tools");
+
+			ADD_MENU_ITEM(MenuExportCheckAllSampleMaps);
+			ADD_MENU_ITEM(MenuExportCheckPluginParameters);
+			ADD_MENU_ITEM(MenuExportValidateUserPresets);
+			ADD_MENU_ITEM(MenuExportCheckUnusedImages);
+
+			p.addSeparator();
+
+			p.addSectionHeader("Cleanup Tools");
+
+			ADD_MENU_ITEM(MenuExportRestoreToDefault);
+			ADD_MENU_ITEM(MenuExportUnloadAllSampleMaps);
+			ADD_MENU_ITEM(MenuExportUnloadAllAudioFiles);
+			ADD_MENU_ITEM(MenuExportCleanBuildDirectory);
+
+			p.addSeparator();
+
+			p.addSectionHeader("Export Tools");
+			
+			ADD_MENU_ITEM(MenuExportSampleDataForInstaller);
+			
+			ADD_MENU_ITEM(MenuExportCompileFilesInPool);
+			ADD_MENU_ITEM(MenuExportCompileNetworksAsDll);
+		}
+
 		break;
 	}
 	case BackendCommandTarget::ToolsMenu:
 	{
-		p.addSectionHeader("Scripting Tools");
+		if(isSnippetBrowser)
+		{
+            ADD_MENU_ITEM(MenuToolsRecompile);
+            ADD_MENU_ITEM(MenuToolsConvertSVGToPathData);
+            ADD_MENU_ITEM(MenuToolsBroadcasterWizard);
+            p.addSeparator();
+            ADD_MENU_ITEM(MenuToolsShowDspNetworkDllInfo);
+            ADD_MENU_ITEM(MenuToolsRecordOneSecond);
+            ADD_MENU_ITEM(MenuToolsSimulateChangingBufferSize);
+
+		}
+		else
+		{
+			p.addSectionHeader("Scripting Tools");
 		
-		ADD_ALL_PLATFORMS(MenuToolsRecompile);
-		ADD_ALL_PLATFORMS(MenuToolsSanityCheck);
-        ADD_ALL_PLATFORMS(MenuToolsCheckPluginParameterSanity);
-		ADD_ALL_PLATFORMS(MenuToolsClearConsole);
-		ADD_DESKTOP_ONLY(MenuToolsCheckCyclicReferences);
-		
-		ADD_DESKTOP_ONLY(MenuToolsCreateExternalScriptFile);
-		ADD_DESKTOP_ONLY(MenuToolsValidateUserPresets);
-		ADD_DESKTOP_ONLY(MenuToolsRestoreToDefault);
-		ADD_DESKTOP_ONLY(MenuToolsConvertSVGToPathData);
-		
-		p.addSeparator();
-		p.addSectionHeader("Sample Management");
-		
-		ADD_DESKTOP_ONLY(MenuToolsResolveMissingSamples);
-		ADD_DESKTOP_ONLY(MenuToolsGetMissingSampleList);
-		ADD_DESKTOP_ONLY(MenuToolsDeleteMissingSamples);
-		ADD_DESKTOP_ONLY(MenuToolsCheckAllSampleMaps);
-		ADD_DESKTOP_ONLY(MenuToolsApplySampleMapProperties);
-		ADD_DESKTOP_ONLY(MenuToolsImportArchivedSamples);
-		ADD_DESKTOP_ONLY(MenuToolsCheckUnusedImages);
-		ADD_DESKTOP_ONLY(MenuToolsForcePoolSearch);
-		
-		ADD_DESKTOP_ONLY(MenuToolsConvertSampleMapToWavetableBanks);
-		ADD_DESKTOP_ONLY(MenuToolsConvertAllSamplesToMonolith);
-		ADD_DESKTOP_ONLY(MenuToolsUpdateSampleMapIdsBasedOnFileName);
-		ADD_DESKTOP_ONLY(MenuToolsConvertSfzToSampleMaps);
-		ADD_DESKTOP_ONLY(MenuToolsRemoveAllSampleMaps);
-		ADD_DESKTOP_ONLY(MenuToolsUnloadAllAudioFiles);
-		ADD_DESKTOP_ONLY(MenuToolsShowDspNetworkDllInfo);
-		ADD_DESKTOP_ONLY(MenuToolsRecordOneSecond);
-		ADD_DESKTOP_ONLY(MenuToolsSimulateChangingBufferSize);
-        ADD_DESKTOP_ONLY(MenuToolsCreateRnboTemplate);
-		p.addSeparator();
-		p.addSectionHeader("License Management");
-		ADD_DESKTOP_ONLY(MenuToolsCreateDummyLicenseFile);
-		ADD_DESKTOP_ONLY(MenuToolsCreateRSAKeys);
+			ADD_MENU_ITEM(MenuToolsRecompile);
+			ADD_MENU_ITEM(MenuToolsCheckCyclicReferences);
+			ADD_MENU_ITEM(MenuToolsConvertSVGToPathData);
+            ADD_MENU_ITEM(MenuToolsBroadcasterWizard);
+            
+			p.addSeparator();
+			p.addSectionHeader("Sample Management");
+			
+			ADD_MENU_ITEM(MenuToolsApplySampleMapProperties);
+			ADD_MENU_ITEM(MenuToolsImportArchivedSamples);
+			ADD_MENU_ITEM(MenuToolsForcePoolSearch);
+			
+			ADD_MENU_ITEM(MenuToolsConvertAllSamplesToMonolith);
+			ADD_MENU_ITEM(MenuToolsUpdateSampleMapIdsBasedOnFileName);
+			ADD_MENU_ITEM(MenuToolsConvertSfzToSampleMaps);
+			
+			p.addSeparator();
+
+			p.addSectionHeader("Wavetable Tools");
+
+			ADD_MENU_ITEM(MenuToolsConvertSampleMapToWavetableBanks);
+			ADD_MENU_ITEM(MenuToolsWavetablesToMonolith);
+
+			p.addSeparator();
+
+			p.addSectionHeader("DSP Tools");
+
+			ADD_MENU_ITEM(MenuToolsShowDspNetworkDllInfo);
+			ADD_MENU_ITEM(MenuToolsRecordOneSecond);
+			ADD_MENU_ITEM(MenuToolsSimulateChangingBufferSize);
+	        ADD_MENU_ITEM(MenuToolsCreateRnboTemplate);
+			ADD_MENU_ITEM(MenuToolsCreateThirdPartyNode);
+			p.addSeparator();
+			p.addSectionHeader("License Management");
+			ADD_MENU_ITEM(MenuToolsCreateRSAKeys);
+			ADD_MENU_ITEM(MenuToolsCreateDummyLicenseFile);
+			
+		}
 		
 		break;
 	}
 	case BackendCommandTarget::ViewMenu: {
 
-        ADD_ALL_PLATFORMS(MenuViewGotoUndo);
-        ADD_ALL_PLATFORMS(MenuViewGotoRedo);
-        
-        p.addSeparator();
-        
-        ADD_ALL_PLATFORMS(MenuViewFullscreen);
-        ADD_ALL_PLATFORMS(MenuViewRotate);
+		if(isSnippetBrowser)
+		{
+            ADD_MENU_ITEM(MenuViewGotoUndo);
+            ADD_MENU_ITEM(MenuViewGotoRedo);
+            
+            p.addSeparator();
 
-		p.addSeparator();
+            ADD_MENU_ITEM(MenuViewToggleSnippetBrowser);
+            ADD_MENU_ITEM(WorkspaceCustom);
+            
+            p.addSeparator();
 
-		ADD_ALL_PLATFORMS(WorkspaceScript);
-		ADD_ALL_PLATFORMS(WorkspaceSampler);
-		ADD_ALL_PLATFORMS(WorkspaceCustom);
+			ADD_MENU_ITEM(MenuViewClearConsole);
+            ADD_MENU_ITEM(MenuViewResetLookAndFeel);
 
-		p.addSeparator();
+		}
+		else
+		{
+			ADD_MENU_ITEM(MenuViewGotoUndo);
+	        ADD_MENU_ITEM(MenuViewGotoRedo);
+	        
+	        p.addSeparator();
+	        
+	        ADD_MENU_ITEM(MenuViewRotate);
+			ADD_MENU_ITEM(MenuViewEnableGlobalLayoutMode);
 
-		ADD_DESKTOP_ONLY(MenuViewEnableGlobalLayoutMode);
-		ADD_DESKTOP_ONLY(MenuViewAddFloatingWindow);
-		
-        p.addSeparator();
-        
-        ADD_ALL_PLATFORMS(MenuViewResetLookAndFeel);
-        ADD_ALL_PLATFORMS(MenuViewReset);
+			p.addSeparator();
+			ADD_MENU_ITEM(WorkspaceCustom);
+			ADD_MENU_ITEM(MenuViewAddFloatingWindow);
+			
+	        p.addSeparator();
+
+			ADD_MENU_ITEM(MenuViewClearConsole);
+	        ADD_MENU_ITEM(MenuViewResetLookAndFeel);
+	        ADD_MENU_ITEM(MenuViewReset);
+		}
         
 		break;
 		}
 	case BackendCommandTarget::HelpMenu:
-			ADD_ALL_PLATFORMS(MenuHelpShowAboutPage);
-			ADD_DESKTOP_ONLY(MenuHelpCheckVersion);
-			ADD_ALL_PLATFORMS(MenuHelpShowDocumentation);
+			ADD_MENU_ITEM(MenuHelpShowDocumentation);
+			ADD_MENU_ITEM(MenuFileBrowseExamples);
+			p.addSeparator();
+			ADD_MENU_ITEM(MenuHelpCheckVersion);
+			ADD_MENU_ITEM(MenuHelpShowAboutPage);
 		break;
 	default:
 		break;
@@ -1267,23 +1278,8 @@ void BackendCommandTarget::Actions::replaceWithClipboardContent(BackendRootWindo
     
 	if (hasSnippetInClipboard())
 	{
-		String data = clipboardContent.fromFirstOccurrenceOf("HiseSnippet ", false, false);
-
-		MemoryBlock mb;
-
-		mb.fromBase64Encoding(data);
-
-		MemoryInputStream mis(mb, false);
-
-		GZIPDecompressorInputStream dezipper(&mis, false);
-
-		ValueTree v = ValueTree::readFromGZIPData(mb.getData(), mb.getSize());
-
-		if (v.isValid())
-		{
-			bpe->loadNewContainer(v);
-			return;
-		}
+		loadSnippet(bpe, clipboardContent);
+		return;
 	}
 	else
 	{
@@ -1300,6 +1296,26 @@ void BackendCommandTarget::Actions::replaceWithClipboardContent(BackendRootWindo
 	}
     
 	PresetHandler::showMessageWindow("Invalid Preset", "The clipboard does not contain a valid container / snippet.", PresetHandler::IconType::Warning);
+}
+
+void BackendCommandTarget::Actions::loadSnippet(BackendRootWindow* bpe, const String& snippet)
+{
+	String data = snippet.fromFirstOccurrenceOf("HiseSnippet ", false, false);
+
+	MemoryBlock mb;
+
+	mb.fromBase64Encoding(data);
+
+	MemoryInputStream mis(mb, false);
+
+	GZIPDecompressorInputStream dezipper(&mis, false);
+
+	ValueTree v = ValueTree::readFromGZIPData(mb.getData(), mb.getSize());
+
+	if (v.isValid())
+	{
+		bpe->loadNewContainer(v);
+	}
 }
 
 void BackendCommandTarget::Actions::createScriptVariableDeclaration(CopyPasteTarget *currentCopyPasteTarget)
@@ -1407,35 +1423,7 @@ void BackendCommandTarget::Actions::checkUnusedImages(BackendRootWindow * bpe)
 
 }
 
-void BackendCommandTarget::Actions::addInterfacePreview(BackendRootWindow * bpe)
-{
-	auto w = bpe->addFloatingWindow();
 
-	w->getRootFloatingTile()->setNewContent(GET_PANEL_NAME(InterfaceContentPanel));
-	w->getRootFloatingTile()->setLayoutModeEnabled(false);
-	w->getRootFloatingTile()->setVital(true);
-	
-	w->setName("Interface Preview");
-	
-	auto jmp = JavascriptMidiProcessor::getFirstInterfaceScriptProcessor(bpe->getBackendProcessor());
-
-	if (jmp != nullptr)
-	{
-		if (auto content = jmp->getScriptingContent())
-		{
-			auto scaleFactor = dynamic_cast<GlobalSettingManager*>(bpe->getBackendProcessor())->getGlobalScaleFactor();
-
-			const int width = (int)((float)content->getContentWidth()*scaleFactor);
-			const int height = (int)((float)content->getContentHeight()*scaleFactor);
-
-			dynamic_cast<Component*>(w->getRootFloatingTile()->getCurrentFloatingPanel())->setTransform(AffineTransform::scale((float)scaleFactor));
-			w->centreWithSize(width, height);
-			w->setResizable(false, false);
-		}
-	}
-
-	w->getRootFloatingTile()->refreshRootLayout();
-}
 
 void BackendCommandTarget::Actions::updateSampleMapIds(BackendRootWindow* bpe)
 {
@@ -1576,44 +1564,7 @@ void BackendCommandTarget::Actions::recompileAllScripts(BackendRootWindow * bpe)
 	bpe->owner->compileAllScripts();
 }
 
-void BackendCommandTarget::Actions::toggleFullscreen(BackendRootWindow * bpe)
-{
-#if IS_STANDALONE_APP
-    
-    Component *window = bpe->getParentComponent()->getParentComponent();
-    
-    if (bpe->isFullScreenMode())
-    {
-        Desktop::getInstance().setKioskModeComponent(nullptr);
-        
-        const int height = Desktop::getInstance().getDisplays().getMainDisplay().userArea.getHeight() - 70;
-        bpe->setSize(900, height);
-        bpe->resized();
-        
-        window->centreWithSize(bpe->getWidth(), bpe->getHeight());
-        
-        bpe->setAlwaysOnTop(false);
-        bpe->yBorderDragger->setVisible(true);
-		bpe->xBorderDragger->setVisible(true);
-    }
-    else
-    {
-        Desktop::getInstance().setKioskModeComponent(window);
-        
-        bpe->yBorderDragger->setVisible(false);
-		bpe->xBorderDragger->setVisible(false);
-        bpe->setAlwaysOnTop(true);
-        
-        bpe->setSize(Desktop::getInstance().getDisplays().getMainDisplay().totalArea.getWidth(),
-                Desktop::getInstance().getDisplays().getMainDisplay().totalArea.getHeight());
-        
-        bpe->resized();
-        
-    }
-#else 
-	ignoreUnused(bpe);
-#endif
-}
+
 
 
 
@@ -1635,13 +1586,7 @@ void BackendCommandTarget::Actions::closeAllChains(BackendRootWindow *bpe)
     }
 }
 
-void BackendCommandTarget::Actions::validatePluginParameters(BackendRootWindow *bpe)
-{
-	PresetHandler::checkMetaParameters(bpe->owner->synthChain);
 
-    PresetHandler::checkProcessorIdsForDuplicates(bpe->owner->synthChain, false);
-
-}
 
 void BackendCommandTarget::Actions::showAboutPage(BackendRootWindow * bpe)
 {
@@ -1664,28 +1609,6 @@ void BackendCommandTarget::Actions::checkVersion(BackendRootWindow *bpe)
     }
 }
 
-void BackendCommandTarget::Actions::setColumns(BackendRootWindow * bpe, BackendCommandTarget* target, ColumnMode columns)
-{
-	target->currentColumnMode = columns;
-
-	switch (columns)
-	{
-	case BackendCommandTarget::OneColumn:
-		bpe->setSize(900, bpe->getHeight());
-		break;
-	case BackendCommandTarget::TwoColumns:
-		bpe->setSize(jmin<int>(Desktop::getInstance().getDisplays().getMainDisplay().totalArea.getWidth(), 1280), bpe->getHeight());
-		break;
-	case BackendCommandTarget::ThreeColumns:
-		bpe->setSize(jmin<int>(Desktop::getInstance().getDisplays().getMainDisplay().totalArea.getWidth(), 1650), bpe->getHeight());
-		break;
-	default:
-		break;
-	}
-
-	bpe->resized();
-	
-}
 
 void BackendCommandTarget::Actions::plotModulator(CopyPasteTarget *currentCopyPasteTarget)
 {
@@ -1724,18 +1647,34 @@ void BackendCommandTarget::Actions::toggleCompileScriptsOnPresetLoad(BackendRoot
 
 
 
-void BackendCommandTarget::Actions::exportFileAsSnippet(BackendProcessor* bp)
+String BackendCommandTarget::Actions::exportFileAsSnippet(BackendRootWindow* bpe, bool copyToClipboard)
 {
+    auto bp = bpe->getBackendProcessor();
+            
 	MainController::ScopedEmbedAllResources sd(bp);
     
 	ValueTree v = bp->getMainSynthChain()->exportAsValueTree();
+	
+	auto scriptRootFolder = bp->getCurrentFileHandler().getSubDirectory(FileHandlerBase::Scripts);
+	auto snexRootFolder = BackendDllManager::getSubFolder(bp, BackendDllManager::FolderSubType::CodeLibrary);
 
+	auto embeddedScripts = bp->collectIncludedScriptFilesForSnippet("embeddedScripts", scriptRootFolder);
+	auto embeddedSnexFiles = bp->collectIncludedScriptFilesForSnippet("embeddedSnexFiles", snexRootFolder);
+	
 	MemoryOutputStream mos;
 
-	v.writeToStream(mos);
+	if(embeddedScripts.getNumChildren() > 0 || embeddedSnexFiles.getNumChildren() > 0)
+	{
+		ValueTree nv("extended_snippet");
+		nv.addChild(v, -1, nullptr);
+		nv.addChild(embeddedScripts, -1, nullptr);
+		nv.addChild(embeddedSnexFiles, -1, nullptr);
+		nv.writeToStream(mos);
+	}
+	else
+		v.writeToStream(mos);
 
 	MemoryOutputStream mos2;
-
 	GZIPCompressorOutputStream zipper(&mos2, 9);
 	
 	zipper.write(mos.getData(), mos.getDataSize());
@@ -1743,13 +1682,15 @@ void BackendCommandTarget::Actions::exportFileAsSnippet(BackendProcessor* bp)
 
 	String data = "HiseSnippet " + mos2.getMemoryBlock().toBase64Encoding();
 
-	SystemClipboard::copyTextToClipboard(data);
+	if(copyToClipboard)
+		SystemClipboard::copyTextToClipboard(data);
 
-	if (!MainController::inUnitTestMode())
+	if (!MainController::inUnitTestMode() && copyToClipboard)
 	{
 		PresetHandler::showMessageWindow("Preset copied as compressed snippet", "You can paste the clipboard content to share this preset", PresetHandler::IconType::Info);
 	}
-	
+
+	return data;
 }
 
 void BackendCommandTarget::Actions::createRnboTemplate(BackendRootWindow* bpe)
@@ -2098,14 +2039,7 @@ void BackendCommandTarget::Actions::loadFirstXmlAfterProjectSwitch(BackendRootWi
 	}
 }
 
-void BackendCommandTarget::Actions::closeProject(BackendRootWindow *bpe)
-{
-    const bool shouldDiscard = !bpe->getBackendProcessor()->isChanged() || PresetHandler::showYesNoWindow("Discard the current preset?", "The current preset will be discarded", PresetHandler::IconType::Question);
-    
-    if (!shouldDiscard) return;
-    
-	GET_PROJECT_HANDLER(bpe->getMainSynthChain()).setWorkingProject(File());
-}
+
 
 void BackendCommandTarget::Actions::showProjectInFinder(BackendRootWindow *bpe)
 {
@@ -2115,10 +2049,7 @@ void BackendCommandTarget::Actions::showProjectInFinder(BackendRootWindow *bpe)
 	}
 }
 
-void BackendCommandTarget::Actions::saveUserPreset(BackendRootWindow *bpe)
-{
-	UserPresetHelpers::saveUserPreset(bpe->getMainSynthChain());
-}
+
 
 void BackendCommandTarget::Actions::loadUserPreset(BackendRootWindow *bpe, const File &fileToLoad)
 {
@@ -2129,36 +2060,13 @@ void BackendCommandTarget::Actions::loadUserPreset(BackendRootWindow *bpe, const
 	UserPresetHelpers::loadUserPreset(bpe->getMainSynthChain(), fileToLoad);
 }
 
-void BackendCommandTarget::Actions::showFilePresetSettings(BackendRootWindow * /*bpe*/)
-{
-	
-}
-
 void BackendCommandTarget::Actions::showFileProjectSettings(BackendRootWindow * bpe)
 {
 	//SettingWindows::ProjectSettingWindow *window = new SettingWindows::ProjectSettingWindow(&GET_PROJECT_HANDLER(bpe->getMainSynthChain()));
 
 	auto window = new SettingWindows(bpe->getBackendProcessor()->getSettingsObject());
-
-
 	window->setModalBaseWindowComponent(bpe);
-
 	window->activateSearchBox();
-}
-
-void BackendCommandTarget::Actions::showFileUserSettings(BackendRootWindow * /*bpe*/)
-{
-	jassertfalse;
-}
-
-void BackendCommandTarget::Actions::showFileCompilerSettings(BackendRootWindow * /*bpe*/)
-{
-	jassertfalse;
-}
-
-void BackendCommandTarget::Actions::checkSettingSanity(BackendRootWindow * /*bpe*/)
-{
-	jassertfalse;
 }
 
 void BackendCommandTarget::Actions::togglePluginPopupWindow(BackendRootWindow * bpe)
@@ -2194,7 +2102,12 @@ Result checkPluginParameterComponent(ScriptingApi::Content* c, ScriptComponent* 
 	if (!sc->getScriptObjectProperty(ScriptComponent::isPluginParameter))
 	{
 		if (name.isEmpty())
-			return Result::ok();
+		{
+			if(sc->getScriptObjectProperty(ScriptingApi::Content::ScriptComponent::isMetaParameter))
+				return Result::fail(sc->getName() + " has the isMetaParameter flag set but is not a plugin parameter");
+			else
+				return Result::ok();
+		}
 		else
 			return Result::fail(sc->getName() + " has an non-empty plugin parameter ID but is not set as plugin parameter");
 	}
@@ -2291,6 +2204,10 @@ Result checkPluginParameterComponent(ScriptingApi::Content* c, ScriptComponent* 
                          
 void BackendCommandTarget::Actions::checkPluginParameterSanity(BackendRootWindow* bpe)
 {
+	PresetHandler::checkMetaParameters(bpe->owner->synthChain);
+
+    PresetHandler::checkProcessorIdsForDuplicates(bpe->owner->synthChain, false);
+
 	auto chain = bpe->getMainController()->getMainSynthChain();
 
     auto list = ProcessorHelpers::getListOfAllProcessors<JavascriptMidiProcessor>(chain);
@@ -2396,37 +2313,6 @@ void BackendCommandTarget::Actions::toggleForcePoolSearch(BackendRootWindow * bp
 }
 
 
-void BackendCommandTarget::Actions::archiveProject(BackendRootWindow * bpe)
-{
-	ProjectHandler *handler = &GET_PROJECT_HANDLER(bpe->getMainSynthChain());
-
-	if (handler->isRedirected(ProjectHandler::SubDirectories::Samples))
-	{
-		if (PresetHandler::showYesNoWindow("Sample Folder is redirected", 
-										   "The sample folder is redirected to another location.\nIt will not be included in the archive. Press OK to continue or cancel to abort", 
-										   PresetHandler::IconType::Warning))
-			return;
-	}
-
-	FileChooser fc("Select archive destination", File(), "*.zip");
-
-	if (fc.browseForFileToSave(true))
-	{
-		File archiveFile = fc.getResult();
-
-		File projectDirectory = handler->getWorkDirectory();
-
-		new ProjectArchiver(archiveFile, projectDirectory, bpe->getBackendProcessor());
-
-	}
-}
-
-void BackendCommandTarget::Actions::downloadNewProject(BackendRootWindow * bpe)
-{
-	ProjectDownloader *downloader = new ProjectDownloader(bpe->mainEditor);
-
-	downloader->setModalBaseWindowComponent(bpe);
-}
 
 void BackendCommandTarget::Actions::showMainMenu(BackendRootWindow * /*bpe*/)
 {
@@ -3099,12 +2985,91 @@ void BackendCommandTarget::Actions::restoreToDefault(BackendRootWindow * bpe)
 	debugToConsole(mp, message);
 }
 
+void BackendCommandTarget::Actions::extractEmbeddedFilesFromSnippet(BackendRootWindow* bpe)
+{
+	auto gp = dynamic_cast<GlobalScriptCompileBroadcaster*>(bpe->getBackendProcessor());
+
+	String m;
+
+	m << "Do you want to copy the embedde script files into your current working project ? \n";
+
+	for(int i = 0; i <gp->getNumExternalScriptFiles(); i++)
+	{
+		if(gp->getExternalScriptFile(i)->getResourceType() == ExternalScriptFile::ResourceType::EmbeddedInSnippet)
+		{
+			m << "- " << gp->getExternalScriptFile(i)->getFile().getFullPathName() << "\n";
+		}
+	}
+
+	if(!PresetHandler::showYesNoWindow("Copy script resource files", m))
+	{
+		return;
+	}
+
+	
+
+	int numWritten = 0;
+
+	auto chain = bpe->getBackendProcessor()->getMainSynthChain();
+
+	for(int i = 0; i < gp->getNumExternalScriptFiles(); i++)
+	{
+		if(gp->getExternalScriptFile(i)->extractEmbedded())
+		{
+			debugToConsole(chain, "Extracted " + gp->getExternalScriptFile(i)->getFile().getFullPathName());
+			numWritten++;
+		}
+	}
+
+	debugToConsole(chain, "Extracted " + String(numWritten) + " files from currently loaded HISE snippet");
+	
+}
+
+void BackendCommandTarget::Actions::showExampleBrowser(BackendRootWindow* bpe)
+{
+	auto dm = bpe->getBackendProcessor()->deviceManager;
+	auto cb = bpe->getBackendProcessor()->callback;
+
+	auto bp = new BackendProcessor(dm, cb);
+
+	bp->setIsSnippetBrowser();
+	
+	auto nw = dynamic_cast<BackendRootWindow*>(bp->createEditor());
+
+	for(auto w: bpe->allWindowsAndBrowsers)
+		nw->allWindowsAndBrowsers.addIfNotAlreadyThere(w);
+
+	bpe->allWindowsAndBrowsers.addIfNotAlreadyThere(nw);
+
+	nw->toggleSnippetBrowser();
+	nw->setVisible(true);
+	nw->centreWithSize(1600, 1000);
+
+	
+
+	int flags = 0;
+
+	flags |= ComponentPeer::StyleFlags::windowAppearsOnTaskbar;
+	flags |= ComponentPeer::StyleFlags::windowHasCloseButton;
+	flags |= ComponentPeer::StyleFlags::windowHasDropShadow;
+	flags |= ComponentPeer::StyleFlags::windowHasMaximiseButton;
+	flags |= ComponentPeer::StyleFlags::windowHasTitleBar;
+	flags |= ComponentPeer::StyleFlags::windowIsResizable;
+
+	nw->setName("HISE Snippet browser");
+
+	nw->addToDesktop(flags, nullptr);
+
+	nw->setCurrentlyActiveProcessor();
+	
+}
+
 #undef REPLACE_WILDCARD
 #undef REPLACE_WILDCARD_WITH_STRING
 
-#undef ADD_ALL_PLATFORMS
+#undef ADD_MENU_ITEM
 #undef ADD_IOS_ONLY
-#undef ADD_DESKTOP_ONLY
+#undef ADD_MENU_ITEM
 #undef toggleVisibility
 
 void XmlBackupFunctions::removeEditorStatesFromXml(XmlElement &xml)

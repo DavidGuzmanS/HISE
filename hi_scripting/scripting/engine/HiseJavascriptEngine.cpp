@@ -54,7 +54,7 @@ X(rightShiftUnsigned, ">>>") X(rightShiftEquals, ">>=") X(rightShift,   ">>")   
     X(function, "function") X(return_, "return") X(true_,  "true")   X(false_,    "false")    X(new_,      "new") \
     X(typeof_,  "typeof")	X(switch_, "switch") X(case_, "case")	 X(default_,  "default")  X(register_var, "reg") \
 	X(in, 		"in")		X(inline_, "inline") X(const_, "const")	 X(global_,   "global")	  X(local_,	   "local") \
-	X(include_,  "include") X(rLock_,   "readLock") X(wLock_,"writeLock") 	X(extern_, "extern") X(namespace_, "namespace") \
+	X(include_,  "include") X(extern_, "extern") X(namespace_, "namespace") \
 	X(isDefined_, "isDefined");
 
 namespace TokenTypes
@@ -1132,7 +1132,7 @@ void HiseJavascriptEngine::sendBreakpointMessage(int breakpointIndex)
 	}
 }
 
-void HiseJavascriptEngine::checkValidParameter(int index, const var& valueToTest, const RootObject::CodeLocation& location)
+void HiseJavascriptEngine::checkValidParameter(int index, const var& valueToTest, const RootObject::CodeLocation& location, VarTypeChecker::VarTypes expectedType)
 {
 #if ENABLE_SCRIPTING_SAFE_CHECKS
 
@@ -1140,6 +1140,17 @@ void HiseJavascriptEngine::checkValidParameter(int index, const var& valueToTest
 	{
 		location.throwError("API call with undefined parameter " + String(index));
 	}
+    
+    if(expectedType != VarTypeChecker::Undefined)
+    {
+        auto ok = VarTypeChecker::checkType(valueToTest, expectedType, false);
+        
+        if(ok.failed())
+        {
+            location.throwError(ok.getErrorMessage());
+        }
+    }
+    
 #else
     ignoreUnused(location, index, valueToTest);
 #endif
@@ -1440,6 +1451,9 @@ struct HiseJavascriptEngine::TokenProvider::ObjectMethodToken : public TokenWith
 		s << MarkdownLink::Helpers::getSanitizedFilename(methodTree["name"].toString()) << "/";
 
 		link = { File(), s };
+		link.setType(MarkdownLink::Type::Folder);
+
+		markdownDescription << "  \n[Doc Reference](https://docs.hise.audio/" + link.toString(MarkdownLink::FormattedLinkHtml) + ")";
 	}
 
 	
@@ -1498,11 +1512,16 @@ struct HiseJavascriptEngine::TokenProvider::ApiToken : public TokenWithDot
 
 		String s;
 		s << "scripting/scripting-api/";
-		s << MarkdownLink::Helpers::getSanitizedFilename(classId);
+		s << MarkdownLink::Helpers::getSanitizedFilename(id.toString());
 		s << "#";
 		s << MarkdownLink::Helpers::getSanitizedFilename(mTree["name"].toString()) << "/";
 
 		link = { File(), s };
+
+		link.setType(MarkdownLink::Type::Folder);
+
+		markdownDescription << "  \n[Doc Reference](https://docs.hise.audio/" + link.toString(MarkdownLink::FormattedLinkHtml) + ")";
+
 	}
 
 	MarkdownLink getLink() const override
@@ -1579,7 +1598,11 @@ struct HiseJavascriptEngine::TokenProvider::DebugInformationToken : public Token
 		
 		if (isGlobalClass)
 		{
-			markdownDescription << "Global API class `" << s << "`  \n> Press F1 to open the documentation";
+			if(link.isValid())
+			{
+				link.setType(MarkdownLink::Type::Folder);
+				markdownDescription << " [Doc Reference](https://docs.hise.audio/"  + link.toString(MarkdownLink::FormattedLinkHtml) + ")";
+			}
 		}
 		else
 		{
@@ -1774,14 +1797,20 @@ struct TokenHelpers
 	}
 };
 
-
-
+bool HiseJavascriptEngine::TokenProvider::shouldAbortTokenRebuild(Thread* t) const
+{
+    return (t != nullptr && t->threadShouldExit()) ||
+           (jp == nullptr) ||
+           (jp != nullptr && jp->shouldReleaseDebugLock());
+}
 
 
 void HiseJavascriptEngine::TokenProvider::addTokens(mcl::TokenCollection::List& tokens)
 {
 	if (jp != nullptr)
 	{
+		LockHelpers::SafeLock ssl(dynamic_cast<Processor*>(jp.get())->getMainController(), LockHelpers::Type::ScriptLock);
+
 		File scriptFolder = dynamic_cast<Processor*>(jp.get())->getMainController()->getCurrentFileHandler().getSubDirectory(FileHandlerBase::Scripts);
 		auto scriptFiles = scriptFolder.findChildFiles(File::findFiles, true, "*.js");
 
@@ -1813,7 +1842,7 @@ void HiseJavascriptEngine::TokenProvider::addTokens(mcl::TokenCollection::List& 
 		}
 		
 
-		ScopedReadLock sl(jp->getDebugLock());
+		//ScopedReadLock sl(jp->getDebugLock());
 
 		auto holder = dynamic_cast<ApiProviderBase::Holder*>(jp.get());
 
@@ -1858,7 +1887,7 @@ void HiseJavascriptEngine::TokenProvider::addTokens(mcl::TokenCollection::List& 
 
 			for (int i = 0; i < numObjects; i++)
 			{
-				if (Thread::currentThreadShouldExit() || jp->shouldReleaseDebugLock())
+				if (shouldAbortTokenRebuild(Thread::getCurrentThread()))
 					return;
 
 				if (e == nullptr)
@@ -1891,7 +1920,7 @@ void HiseJavascriptEngine::TokenProvider::addTokens(mcl::TokenCollection::List& 
 
 						for (auto methodTree : classTree)
 						{
-							if (Thread::currentThreadShouldExit() || jp->shouldReleaseDebugLock())
+							if (shouldAbortTokenRebuild(Thread::getCurrentThread()))
 								return;
 
 							tokens.add(new ApiToken(cid, methodTree));

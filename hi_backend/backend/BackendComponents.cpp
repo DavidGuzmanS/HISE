@@ -65,14 +65,13 @@ void MacroComponent::addSynthChainToPopup(ModulatorSynthChain *parent, PopupMenu
 }
 
 MacroComponent::MacroComponent(BackendRootWindow* rootWindow_) :
+	Processor::OtherListener(rootWindow_->getBackendProcessor()->getMainSynthChain(), dispatch::library::ProcessorChangeEvent::Macro),
 	rootWindow(rootWindow_),
 	processor(rootWindow_->getBackendProcessor()),
 	synthChain(processor->getMainSynthChain())
 {
 	setName("Macro Controls");
-
-	synthChain->addChangeListener(this);
-
+	
 	mlaf = new MacroKnobLookAndFeel();
 
 	for (int i = 0; i < HISE_NUM_MACROS; i++)
@@ -144,105 +143,17 @@ MacroComponent::MacroComponent(BackendRootWindow* rootWindow_) :
 
 	}
 
-	changeListenerCallback(synthChain);
+	otherChange(synthChain);
 }
 
 MacroComponent::~MacroComponent()
 {
 	processor->getMacroManager().setMacroControlLearnMode(processor->getMainSynthChain(), -1);
-
-	if (synthChain != nullptr) synthChain->removeChangeListener(this);
 }
 
 void MacroComponent::mouseDown(const MouseEvent &e)
 {
-	if(e.mods.isRightButtonDown() && dynamic_cast<Slider*>(e.eventComponent) != nullptr)
-	{
-		const int index = macroKnobs.indexOf(dynamic_cast<Slider*>(e.eventComponent));
-
-		PopupMenu p;
-
-		ScopedPointer<PopupLookAndFeel> laf = new PopupLookAndFeel();
-
-		p.setLookAndFeel(laf);
-
-		p.addSectionHeader("Add Macro Control from subchain");
-
-		Array<MacroControlPopupData> popupData;
-
-		addSynthChainToPopup(synthChain, p, popupData);
-
-		if(p.getNumItems() == 1)
-		{
-			p.addItem(1, "No subchains with macro controls detected", false, false);
-		}
-		
-		p.addSeparator();
-
-		p.addItem(-1, "Clear MacroControl");
-
-		p.addSeparator();
-
-		p.addItem(-2, "MIDI Learn", synthChain->hasActiveParameters(index));
-
-		const bool midiControlActive = synthChain->getMainController()->getMacroManager().midiControlActiveForMacro(index);
-
-		String removeText;
-
-		if(midiControlActive)
-		{
-			removeText << "Remove MIDI Control (CC Nr. " << String(synthChain->getMainController()->getMacroManager().getMidiControllerForMacro(index)) << ")";
-		}
-		else
-		{
-			removeText << "No MIDI Control";
-		}
-
-
-		p.addItem(-3, removeText, midiControlActive, false);
-
-		const int result = p.show();
-
-		if(result == -1)
-		{
-			synthChain->getMainController()->getMacroManager().setMacroControlMidiLearnMode(synthChain, index);
-			synthChain->getMainController()->getMacroManager().setMidiControllerForMacro(-1);
-
-			synthChain->clearData(index);
-
-			macroNames[index]->setText("Macro " + String(index + 1), dontSendNotification);
-
-		}
-		else if(result == -2)
-		{
-			synthChain->getMainController()->getMacroManager().setMacroControlMidiLearnMode(synthChain, index);
-		}
-		else if(result == -3)
-		{
-			synthChain->getMainController()->getMacroManager().setMacroControlMidiLearnMode(synthChain, -1);
-			synthChain->getMainController()->getMacroManager().removeMidiController(index);
-
-		}
-
-		for(int i = 0; i < popupData.size(); i++)
-		{
-			if(popupData[i].itemId == result)
-			{
-				const String name = popupData[i].chain->getMacroControlData(popupData[i].macroIndex)->getMacroName();
-
-				const int macroIndex = macroKnobs.indexOf(dynamic_cast<Slider*>(e.eventComponent));
-
-				debugToConsole(synthChain, "Adding " + name + " from " + popupData[i].chain->getId() + " to macro slot " + String(macroIndex));
-
-				synthChain->replaceMacroControlData(macroIndex, popupData[i].chain->getMacroControlData(popupData[i].macroIndex), popupData[i].chain);
-
-				macroNames[macroIndex]->setText(name, dontSendNotification);
-
-			}
-		}
-			
-			
-	}
+	
 }
 
 void MacroComponent::buttonClicked(Button *b)
@@ -283,19 +194,6 @@ void MacroComponent::buttonClicked(Button *b)
 		processor->getMacroManager().setMacroControlLearnMode(processor->getMainSynthChain(), -1);
 	}
 };
-
-
-void MacroComponent::changeListenerCallback(SafeChangeBroadcaster *)
-{
-	for(int i = 0; i < macroKnobs.size(); i++)
-	{
-		macroKnobs[i]->setValue(synthChain->getMacroControlData(i)->getCurrentValue(), dontSendNotification);
-	}
-
-	
-
-	checkActiveButtons();
-}
 
 
 MacroParameterTable* MacroComponent::getMainTable()
@@ -468,8 +366,14 @@ BreadcrumbComponent::~BreadcrumbComponent()
 
 void BreadcrumbComponent::moduleListChanged(Processor* /*processorThatWasChanged*/, MainController::ProcessorChangeHandler::EventType type)
 {
+#if USE_OLD_PROCESSOR_DISPATCH
 	if (type == MainController::ProcessorChangeHandler::EventType::ProcessorRenamed)
 		refreshBreadcrumbs();
+#endif
+#if USE_NEW_PROCESSOR_DISPATCH
+	// implement me...
+	jassertfalse;
+#endif
 }
 
 void BreadcrumbComponent::paint(Graphics &g)

@@ -48,6 +48,7 @@ mod(m)
 
 ScriptContentComponent::ScriptContentComponent(ProcessorWithScriptingContent *p_) :
 	AsyncValueTreePropertyListener(p_->getScriptingContent()->getContentProperties(), p_->getScriptingContent()->getUpdateDispatcher()),
+	updater(*this, dynamic_cast<Processor*>(p_)),
 	contentRebuildNotifier(*this),
 	modalOverlay(*this),
 	processor(p_),
@@ -64,7 +65,7 @@ ScriptContentComponent::ScriptContentComponent(ProcessorWithScriptingContent *p_
     
 	p->addDeleteListener(this);
 
-	p->addChangeListener(this);
+	OLD_PROCESSOR_DISPATCH(p->addChangeListener(this));
 	p->getMainController()->addScriptListener(this, true);
 
 	addChildComponent(modalOverlay);
@@ -72,6 +73,8 @@ ScriptContentComponent::ScriptContentComponent(ProcessorWithScriptingContent *p_
 
 ScriptContentComponent::~ScriptContentComponent()
 {
+
+
 	if (contentData.get() != nullptr)
 	{
 		for (int i = 0; i < contentData->getNumComponents(); i++)
@@ -85,12 +88,18 @@ ScriptContentComponent::~ScriptContentComponent()
 
 	if (p.get() != nullptr)
 	{
+        SUSPEND_GLOBAL_DISPATCH(p->getMainController(), "delete scripting UI");
+        
 		p->getMainController()->removeScriptListener(this);
-		p->removeChangeListener(this);
+		OLD_PROCESSOR_DISPATCH(p->removeChangeListener(this));
 		p->removeDeleteListener(this);
-	};
-
-	componentWrappers.clear();
+        
+        componentWrappers.clear();
+	}
+    else
+    {
+        componentWrappers.clear();
+    }
 }
 
 
@@ -117,7 +126,7 @@ void ScriptContentComponent::refreshMacroIndexes()
 
 				mcb->getMacroControlData(macroIndex)->removeParameter(x);
 
-				p->getMainController()->getMacroManager().getMacroChain()->sendChangeMessage();
+				p->getMainController()->getMacroManager().getMacroChain()->sendOtherChangeMessage(dispatch::library::ProcessorChangeEvent::Macro);
 
 				debugToConsole(p, "Index mismatch: Removed Macro Control for " + x);
 			}
@@ -186,14 +195,6 @@ void ScriptContentComponent::changeListenerCallback(SafeChangeBroadcaster *b)
 	{
 		setEnabled(false);
 	}
-
-	if (p == b)
-	{
-#if USE_BACKEND
-		updateValues();
-#endif
-	}
-	
 	else if (auto sc = dynamic_cast<ScriptingApi::Content::ScriptComponent*>(b))
 	{
 		auto index = contentData->getComponentIndex(sc->name);
@@ -208,7 +209,7 @@ void ScriptContentComponent::changeListenerCallback(SafeChangeBroadcaster *b)
 	}
 	else
 	{
-		updateContent();
+		OLD_PROCESSOR_DISPATCH(updateContent());
 	}
 }
 
@@ -522,18 +523,49 @@ void ScriptContentComponent::prepareScreenshot()
 void ScriptContentComponent::contentWasRebuilt()
 {
 	contentRebuildNotifier.notify(processor->getScriptingContent());
+
+	setWantsKeyboardFocus(processor->getScriptingContent()->hasKeyPressCallbacks());
 }
 
 
 
 void ScriptContentComponent::setNewContent(ScriptingApi::Content *c)
 {
+	SUSPEND_GLOBAL_DISPATCH(p->getMainController(), "rebuild scripting UI");
+
 	if (c == nullptr) return;
 
+	currentTextBox = nullptr;
 	contentData = c;
 
 	deleteAllScriptComponents();
 
+    contentData->textInputBroadcaster.addListener(*this, [](ScriptContentComponent& c, ScriptingApi::Content::TextInputDataBase::Ptr ptr)
+    {
+		c.currentTextBox = ptr;
+
+        if(ptr == nullptr || ptr->done)
+            return;
+        
+        Component* comp = &c;
+        
+        if(ptr->parentId.isNotEmpty())
+        {
+            Identifier pid(ptr->parentId);
+            
+            for(int i = 0; i < c.componentWrappers.size(); i++)
+            {
+                if(c.componentWrappers[i]->getScriptComponent()->getName() == pid)
+                {
+                    comp = c.componentWrappers[i]->getComponent();
+                    break;
+                }
+            }
+        }
+        
+        ptr->show(comp);
+    });
+    
 	valuePopupProperties = new ScriptCreatedComponentWrapper::ValuePopup::Properties(p->getMainController(), c->getValuePopupProperties());
 
 	for (int i = 0; i < contentData->components.size(); i++)
@@ -612,8 +644,14 @@ void ScriptContentComponent::refreshContentButton()
 
 }
 
-bool ScriptContentComponent::keyPressed(const KeyPress &/*key*/)
+bool ScriptContentComponent::keyPressed(const KeyPress& k)
 {
+	if(contentData != nullptr && contentData->hasKeyPressCallbacks())
+	{
+		if(contentData->handleKeyPress(k))
+			return true;
+	}
+
 	return false;
 }
 
@@ -625,8 +663,9 @@ void ScriptContentComponent::processorDeleted(Processor* /*deletedProcessor*/)
 
 void ScriptContentComponent::paint(Graphics &g)
 {
-	if(findParentComponentOfClass<FloatingTilePopup>() == nullptr)
-		g.fillAll(JUCE_LIVE_CONSTANT_OFF(Colour(0xff252525)));
+	TRACE_COMPONENT();
+
+	g.fillAll(JUCE_LIVE_CONSTANT_OFF(Colour(0xff252525)));
 }
 
 void ScriptContentComponent::paintOverChildren(Graphics& g)
@@ -654,7 +693,19 @@ void ScriptContentComponent::paintOverChildren(Graphics& g)
 				ug.draw1PxRect(vg.area);
 		}
 	}
+
+	if(processor->simulatedSuspensionState)
+	{
+		g.fillAll(Colours::black.withAlpha(0.8f));
+		g.setColour(Colours::white);
+		g.setFont(GLOBAL_BOLD_FONT());
+		g.drawText("Suspended...", 0, 0, getWidth(), getHeight(), Justification::centred, false);
+		return;
+	}
+
 #endif
+
+	
 
 	if (isRebuilding)
 	{
@@ -1050,7 +1101,7 @@ bool ScriptContentComponent::ComponentDragInfo::isValid(bool force)
 
 	if (HiseJavascriptEngine::isJavascriptFunction(vf))
 	{
-		LockHelpers::SafeLock sl(getMainController(), LockHelpers::ScriptLock);
+		LockHelpers::SafeLock sl(getMainController(), LockHelpers::Type::ScriptLock);
 		
 		auto sc = dynamic_cast<ScriptComponent*>(scriptComponent.getObject());
 		WeakCallbackHolder wc(sc->getScriptProcessor(), nullptr, vf, 1);
@@ -1073,7 +1124,7 @@ void ScriptContentComponent::ComponentDragInfo::callRepaint()
 	{
 		jassert(source != nullptr);
 		jassert(!MessageManager::getInstance()->isThisTheMessageThread());
-		jassert(getMainController()->getKillStateHandler().getCurrentThread() == MainController::KillStateHandler::ScriptingThread);
+		jassert(getMainController()->getKillStateHandler().getCurrentThread() == MainController::KillStateHandler::TargetThread::ScriptingThread);
 
 		auto area = ApiHelpers::getRectangleFromVar(dragData["area"], nullptr);
 
@@ -1095,11 +1146,11 @@ void ScriptContentComponent::ComponentDragInfo::callRepaint()
 		paintRoutine.callSync(args, 2, nullptr);
 
 		auto handler = &dynamic_cast<ScriptingObjects::GraphicsObject*>(graphicsObject.getObject())->getDrawHandler();
-		handler->flush();
+		handler->flush(0);
 	}
 }
 
-void ScriptContentComponent::ComponentDragInfo::newPaintActionsAvailable()
+void ScriptContentComponent::ComponentDragInfo::newPaintActionsAvailable(uint64_t)
 {
 	if (!parent.isDragAndDropActive())
 	{

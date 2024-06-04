@@ -454,6 +454,10 @@ public:
 			addButton("add", this, f)
 		{
 			addAndMakeVisible(dragButton);
+
+			dragButton.setTooltip("Enable drag mode to draw connections between the parameters");
+			addButton.setTooltip("Create a new parameter");
+
 			addAndMakeVisible(addButton);
 			dragButton.setToggleModeWithColourChange(true);
 			setSize(32, 40);
@@ -466,6 +470,16 @@ public:
 
 			addButton.setBounds(bRow.removeFromTop(bRow.getWidth()).reduced(3));
 			dragButton.setBounds(bRow.removeFromTop(bRow.getWidth()).reduced(3));
+		}
+
+		bool fixed = false;
+
+		void setFixedParameter(bool shouldBeFixed)
+		{
+			fixed = shouldBeFixed;
+
+			addButton.setVisible(!fixed);
+			dragButton.setVisible(!fixed);
 		}
 
 		void buttonClicked(Button* b) override
@@ -528,6 +542,9 @@ public:
 			if ((leftTabComponent = dynamic_cast<NodeContainer*>(parent.node.get())->createLeftTabComponent()))
 				addAndMakeVisible(leftTabComponent);
 
+			if(auto mt = dynamic_cast<ContainerComponent::MacroToolbar*>(leftTabComponent.get()))
+				mt->setFixedParameter(isFixedParameterComponent());
+			
 			setSize(500, UIValues::ParameterHeight);
 			rebuildParameters();
 		}

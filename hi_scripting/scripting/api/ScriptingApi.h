@@ -114,6 +114,27 @@ public:
 		/** Returns the Velocity. */
 		int getVelocity() const;
 
+		/** Checks if the message is a MONOPHONIC aftertouch message. */
+		bool isMonophonicAfterTouch() const;;
+
+		/** Returns the aftertouch value of the monophonic aftertouch message. */
+		int getMonophonicAftertouchPressure() const;;
+
+		/** Sets the pressure value of the monophonic aftertouch message */
+		void setMonophonicAfterTouchPressure(int pressure);;
+
+		/** Checks if the message is a POLYPHONIC aftertouch message (Use isChannelPressure() for monophonic aftertouch). */
+		bool isPolyAftertouch() const;;
+
+		/** Returns the polyphonic aftertouch note number. */
+		int getPolyAfterTouchNoteNumber() const;
+
+		/** Checks if the message is a POLYPHONIC aftertouch message (Use isChannelPressure() for monophonic aftertouch). */
+		int getPolyAfterTouchPressureValue() const;;
+
+		/** Copied from MidiMessage. */
+		void setPolyAfterTouchNoteNumberAndPressureValue(int noteNumber, int aftertouchAmount);;
+
 		/** Ignores the event. */
 		void ignoreEvent(bool shouldBeIgnored=true);;
 
@@ -155,8 +176,11 @@ public:
 		/** Stores a copy of the current event into the given holder object. */
 		void store(var messageEventHolder) const;
 
-		/** Creates a artificial copy of this event and returns the new event ID. */
+		/** Creates a artificial copy of this event and returns the new event ID. If the event is already artificial it will return the event ID. */
 		int makeArtificial();
+
+		/** Creates a artificial copy of this event and returns the new event ID. If the event is artificial it will make a new one with a new ID. */
+		int makeArtificialOrLocal();
 
 		/** Checks if the event was created by a script earlier. */
 		bool isArtificial() const;
@@ -186,6 +210,8 @@ public:
 
 	private:
 
+		int makeArtificialInternal(bool makeLocal);
+		
 		WeakCallbackHolder allNotesOffCallback;
 
 		friend class Synth;
@@ -197,6 +223,8 @@ public:
 		const HiseEvent* constMessageHolder;
 
 		uint16 artificialNoteOnIds[128];
+
+		HiseEvent artificialNoteOnThatWasKilled;
 
 		JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(Message);
 		JUCE_DECLARE_WEAK_REFERENCEABLE(Message);
@@ -359,9 +387,15 @@ public:
 
         /** Creates a fix object factory using the data layout. */
         var createFixObjectFactory(var layoutDescription);
-        
+
+		/** Creates a thread safe storage container. */
+		var createThreadSafeStorage();
+
 		/** Creates a reference to the script license manager. */
 		var createLicenseUnlocker();
+
+		/** Creates a beatport manager object. */
+		var createBeatportManager();
 
 		/** Renders a MIDI event list as audio data on a background thread and calls a function when it's ready. */
 		void renderAudio(var eventList, var finishCallback);
@@ -579,14 +613,26 @@ public:
 		/** Creates a storage object for Message events. */
 		ScriptingObjects::ScriptingMessageHolder* createMessageHolder();
 
+		/** Creates a neural network with the given ID. */
+		ScriptingObjects::ScriptNeuralNetwork* createNeuralNetwork(String id);
+
 		/** Creates an object that can listen to transport events. */
 		var createTransportHandler();
 
 		/** Creates a modulation matrix object that handles dynamic modulation using the given Global Modulator Container as source. */
 		var createModulationMatrix(String containerId);
 
+		/** Creates a macro handler that lets you programmatically change the macro connections. */
+		var createMacroHandler();
+
 		/** Exports an object as JSON. */
 		void dumpAsJSON(var object, String fileName);
+
+		/** Compresses a JSON object as Base64 string using zstd. */
+		String compressJSON(var object);
+
+		/** Expands a compressed JSON object. */
+		var uncompressJSON(const String& b64);
 
 		/** Imports a JSON file as object. */
 		var loadFromJSON(String fileName);
@@ -782,6 +828,18 @@ public:
 		/** Enables or disables debug logging */
 		void setEnableDebugMode(bool shouldBeEnabled);
 
+		/** Changes the sample folder. */
+		void setSampleFolder(var sampleFolder);
+
+		/** Starts the perfetto profile recording. */
+		void startPerfettoTracing();
+
+		/** Stops the perfetto profile recording and dumps the data to the given file. */
+		void stopPerfettoTracing(var traceFileToUse);
+
+		/** Calls abort to terminate the program. You can use this to check your crash reporting workflow. */
+		void crashAndBurn();
+
 		// ============================================================================================================
 
 	private:
@@ -819,14 +877,23 @@ public:
 		/** Enables the group with the given index (one-based). Works only with samplers and `enableRoundRobin(false)`. */
 		void setActiveGroup(int activeGroupIndex);
 
+		/** Enables the group with the given index (one-based) for the given event ID. Works only with samplers and `enableRoundRobin(false)`. */
+		void setActiveGroupForEventId(int eventId, int activeGroupIndex);
+
 		/** Enables the group with the given index (one-based). Allows multiple groups to be active. */
 		void setMultiGroupIndex(var groupIndex, bool enabled);
+
+		/** Enables the group with the given index (one-based) for the given event id. Allows multiple groups to be active. */
+		void setMultiGroupIndexForEventId(int eventId, var groupIndex, bool enabled);
 
 		/** Sets the volume of a particular group (use -1 for active group). Only works with disabled crossfade tables. */
 		void setRRGroupVolume(int groupIndex, int gainInDecibels);
 
 		/** Returns the currently (single) active RR group. */
 		int getActiveRRGroup();
+
+		/** Returns the RR group that is associated with the event ID. */
+		int getActiveRRGroupForEventId(int eventId);
 
 		/** Returns the number of currently active groups. */
 		int getNumActiveGroups() const;
@@ -1013,6 +1080,8 @@ public:
 		/** Adds the interface to the Container's body (or the frontend interface if compiled) */
 		void addToFront(bool addToFront);
 
+		
+
 		/** Defers all callbacks to the message thread (midi callbacks become read-only). */
 		void deferCallbacks(bool makeAsynchronous);
 
@@ -1036,6 +1105,12 @@ public:
 
 		/** Plays a note and returns the event id with the given channel and start offset. */
 		int playNoteWithStartOffset(int channel, int number, int velocity, int offset);
+
+		/** Attaches an artificial note to be stopped when the original note is stopped. */
+		bool attachNote(int originalNoteId, int artificialNoteId);
+
+		/** Adds a few additional safe checks to prevent stuck notes from note offs being processed before their note-on message. */
+		void setFixNoteOnAfterNoteOff(bool shouldBeFixed);
 
 		/** Fades all voices with the given event id to the target volume (in decibels). */
 		void addVolumeFade(int eventId, int fadeTimeMilliseconds, int targetVolume);
@@ -1319,14 +1394,12 @@ public:
 			lineNumber = lineNumber_;
 		}
 
-	private:
+private:
 
 		Identifier id;
 		int lineNumber;
 
 		double startTime;
-
-
 
 		JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(Console)
 	};
@@ -1406,6 +1479,9 @@ public:
 		/** Registers a callback to changes in the grid. */
 		void setOnGridChange(var sync, var f);
 
+		/** Registers a callback that will be executed asynchronously when the plugin's bypass state changes. */
+		void setOnBypass(var f);
+
 		/** Enables a high precision grid timer. */
 		void setEnableGrid(bool shouldBeEnabled, int tempoFactor);
 
@@ -1427,7 +1503,12 @@ public:
 		/** If enabled, this will link the internal / external BPM to the sync mode. */
 		void setLinkBpmToSyncMode(bool shouldPrefer);
 
+		/** This will return true if the DAW is currently bouncing the audio to a file. You can use this in the transport change callback to modify your processing chain. */
+		bool isNonRealtime() const;
+
 	private:
+
+		static void onBypassUpdate(TransportHandler& handler, bool state);
 
 		void clearIf(ScopedPointer<Callback>& cb, const var& f)
 		{
@@ -1452,6 +1533,8 @@ public:
 		ScopedPointer<Callback> timeSignatureCallback;
 		ScopedPointer<Callback> beatCallback;
 		ScopedPointer<Callback> gridCallback;
+
+		ScopedPointer<Callback> bypassCallback;
 
 		ScopedPointer<Callback> tempoChangeCallbackAsync;
 		ScopedPointer<Callback> transportChangeCallbackAsync;
@@ -1650,7 +1733,10 @@ public:
         
         /** Decrypts the given string using a RSA public key. */
         String decryptWithRSA(const String& dataToDecrypt, const String& publicKey);
-        
+
+		/** Loads a bunch of dummy assets (audio files, MIDI files, filmstrips) for use in snippets & examples. */
+		void loadExampleAssets();
+
 		// ========================================================= End of API calls
 
 		ProcessorWithScriptingContent* p;
@@ -1667,6 +1753,63 @@ public:
 
 
 	};
+
+    class Threads: public ApiClass,
+				   public ScriptingObject
+    {
+    public:
+
+        Threads(ProcessorWithScriptingContent* p);
+
+        Identifier getObjectName() const override { RETURN_STATIC_IDENTIFIER("Threads"); }
+
+		// API METHODS ===============================================================================
+
+		/** Returns the thread ID of the thread that is calling this method. */
+        int getCurrentThread() const;
+
+		/** Returns true if the audio callback is running or false if it's suspended during a load operation. */
+        bool isAudioRunning() const;
+
+		/** Returns true if the audio exporter is currently rendering the audio on a background thread. */
+		bool isCurrentlyExporting() const;
+
+		/** Returns true if the given thread is currently locked by the current thread. */
+        bool isLockedByCurrentThread(int thread) const;
+
+		/** Returns the thread ID of the thread the locks the given thread ID. */
+        int getLockerThread(int threadThatIsLocked) const;
+
+		/** Returns true if the given thread is currently locked. */
+        bool isLocked(int thread) const;
+
+		/** Returns the name of the given string (for debugging purposes only!). */
+		String toString(int thread) const;
+
+		/** Returns the name of the current thread (for debugging purposes only!). */
+        String getCurrentThreadName() const
+        {
+			return toString(getCurrentThread());
+        }
+
+        /** Kills all voices, suspends the audio processing and calls the given function on the loading thread. Returns true if the function was executed synchronously. */
+        bool killVoicesAndCall(const var& functionToExecute);
+
+    private:
+
+		using TargetThreadId = MainController::KillStateHandler::TargetThread;
+		using LockId = LockHelpers::Type;
+
+        static TargetThreadId getAsThreadId(int x);
+        static LockId getAsLockId(int x);
+
+        MainController::KillStateHandler& getKillStateHandler();
+        const MainController::KillStateHandler& getKillStateHandler() const;
+
+        struct Wrapper;
+
+        JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(Threads);
+    };
 
 	class Colours: public ApiClass
 	{
@@ -1735,14 +1878,14 @@ public:
 		void setIntensity(var newValue)
 		{
 			m->setIntensity((float)newValue);
-			BACKEND_ONLY(mod->sendChangeMessage());
+			BACKEND_ONLY(mod->sendOtherChangeMessage(dispatch::library::ProcessorChangeEvent::Intensity, dispatch::sendNotificationAsync););
 		}
 
 		/** Bypasses the modulator. */
 		void setBypassed(var newValue)
 		{
 			mod->setBypassed((bool)newValue);
-			BACKEND_ONLY(mod->sendChangeMessage());
+			BACKEND_ONLY(mod->sendOtherChangeMessage(dispatch::library::ProcessorChangeEvent::Bypassed, dispatch::sendNotificationAsync););
 		}
 
 	private:

@@ -220,6 +220,16 @@ public:
 		void setForceFoldButton(bool shouldBeShown);
 		bool mustShowFoldButton() const;
 
+		Identifier getKeyPressId() const
+		{
+			auto s = getPropertyWithDefault(layoutDataObject, LayoutDataIds::FoldKeyPress).toString();
+
+			if(s.isNotEmpty())
+				return Identifier(s);
+
+			return {};
+		}
+
 	private:
 
 		struct CachedValues
@@ -532,6 +542,12 @@ public:
 	void removePopup(FloatingTilePopup* p);
 	void detachCurrentPopupAsync();
 	void toggleDetachPopup(FloatingTilePopup* p);
+
+	void clearAllPopups()
+	{
+		showComponentInRootPopup(nullptr, nullptr, {});
+		detachedPopups.clear();
+	}
 
 private:
 

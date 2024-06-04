@@ -230,6 +230,7 @@ struct ScriptingApi::Content::ScriptComponent::Wrapper
 	API_VOID_METHOD_WRAPPER_1(ScriptComponent, setControlCallback);
 	API_METHOD_WRAPPER_0(ScriptComponent, getAllProperties);
 	API_VOID_METHOD_WRAPPER_1(ScriptComponent, setKeyPressCallback);
+	API_VOID_METHOD_WRAPPER_1(ScriptComponent, setConsumedKeyPresses);
 	API_VOID_METHOD_WRAPPER_0(ScriptComponent, loseFocus);
     API_VOID_METHOD_WRAPPER_0(ScriptComponent, grabFocus);
 	API_VOID_METHOD_WRAPPER_1(ScriptComponent, setZLevel);
@@ -335,6 +336,7 @@ ScriptingApi::Content::ScriptComponent::ScriptComponent(ProcessorWithScriptingCo
 	asyncValueUpdater(*this),
 	propertyTree(name_.isValid() ? parent->getValueTreeForComponent(name) : ValueTree("Component")),
 	value(0.0),
+	NEW_AUTOMATION_WITH_COMMA(automationListener(base->getMainController_()->getRootDispatcher(), *this, BIND_MEMBER_FUNCTION_2(ScriptComponent::updateAutomation)))
     subComponentNotifier(*this),
 	skipRestoring(false),
 	hasChanged(false),
@@ -422,6 +424,7 @@ ScriptingApi::Content::ScriptComponent::ScriptComponent(ProcessorWithScriptingCo
 	ADD_API_METHOD_0(getAllProperties);
 	ADD_API_METHOD_1(setZLevel);
 	ADD_API_METHOD_1(setKeyPressCallback);
+	ADD_API_METHOD_1(setConsumedKeyPresses);
 	ADD_API_METHOD_0(loseFocus);
     ADD_API_METHOD_0(grabFocus);
 	ADD_API_METHOD_1(setLocalLookAndFeel);
@@ -615,7 +618,8 @@ void ScriptingApi::Content::ScriptComponent::setScriptObjectPropertyWithChangeMe
 	{
 		if (currentAutomationData != nullptr)
 		{
-			currentAutomationData->asyncListeners.removeListener(*this);
+			IF_OLD_AUTOMATION_DISPATCH(currentAutomationData->asyncListeners.removeListener(*this));
+			IF_NEW_AUTOMATION_DISPATCH(currentAutomationData->dispatcher.removeValueListener(&automationListener));
 		}
 
 		if (!newValue.toString().isEmpty())
@@ -626,10 +630,14 @@ void ScriptingApi::Content::ScriptComponent::setScriptObjectPropertyWithChangeMe
 			{
 				if ((sc.currentAutomationData = sc.getScriptProcessor()->getMainController_()->getUserPresetHandler().getCustomAutomationData(newCustomId)))
 				{
+#if USE_OLD_AUTOMATION_DISPATCH
 					sc.currentAutomationData->asyncListeners.addListener(sc, [](ScriptComponent& c, int index, float v)
 					{
 						c.setValue(v);
 					}, true);
+#endif
+
+					IF_NEW_AUTOMATION_DISPATCH(sc.currentAutomationData->dispatcher.addValueListener(&sc.automationListener, true, dispatch::DispatchType::sendNotificationAsyncHiPriority));
 				}
 			};
 
@@ -924,7 +932,7 @@ void ScriptingApi::Content::ScriptComponent::sendValueListenerMessage()
 	{
 		auto currentThread = getScriptProcessor()->getMainController_()->getKillStateHandler().getCurrentThread();
 
-		if (currentThread == MainController::KillStateHandler::AudioThread)
+		if (currentThread == MainController::KillStateHandler::TargetThread::AudioThread)
 		{
 			asyncValueUpdater.triggerAsyncUpdate();
 			return;
@@ -942,8 +950,13 @@ void ScriptingApi::Content::ScriptComponent::sendValueListenerMessage()
 void ScriptingApi::Content::ScriptComponent::changed()
 {
 	if (!parent->asyncFunctionsAllowed())
+	{
+		debugToConsole(dynamic_cast<Processor*>(getScriptProcessor()), "Skipping changed() callback during onInit for " + getId());
 		return;
+	}
 
+	ScopedValueSetter<bool> svs(getScriptProcessor()->getMainController_()->getDeferNotifyHostFlag(), true);
+	
 	controlSender.sendControlCallbackMessage();
 	sendValueListenerMessage();
 
@@ -976,7 +989,7 @@ void ScriptingApi::Content::ScriptComponent::AsyncControlCallbackSender::sendCon
 	{
 		changePending = true;
 
-		if (p->getMainController_()->getKillStateHandler().getCurrentThread() == MainController::KillStateHandler::ScriptingThread ||
+		if (p->getMainController_()->getKillStateHandler().getCurrentThread() == MainController::KillStateHandler::TargetThread::ScriptingThread ||
             p->getMainController_()->isFlakyThreadingAllowed())
 			handleAsyncUpdate();
 		else
@@ -1367,7 +1380,11 @@ ScriptingApi::Content::ScriptComponent::~ScriptComponent()
 		linkedComponent->removeLinkedTarget(this);
 
 	if (currentAutomationData != nullptr)
-		currentAutomationData->asyncListeners.removeListener(*this);
+	{
+		IF_OLD_AUTOMATION_DISPATCH(currentAutomationData->asyncListeners.removeListener(*this));
+		IF_NEW_AUTOMATION_DISPATCH(currentAutomationData->dispatcher.removeValueListener(&automationListener));
+	}
+		
 }
 
 void ScriptingApi::Content::ScriptComponent::handleDefaultDeactivatedProperties()
@@ -1520,46 +1537,79 @@ var ScriptingApi::Content::ScriptComponent::getLocalBounds(float reduceAmount)
 
 void ScriptingApi::Content::ScriptComponent::setKeyPressCallback(var keyboardFunction)
 {
+    if(!consumedCalled && HiseJavascriptEngine::isJavascriptFunction(keyboardFunction))
+    {
+        reportScriptError("You need to call setConsumedKeyPresses() before calling this method.");
+    }
+    
 	keyboardCallback = WeakCallbackHolder(getScriptProcessor(), this, keyboardFunction, 1);
 	keyboardCallback.incRefCount();
 	keyboardCallback.setThisObject(this);
 }
 
+void ScriptComponent::setConsumedKeyPresses(var listOfKeys)
+{
+    consumedCalled = true;
+    
+	registeredKeys.clear();
+
+	auto r = Result::ok();
+
+	if(listOfKeys.isArray())
+	{
+		catchAllKeys = false;
+				
+		for(const auto& v: *listOfKeys.getArray())
+		{
+			auto k = ApiHelpers::getKeyPress(v, &r);
+
+			if(!r.wasOk())
+				reportScriptError(r.getErrorMessage());
+			else
+				registeredKeys.add(k);
+		}
+	}
+	else
+	{
+        if(listOfKeys.toString() == "all")
+        {
+            catchAllKeys = true;
+        }
+        else
+        {
+            auto k = ApiHelpers::getKeyPress(listOfKeys, &r);
+
+            if(r.wasOk())
+            {
+                catchAllKeys = false;
+                registeredKeys.add(k);
+            }
+            else
+            {
+                reportScriptError(r.getErrorMessage());
+            }
+        }
+
+	}
+}
+
+
 bool ScriptingApi::Content::ScriptComponent::handleKeyPress(const KeyPress& k)
 {
 	if (keyboardCallback)
 	{
-		auto obj = new DynamicObject();
-		var args(obj);
+		if(catchAllKeys || registeredKeys.contains(k))
+		{
+			auto args = Content::createKeyboardCallbackObject(k);
 
-		obj->setProperty("isFocusChange", false);
+			var rv;
 
-		auto c = k.getTextCharacter();
+			keyboardCallback.call(&args, 1); 
 
-		auto printable    = CharacterFunctions::isPrintable(c);
-		auto isWhitespace = CharacterFunctions::isWhitespace(c);
-		auto isLetter     = CharacterFunctions::isLetter(c);
-		auto isDigit      = CharacterFunctions::isDigit(c);
+			return true;
+		}
+
 		
-		obj->setProperty("character", printable ? String::charToString(c) : "");
-		obj->setProperty("specialKey", !printable);
-		obj->setProperty("isWhitespace", isWhitespace);
-		obj->setProperty("isLetter", isLetter);
-		obj->setProperty("isDigit", isDigit);
-		obj->setProperty("keyCode", k.getKeyCode());
-		obj->setProperty("description", k.getTextDescription());
-		obj->setProperty("shift", k.getModifiers().isShiftDown());
-		obj->setProperty("cmd", k.getModifiers().isCommandDown() || k.getModifiers().isCtrlDown());
-		obj->setProperty("alt", k.getModifiers().isAltDown());
-
-		var rv;
-
-		auto ok = keyboardCallback.callSync(&args, 1, &rv);
-
-		if (ok.wasOk())
-			return (bool)rv;
-		else
-			reportScriptError(ok.getErrorMessage());
 	}
 
 	return false;
@@ -1772,6 +1822,8 @@ struct ScriptingApi::Content::ScriptSlider::Wrapper
 	API_METHOD_WRAPPER_0(ScriptSlider, getMinValue);
 	API_METHOD_WRAPPER_0(ScriptSlider, getMaxValue);
 	API_METHOD_WRAPPER_1(ScriptSlider, contains);
+    API_METHOD_WRAPPER_0(ScriptSlider, createModifiers);
+    API_VOID_METHOD_WRAPPER_2(ScriptSlider, setModifiers);
 };
 
 ScriptingApi::Content::ScriptSlider::ScriptSlider(ProcessorWithScriptingContent *base, Content* /*parentContent*/, Identifier name_, int x, int y, int, int) :
@@ -1798,6 +1850,7 @@ maximum(1.0f)
 	ADD_SCRIPT_PROPERTY(i14, "showTextBox"); 	ADD_TO_TYPE_SELECTOR(SelectorTypes::ToggleSelector);
 	ADD_SCRIPT_PROPERTY(i15, "scrollWheel"); 	ADD_TO_TYPE_SELECTOR(SelectorTypes::ToggleSelector);
 	ADD_SCRIPT_PROPERTY(i16, "enableMidiLearn"); ADD_TO_TYPE_SELECTOR(SelectorTypes::ToggleSelector);
+	ADD_SCRIPT_PROPERTY(i17, "sendValueOnDrag"); ADD_TO_TYPE_SELECTOR(SelectorTypes::ToggleSelector);
 
 #if 0
 	componentProperties->setProperty(getIdFor(Mode), 0);
@@ -1838,7 +1891,8 @@ maximum(1.0f)
 	setDefaultValue(ScriptSlider::Properties::showTextBox, true);
 	setDefaultValue(ScriptSlider::Properties::scrollWheel, true);
 	setDefaultValue(ScriptSlider::Properties::enableMidiLearn, true);
-
+	setDefaultValue(ScriptSlider::Properties::sendValueOnDrag, true);
+	
 	ScopedValueSetter<bool> svs(removePropertyIfDefault, false);
 
 	const bool dontUpdateMode = !getPropertyValueTree().hasProperty(getIdFor(Mode));
@@ -1854,16 +1908,18 @@ maximum(1.0f)
 	initInternalPropertyFromValueTreeOrDefault(Properties::filmstripImage);
 	initInternalPropertyFromValueTreeOrDefault(ScriptComponent::linkedTo);
 
-	ADD_API_METHOD_1(setValuePopupFunction);
-	ADD_API_METHOD_1(setMidPoint);
+	ADD_TYPED_API_METHOD_1(setValuePopupFunction, VarTypeChecker::Function);
+	ADD_TYPED_API_METHOD_1(setMidPoint, VarTypeChecker::Number);
 	ADD_API_METHOD_3(setRange);
-	ADD_API_METHOD_1(setMode);
-	ADD_API_METHOD_1(setStyle);
-	ADD_API_METHOD_1(setMinValue);
-	ADD_API_METHOD_1(setMaxValue);
+	ADD_TYPED_API_METHOD_1(setMode, VarTypeChecker::String);
+	ADD_TYPED_API_METHOD_1(setStyle, VarTypeChecker::String);
+	ADD_TYPED_API_METHOD_1(setMinValue, VarTypeChecker::Number);
+	ADD_TYPED_API_METHOD_1(setMaxValue, VarTypeChecker::Number);
 	ADD_API_METHOD_0(getMinValue);
 	ADD_API_METHOD_0(getMaxValue);
 	ADD_API_METHOD_1(contains);
+    ADD_API_METHOD_0(createModifiers);
+    ADD_TYPED_API_METHOD_2(setModifiers, VarTypeChecker::String, VarTypeChecker::IndexOrArray);
 
 	//addConstant("Decibel", HiSlider::Mode::Decibel);
 	//addConstant("Discrete", HiSlider::Mode::Discrete);
@@ -2284,6 +2340,26 @@ juce::Array<hise::ScriptingApi::Content::ScriptComponent::PropertyWithValue> Scr
 	return idList;
 }
 
+void ScriptingApi::Content::ScriptSlider::setModifiers(String x, juce::var modifierData)
+{
+    DynamicObject::Ptr obj;
+    
+    if(modObject.getDynamicObject())
+        obj = modObject.getDynamicObject();
+    else
+        obj = new DynamicObject();
+    
+    obj->setProperty(Identifier(x), modifierData);
+    
+    modObject = var(obj.get());
+}
+
+
+juce::var ScriptingApi::Content::ScriptSlider::createModifiers() { 
+    return var(new ModifierObject(getScriptProcessor()));
+}
+
+
 struct ScriptingApi::Content::ScriptButton::Wrapper
 {
 	API_VOID_METHOD_WRAPPER_2(ScriptButton, setPopupData);
@@ -2573,7 +2649,8 @@ ScriptComponent(base, name)
 	ADD_SCRIPT_PROPERTY(i03, "fontStyle");	ADD_TO_TYPE_SELECTOR(SelectorTypes::ChoiceSelector);
 	ADD_SCRIPT_PROPERTY(i04, "enableMidiLearn"); ADD_TO_TYPE_SELECTOR(SelectorTypes::ToggleSelector);
     ADD_SCRIPT_PROPERTY(i05, "popupAlignment"); ADD_TO_TYPE_SELECTOR(SelectorTypes::ChoiceSelector);
-
+    ADD_SCRIPT_PROPERTY(i06, "useCustomPopup"); ADD_TO_TYPE_SELECTOR(SelectorTypes::ToggleSelector);
+    
 	priorityProperties.add(getIdFor(Items));
 
 	setDefaultValue(ScriptComponent::Properties::x, x);
@@ -2588,6 +2665,7 @@ ScriptComponent(base, name)
 	setDefaultValue(ScriptComponent::Properties::defaultValue, 1);
 	setDefaultValue(ScriptComponent::min, 1.0f);
 	setDefaultValue(ScriptComboBox::Properties::enableMidiLearn, false);
+    setDefaultValue(ScriptComboBox::Properties::useCustomPopup, false);
 	
 	handleDefaultDeactivatedProperties();
 	initInternalPropertyFromValueTreeOrDefault(Items);
@@ -3040,6 +3118,7 @@ struct ScriptingApi::Content::ScriptSliderPack::Wrapper
 	API_METHOD_WRAPPER_1(ScriptSliderPack, getSliderValueAt);
 	API_VOID_METHOD_WRAPPER_1(ScriptSliderPack, setAllValues);
 	API_METHOD_WRAPPER_0(ScriptSliderPack, getNumSliders);
+	API_VOID_METHOD_WRAPPER_1(ScriptSliderPack, setAllValuesWithUndo);
 	API_VOID_METHOD_WRAPPER_1(ScriptSliderPack, referToData);
     API_VOID_METHOD_WRAPPER_1(ScriptSliderPack, setWidthArray);
 	API_METHOD_WRAPPER_1(ScriptSliderPack, registerAtParent);
@@ -3057,6 +3136,7 @@ ComplexDataScriptComponent(base, name_, snex::ExternalData::DataType::SliderPack
 	ADD_SCRIPT_PROPERTY(i03, "showValueOverlay");	ADD_TO_TYPE_SELECTOR(SelectorTypes::ToggleSelector);
 	ADD_SCRIPT_PROPERTY(i05, "SliderPackIndex");  
 	ADD_SCRIPT_PROPERTY(i06, "mouseUpCallback"); ADD_TO_TYPE_SELECTOR(SelectorTypes::ToggleSelector);
+	ADD_SCRIPT_PROPERTY(i07, "stepSequencerMode"); ADD_TO_TYPE_SELECTOR(SelectorTypes::ToggleSelector);
 
 	setDefaultValue(ScriptComponent::Properties::x, x);
 	setDefaultValue(ScriptComponent::Properties::y, y);
@@ -3068,6 +3148,7 @@ ComplexDataScriptComponent(base, name_, snex::ExternalData::DataType::SliderPack
 	setDefaultValue(itemColour2, 0x77FFFFFF);
 	setDefaultValue(textColour, 0x33FFFFFF);
 	setDefaultValue(CallbackOnMouseUpOnly, false);
+	setDefaultValue(StepSequencerMode, false);
 
 	setDefaultValue(SliderAmount, 0);
 	setDefaultValue(StepSize, 0);
@@ -3091,12 +3172,14 @@ ComplexDataScriptComponent(base, name_, snex::ExternalData::DataType::SliderPack
 	initInternalPropertyFromValueTreeOrDefault(ScriptComponent::Properties::processorId);
 	initInternalPropertyFromValueTreeOrDefault(SliderPackIndex);
 	initInternalPropertyFromValueTreeOrDefault(CallbackOnMouseUpOnly);
+	initInternalPropertyFromValueTreeOrDefault(StepSequencerMode);
 
 	updateCachedObjectReference();
 
 	ADD_API_METHOD_2(setSliderAtIndex);
 	ADD_API_METHOD_1(getSliderValueAt);
 	ADD_API_METHOD_1(setAllValues);
+	ADD_API_METHOD_1(setAllValuesWithUndo);
 	ADD_API_METHOD_0(getNumSliders);
 	ADD_API_METHOD_1(referToData);
     ADD_API_METHOD_1(setWidthArray);
@@ -3104,6 +3187,7 @@ ComplexDataScriptComponent(base, name_, snex::ExternalData::DataType::SliderPack
 	ADD_API_METHOD_0(getDataAsBuffer);
 	ADD_API_METHOD_1(setAllValueChangeCausesCallback);
 	ADD_API_METHOD_1(setUsePreallocatedLength);
+	
 }
 
 ScriptingApi::Content::ScriptSliderPack::~ScriptSliderPack()
@@ -3145,14 +3229,21 @@ void ScriptingApi::Content::ScriptSliderPack::setAllValues(var value)
 	if (auto d = getCachedSliderPack())
 	{
 		auto isMultiValue = value.isBuffer() || value.isArray();
-
 		int maxIndex = value.isBuffer() ? (value.getBuffer()->size) : (value.isArray() ? value.size() : 0);
 
 		for (int i = 0; i < d->getNumSliders(); i++)
 		{
 			if (!isMultiValue || isPositiveAndBelow(i, maxIndex))
 			{
-				auto vToSet = isMultiValue ? (float)value[i] : (float)value;
+				float vToSet;
+
+				if(value.isBuffer())
+					vToSet = value.getBuffer()->getSample(i);
+				else if (value.isArray())
+					vToSet = value[i];
+				else
+					vToSet = (float)value;
+				
 				d->setValue(i, (float)vToSet, dontSendNotification);
 			}
 		}
@@ -3165,6 +3256,36 @@ void ScriptingApi::Content::ScriptSliderPack::setAllValues(var value)
 		}
 		else
 			d->getUpdater().sendDisplayChangeMessage(-1, sendNotificationAsync, true);
+	}
+}
+
+void ScriptingApi::Content::ScriptSliderPack::setAllValuesWithUndo(var value)
+{
+	if (auto d = getCachedSliderPack())
+	{
+		int maxIndex = value.isBuffer() ? (value.getBuffer()->size) : (value.isArray() ? value.size() : d->getNumSliders());
+
+		Array<float> newData;
+		newData.ensureStorageAllocated(maxIndex);
+
+		for(int i = 0; i < maxIndex; i++)
+		{
+			float vToSet;
+
+			if(value.isBuffer())
+				vToSet = value.getBuffer()->getSample(i);
+			else if (value.isArray())
+				vToSet = value[i];
+			else
+				vToSet = (float)value;
+
+			newData.add(vToSet);
+		}
+
+		// We always want to send a value change when we're performing a undoable action
+		auto n = (true || allValueChangeCausesCallback) ? sendNotificationAsync : dontSendNotification;
+
+		d->setFromFloatArray(newData, n, true);
 	}
 }
 
@@ -3360,6 +3481,7 @@ ScriptingApi::Content::ScriptAudioWaveform::ScriptAudioWaveform(ProcessorWithScr
 	
 	ADD_SCRIPT_PROPERTY(i05, "sampleIndex");
 	ADD_SCRIPT_PROPERTY(i06, "enableRange"); ADD_TO_TYPE_SELECTOR(SelectorTypes::ToggleSelector);
+	ADD_SCRIPT_PROPERTY(i07, "loadWithLeftClick"); ADD_TO_TYPE_SELECTOR(SelectorTypes::ToggleSelector);
 
 	setDefaultValue(ScriptComponent::Properties::x, x);
 	setDefaultValue(ScriptComponent::Properties::y, y);
@@ -3376,6 +3498,7 @@ ScriptingApi::Content::ScriptAudioWaveform::ScriptAudioWaveform(ProcessorWithScr
 	setDefaultValue(Properties::showFileName, true);
 	setDefaultValue(Properties::sampleIndex, 0);
 	setDefaultValue(Properties::enableRange, true);
+	setDefaultValue(Properties::loadWithLeftClick, false);
 
 	handleDefaultDeactivatedProperties();
 
@@ -4015,6 +4138,10 @@ void ScriptingApi::Content::ScriptPanel::init()
 	ADD_API_METHOD_1(setAnimationFrame);
 	ADD_API_METHOD_3(startExternalFileDrag);
 	ADD_API_METHOD_1(startInternalDrag);
+
+#if PERFETTO
+	setWantsCurrentLocation(true);
+#endif
 }
 
 
@@ -4052,11 +4179,16 @@ ScriptCreatedComponentWrapper * ScriptingApi::Content::ScriptPanel::createCompon
 
 void ScriptingApi::Content::ScriptPanel::repaint()
 {
+#if PERFETTO
+	auto newId = getScriptProcessor()->getMainController_()->getRootDispatcher().bumpFlowCounter();
+	flowManager.openFlow(newId, "repaint ", getName(), getCurrentLocationInFunctionCall().toGotoString());
+#endif
+
 	auto threadId = getScriptProcessor()->getMainController_()->getKillStateHandler().getCurrentThread();
 
-	if (threadId == MainController::KillStateHandler::SampleLoadingThread ||
-		threadId == MainController::KillStateHandler::ScriptingThread ||
-		threadId == MainController::KillStateHandler::MessageThread)
+	if (threadId == MainController::KillStateHandler::TargetThread::SampleLoadingThread ||
+		threadId == MainController::KillStateHandler::TargetThread::ScriptingThread ||
+		threadId == MainController::KillStateHandler::TargetThread::MessageThread)
 	{
 		internalRepaint(false);
 	}
@@ -4120,6 +4252,12 @@ bool ScriptingApi::Content::ScriptPanel::internalRepaintIdle(bool forceRepaint, 
 {
 	jassert_locked_script_thread(dynamic_cast<Processor*>(getScriptProcessor())->getMainController());
 
+	uint64_t lastId = 0;
+
+#if PERFETTO
+	lastId = flowManager.flushAllButLastOne("paint callback", getName());
+#endif
+
 	const bool parentHasMovedOn = !isChildPanel && !parent->hasComponent(this);
 
 	if (parentHasMovedOn || !parent->asyncFunctionsAllowed())
@@ -4161,7 +4299,7 @@ bool ScriptingApi::Content::ScriptPanel::internalRepaintIdle(bool forceRepaint, 
 		debugError(dynamic_cast<Processor*>(getScriptProcessor()), r.getErrorMessage());
 	}
 
-	graphics->getDrawHandler().flush();
+	graphics->getDrawHandler().flush(lastId);
 
 	return true;
 }
@@ -4176,6 +4314,7 @@ void ScriptingApi::Content::ScriptPanel::setLoadingCallback(var loadingCallback)
 		loadRoutine.incRefCount();
 		loadRoutine.setThisObject(this);
 		loadRoutine.setHighPriority();
+		loadRoutine.addAsSource(this, "loadingCallback");
 	}
     else
     {
@@ -4199,6 +4338,7 @@ void ScriptingApi::Content::ScriptPanel::setFileDropCallback(String callbackLeve
 	fileDropRoutine.incRefCount();
 	fileDropRoutine.setThisObject(this);
 	fileDropRoutine.setHighPriority();
+	fileDropRoutine.addAsSource(this, "fileDropCallback");
 
 }
 
@@ -4208,6 +4348,7 @@ void ScriptingApi::Content::ScriptPanel::setMouseCallback(var mouseCallbackFunct
 	mouseRoutine.incRefCount();
 	mouseRoutine.setThisObject(this);
 	mouseRoutine.setHighPriority();
+	mouseRoutine.addAsSource(this, "mouseCallback");
 }
 
 void ScriptingApi::Content::ScriptPanel::fileDropCallback(var fileInformation)
@@ -4237,6 +4378,7 @@ void ScriptingApi::Content::ScriptPanel::setTimerCallback(var timerCallback_)
 	timerRoutine = WeakCallbackHolder(getScriptProcessor(), this, timerCallback_, 0);
 	timerRoutine.incRefCount();
 	timerRoutine.setThisObject(this);
+	timerRoutine.addAsSource(this, "timerCallback");
 }
 
 
@@ -4445,7 +4587,7 @@ void ScriptingApi::Content::ScriptPanel::setImage(String imageName, int xOffset,
 	{
 		drawHandler->beginDrawing();
 		drawHandler->addDrawAction(new ScriptedDrawActions::drawImageWithin(img, b.toFloat()));
-		drawHandler->flush();
+		drawHandler->flush(0);
 	}
 }
 
@@ -4620,7 +4762,7 @@ void ScriptingApi::Content::ScriptPanel::repaintWrapped()
 {
 	auto mc = getScriptProcessor()->getMainController_();
 
-	if (mc->getKillStateHandler().getCurrentThread() != MainController::KillStateHandler::ScriptingThread)
+	if (mc->getKillStateHandler().getCurrentThread() != MainController::KillStateHandler::TargetThread::ScriptingThread)
 	{
 		auto jp = dynamic_cast<JavascriptProcessor*>(getProcessor());
 
@@ -4699,7 +4841,7 @@ void ScriptingApi::Content::ScriptPanel::setAnimationFrame(int numFrame)
 	{
 		animation->setFrame(numFrame);
 		updateAnimationData();
-		graphics->getDrawHandler().flush();
+		graphics->getDrawHandler().flush(0);
 	}
 #else
 	reportScriptError("RLottie is disabled. Compile with HISE_INCLUDE_RLOTTIE");
@@ -5108,6 +5250,8 @@ void ScriptingApi::Content::ScriptedViewport::setTableMode(var tableMetadata)
 	}
 
 	tableModel = new ScriptTableListModel(getScriptProcessor(), tableMetadata);
+
+	tableModel->setTooltip(getScriptObjectProperty(ScriptComponent::Properties::tooltip).toString());
 
 	if (tableModel->isMultiColumn())
 	{
@@ -5669,6 +5813,7 @@ width(600),
 name(String()),
 allowGuiCreation(true),
 dragCallback(p, nullptr, var(), 1),
+suspendCallback(p, nullptr, var(), 1),
 colour(Colour(0xff777777))
 {
 #if USE_FRONTEND
@@ -5708,6 +5853,7 @@ colour(Colour(0xff777777))
 	setMethod("addVisualGuide", Wrapper::addVisualGuide);
     setMethod("makeFrontInterface", Wrapper::makeFrontInterface);
 	setMethod("makeFullScreenInterface", Wrapper::makeFullScreenInterface);
+    setMethod("showModalTextInput", Wrapper::showModalTextInput);
 	setMethod("setName", Wrapper::setName);
 	setMethod("getComponent", Wrapper::getComponent);
 	setMethod("getAllComponents", Wrapper::getAllComponents);
@@ -5721,6 +5867,8 @@ colour(Colour(0xff777777))
 	setMethod("isCtrlDown", Wrapper::isCtrlDown);
 	setMethod("createPath", Wrapper::createPath);
 	setMethod("createShader", Wrapper::createShader);
+	setMethod("setSuspendTimerCallback", Wrapper::setSuspendTimerCallback);
+    setMethod("setKeyPressCallback", Wrapper::setKeyPressCallback);
 	setMethod("createMarkdownRenderer", Wrapper::createMarkdownRenderer);
     setMethod("createSVG", Wrapper::createSVG);
 	setMethod("getScreenBounds", Wrapper::getScreenBounds);
@@ -5959,6 +6107,7 @@ void ScriptingApi::Content::beginInitialization()
 
 	updateWatcher = nullptr;
 	guides.clear();
+	registeredKeyPresses.clear();
 }
 
 
@@ -6250,7 +6399,7 @@ void ScriptingApi::Content::restoreAllControlsFromPreset(const ValueTree &preset
 		}
 		else
 		{
-			getProcessor()->setAttribute(i, (float)v, sendNotification);
+			getProcessor()->setAttribute(i, (float)v, sendNotificationAsync);
 		}
 
 		const String macroName = components[i]->getScriptObjectProperty(ScriptComponent::macroControl).toString();
@@ -6395,6 +6544,8 @@ void ScriptingApi::Content::rebuildComponentListFromValueTree()
 
 	auto p = dynamic_cast<Processor*>(getScriptProcessor());
 
+	updateParameterSlots();
+
 	if (p->getMainController()->getScriptComponentEditBroadcaster()->isBeingEdited(p))
 	{
 		debugToConsole(p, "Updated Components");
@@ -6466,6 +6617,11 @@ void ScriptingApi::Content::addComponentsFromValueTree(const ValueTree& v)
 	{
 		debugError(getProcessor(), errorMessage);
 	}
+}
+
+void ScriptingApi::Content::updateParameterSlots()
+{
+	dynamic_cast<Processor*>(getScriptProcessor())->updateParameterSlots();
 }
 
 void ScriptingApi::Content::restoreSavedValue(const Identifier& controlId)
@@ -6542,12 +6698,23 @@ void ScriptingApi::Content::setValuePopupData(var jsonData)
 
 void ScriptingApi::Content::suspendPanelTimers(bool shouldBeSuspended)
 {
+	if(suspendCallback)
+	{
+		suspendCallback.call1(shouldBeSuspended);
+	}
+    
+#if USE_BACKEND
+    for(auto rb: rebuildListeners)
+    {
+        if(rb != nullptr)
+            rb->suspendStateChanged(shouldBeSuspended);
+    }
+#endif
+
 	for (int i = 0; i < components.size(); i++)
 	{
 		if (auto sp = dynamic_cast<ScriptPanel*>(components[i].get()))
-		{
 			sp->suspendTimer(shouldBeSuspended);
-		}
 	}
 }
 
@@ -6653,6 +6820,153 @@ void ScriptingApi::Content::createScreenshot(var area, var directory, String nam
 			}
 		}
 	}
+}
+
+
+
+struct TextInputData: public ScriptingApi::Content::TextInputDataBase,
+                      public ControlledObject,
+                      public TextEditor::Listener
+{
+    TextInputData(ProcessorWithScriptingContent* sp, const var& properties, const var& callback_):
+      TextInputDataBase(properties["parentComponent"].toString()),
+      ControlledObject(sp->getMainController_()),
+      callback(sp, nullptr, callback_, 2),
+      alignment(Justification::centred),
+      prop(properties.clone())
+    {
+        callback.incRefCount();
+        
+        if(prop.hasProperty("alignment"))
+        {
+            Result re = Result::ok();
+            alignment = ApiHelpers::getJustification(prop["alignment"], &re);
+
+            if (re.failed())
+                alignment = Justification::centred;
+        }
+    }
+
+	~TextInputData()
+    {
+	    if(inputLabel != nullptr)
+	    {
+		    MessageManagerLock mm;
+			inputLabel = nullptr;
+			done = true;
+			prop = var();
+	    }
+    }
+    
+    void textEditorFocusLost(TextEditor&) override
+    {
+        dismissAndCall(false);
+    }
+
+    void textEditorReturnKeyPressed(TextEditor&) override
+    {
+        dismissAndCall(true);
+    }
+
+    void textEditorEscapeKeyPressed(TextEditor&) override
+    {
+        dismissAndCall(false);
+    }
+    
+    void show(Component* parent)
+    {
+        if(done)
+            return;
+        
+        jassert(MessageManager::getInstance()->isThisTheMessageThread());
+        
+        parent->addAndMakeVisible(inputLabel = new TextEditor());
+        inputLabel->addListener(this);
+        
+        Rectangle<int> bounds((int)prop["x"], (int)prop["y"], (int)prop["width"], (int)prop["height"]);
+        
+        if(bounds.isEmpty())
+            inputLabel->centreWithSize(parent->getWidth(), 20);
+        else
+            inputLabel->setBounds(bounds);
+        
+        
+        Colour bgColour, outlineColour, textColour;
+        
+        using namespace scriptnode;
+        
+        bgColour = PropertyHelpers::getColourFromVar(prop.getProperty("bgColour", 0x88000000));
+        outlineColour = PropertyHelpers::getColourFromVar(prop.getProperty("itemColour", 0));
+        textColour = PropertyHelpers::getColourFromVar(prop.getProperty("textColour", 0xAAFFFFFF));
+        
+        inputLabel->setColour(TextEditor::ColourIds::backgroundColourId, bgColour);
+        inputLabel->setColour(TextEditor::ColourIds::textColourId, textColour);
+        inputLabel->setColour(TextEditor::ColourIds::highlightedTextColourId, Colours::black);
+        inputLabel->setColour(TextEditor::ColourIds::highlightColourId, textColour.withAlpha(0.5f));
+        inputLabel->setColour(TextEditor::ColourIds::focusedOutlineColourId, Colours::transparentBlack);
+        inputLabel->setColour(CaretComponent::ColourIds::caretColourId, textColour);
+
+        auto fontName = prop.getProperty("fontName", "").toString();
+        auto fontStyle = prop.getProperty("fontStyle", "plain").toString();
+        auto fontSize = (float)prop.getProperty("fontSize", 13.0f);
+        
+        if(fontName.isNotEmpty())
+        {
+            const juce::Typeface::Ptr typeface = getMainController()->getFont(fontName);
+
+            if (typeface != nullptr)
+                fontToUse = Font(typeface).withHeight(fontSize);
+            else
+                fontToUse = Font(fontName, fontStyle, fontSize);
+        }
+        else
+        {
+            fontToUse = GLOBAL_BOLD_FONT();
+        }
+        
+        inputLabel->setFont(fontToUse);
+        inputLabel->setBorder(BorderSize<int>());
+        
+        inputLabel->setJustification(alignment);
+        
+        inputLabel->setText(prop["text"].toString(), dontSendNotification);
+        inputLabel->selectAll();
+        inputLabel->grabKeyboardFocus();
+    }
+    
+    void dismissAndCall(bool ok)
+    {
+		if(done || inputLabel == nullptr)
+			return;
+
+        var args[2] = {var(ok), var(inputLabel->getText())};
+        
+        inputLabel->getParentComponent()->removeChildComponent(inputLabel);
+        inputLabel = nullptr;
+        
+        if(callback)
+        {
+            callback.call(args, 2);
+        }
+        
+        prop = var();
+        done = true;
+        
+    }
+    
+    ScopedPointer<juce::TextEditor> inputLabel;
+    
+    Justification alignment;
+    Font fontToUse;
+    var prop;
+    WeakCallbackHolder callback;
+};
+
+void ScriptingApi::Content::showModalTextInput(var properties, var callback)
+{
+    TextInputDataBase::Ptr d = new TextInputData(getScriptProcessor(), properties, callback);
+    
+    textInputBroadcaster.sendMessage(sendNotificationAsync, d);
 }
 
 void ScriptingApi::Content::addVisualGuide(var guideData, var colour)
@@ -6808,6 +7122,50 @@ String ScriptingApi::Content::getComponentUnderDrag()
 
 	return obj.toString();
 }
+
+void ScriptingApi::Content::setSuspendTimerCallback(var suspendFunction)
+{
+	if(HiseJavascriptEngine::isJavascriptFunction(suspendFunction))
+	{
+		suspendCallback = WeakCallbackHolder(getScriptProcessor(), nullptr, suspendFunction, 1);
+	}
+}
+
+void ScriptingApi::Content::setKeyPressCallback(const var& keyPress, var keyPressCallback)
+{
+	auto r = Result::ok();
+	auto k = ApiHelpers::getKeyPress(keyPress, &r);
+
+	if(!r.wasOk())
+		reportScriptError(r.getErrorMessage());
+
+	if(HiseJavascriptEngine::isJavascriptFunction(keyPressCallback))
+	{
+		for(auto& rkp: registeredKeyPresses)
+		{
+			if(rkp.first == k)
+			{
+				rkp.second = keyPressCallback;
+				return;
+			}
+		}
+
+		registeredKeyPresses.add({k, keyPressCallback});
+	}
+	else
+	{
+		for(const auto& rkp: registeredKeyPresses)
+		{
+			if(rkp.first == k)
+			{
+				registeredKeyPresses.remove(&rkp);
+				return;
+			}
+		}
+	}
+}
+
+
 
 #undef ADD_TO_TYPE_SELECTOR
 #undef ADD_AS_SLIDER_TYPE
@@ -7546,21 +7904,8 @@ void ScriptingApi::Content::Helpers::sanitizeNumberProperties(juce::ValueTree co
 
 juce::Colour ScriptingApi::Content::Helpers::getCleanedObjectColour(const var& value)
 {
-	int64 colourValue = 0;
-
-	if (value.isInt64() || value.isInt())
-		colourValue = (int64)value;
-	else if (value.isString())
-	{
-		auto string = value.toString();
-
-		if (string.startsWith("0x"))
-			colourValue = string.getHexValue64();
-		else
-			colourValue = string.getLargeIntValue();
-	}
-
-	return Colour((uint32)colourValue);
+	return ApiHelpers::getColourFromVar(value);
+	
 }
 
 var ScriptingApi::Content::Helpers::getCleanedComponentValue(const var& data, bool allowStrings)

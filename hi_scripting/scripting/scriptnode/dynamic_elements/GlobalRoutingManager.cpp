@@ -44,6 +44,7 @@ scriptnode::routing::GlobalRoutingManager::Ptr GlobalRoutingManager::Helpers::ge
 	if(newP == nullptr)
 	{
 		newP = new GlobalRoutingManager();
+		newP->additionalEventStorage.getBroadcaster().enableLockFreeUpdate(mc->getGlobalUIUpdater());
 		mc->setGlobalRoutingManager(newP.get());
 		mc->getProcessorChangeHandler().sendProcessorChangeMessage(mc->getMainSynthChain(), MainController::ProcessorChangeHandler::EventType::RebuildModuleList, false);
 	}
@@ -1339,7 +1340,8 @@ GlobalCableNode::GlobalCableNode(DspNetwork* n, ValueTree d) :
 	ModulationSourceNode(n, d),
 	slotId(PropertyIds::Connection, "")
 {
-	cppgen::CustomNodeProperties::setPropertyForObject(*this, PropertyIds::UncompileableNode);
+	cppgen::CustomNodeProperties::setPropertyForObject(*this, PropertyIds::IsControlNode);
+    cppgen::CustomNodeProperties::setPropertyForObject(*this, PropertyIds::IsFixRuntimeTarget);
 
 	globalRoutingManager = GlobalRoutingManager::Helpers::getOrCreate(n->getScriptProcessor()->getMainController_());
 

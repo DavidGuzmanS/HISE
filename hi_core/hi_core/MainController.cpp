@@ -40,10 +40,59 @@ namespace hise { using namespace juce;
 bool MainController::unitTestMode = false;
 #endif
 
-MainController::MainController() :
+	void MainController::PluginBypassHandler::timerCallback()
+	{
+		if(listeners.hasListeners())
+		{
+			auto thisTime = Time::getApproximateMillisecondCounter();
+
+			auto numSamples = (double)getMainController()->getOriginalBufferSize();
+			auto sampleRate = (double)getMainController()->getOriginalSamplerate();
+
+			if(sampleRate != 0.0)
+			{
+				auto blockLengthSeconds = numSamples / sampleRate;
+
+				// If there is no watchdog call for 10 buffers worth of time we assume that it's bypassed...
+				int deltaForBypassDetection = roundToInt(1000.0 * 10.0 * blockLengthSeconds);
+
+				int deltaSinceLastCall = (thisTime - lastProcessBlockTime);
+				auto noCallsLately = deltaSinceLastCall > deltaForBypassDetection;
+
+				if(reactivateOnNextCall)
+				{
+					lastBypassFlag = false;
+					reactivateOnNextCall = false;
+					listeners.sendMessage(sendNotificationSync, false);
+				}
+				else if(noCallsLately != lastBypassFlag)
+				{
+					lastBypassFlag = noCallsLately;
+					listeners.sendMessage(sendNotificationSync, lastBypassFlag);
+				}
+			}
+		}
+	}
+
+	void MainController::PluginBypassHandler::bumpWatchDog()
+	{
+		if(listeners.hasListeners())
+		{
+			if(lastBypassFlag)
+				reactivateOnNextCall = true;
+
+			lastBypassFlag = false;
+			lastProcessBlockTime = Time::getApproximateMillisecondCounter();
+		}
+	}
+
+	MainController::MainController() :
 
 	sampleManager(new SampleManager(this)),
 	javascriptThreadPool(new JavascriptThreadPool(this)),
+	rootDispatcher(getGlobalUIUpdater()),
+	processorHandler(rootDispatcher),
+	customAutomationSourceManager(rootDispatcher),
 	expansionHandler(this),
 	allNotesOffFlag(false),
 	processingBufferSize(-1),
@@ -71,6 +120,7 @@ MainController::MainController() :
 	customTypeFaceData(ValueTree("CustomFonts")),
 	masterEventBuffer(),
 	eventIdHandler(masterEventBuffer),
+	currentlyRenderingThread({false, Thread::ThreadID()}),
 	lockfreeDispatcher(this),
 	moduleStateManager(this),
 	userPresetHandler(this),
@@ -78,10 +128,12 @@ MainController::MainController() :
 	processorChangeHandler(this),
 	killStateHandler(this),
 	debugLogger(this),
+	bypassHandler(this),
 	globalAsyncModuleHandler(this),
 	//presetLoadRampFlag(OldUserPresetHandler::Active),
 	controlUndoManager(new UndoManager()),
-	xyzPool(new MultiChannelAudioBuffer::XYZPool())
+	xyzPool(new MultiChannelAudioBuffer::XYZPool()),
+	defaultFont(GLOBAL_FONT().getTypefacePtr(), "Oxygen")
 {
 	PresetHandler::setCurrentMainController(this);
 
@@ -105,11 +157,10 @@ MainController::MainController() :
 
 	hostInfo = new DynamicObject();
     
-	startTimer(500);
-    
-#if PERFETTO
-    MelatoninPerfetto::get().beginSession();
-#endif
+	startTimer(HISE_UNDO_INTERVAL);
+
+	javascriptThreadPool->startThread(8);
+	getKillStateHandler().setScriptingThreadId(javascriptThreadPool->getThreadId());
 };
 
 
@@ -131,10 +182,6 @@ MainController::~MainController()
 
 	sampleManager = nullptr;
 	javascriptThreadPool = nullptr;
-    
-#if PERFETTO
-    MelatoninPerfetto::get().endSession();
-#endif
 }
 
 
@@ -233,13 +280,22 @@ void MainController::clearPreset()
 {
 	Processor::Iterator<Processor> iter(getMainSynthChain(), false);
 
-    
+	auto isMessageThread = MessageManager::getInstance()->isThisTheMessageThread();
+
+	getProcessorChangeHandler().sendProcessorChangeMessage(getMainSynthChain(), ProcessorChangeHandler::EventType::ClearBeforeRebuild, isMessageThread);
+
 	while (auto p = iter.getNextProcessor())
-		p->cleanRebuildFlagForThisAndParents();
+    {
+        if(auto sp = dynamic_cast<HardcodedSwappableEffect*>(p))
+            sp->disconnectRuntimeTargets();
+        
+        p->cleanRebuildFlagForThisAndParents();
+    }
 
 	auto f = [](Processor* p)
 	{
 		auto mc = p->getMainController();
+		SUSPEND_GLOBAL_DISPATCH(mc, "reset main controller");
 		LockHelpers::freeToGo(mc);
 
 		mc->getMacroManager().getMidiControlAutomationHandler()->getMPEData().clear();
@@ -247,7 +303,12 @@ void MainController::clearPreset()
 		mc->getControlUndoManager()->clearUndoHistory();
         mc->getLocationUndoManager()->clearUndoHistory();
         mc->getMasterClock().reset();
-        
+				
+		#if USE_BACKEND
+			mc->customTypeFaces.clear();
+			mc->customTypeFaceData.removeAllChildren(nullptr);	
+		#endif
+
         mc->clearWebResources();
 		mc->setGlobalRoutingManager(nullptr);
 
@@ -265,36 +326,36 @@ void MainController::clearPreset()
 		mc->changed = false;
         
         mc->prepareToPlay(mc->processingSampleRate, mc->numSamplesThisBlock);
-        
+
+		mc->getProcessorChangeHandler().sendProcessorChangeMessage(mc->getMainSynthChain(), ProcessorChangeHandler::EventType::RebuildModuleList, false);
+
 		return SafeFunctionCall::OK;
 	};
 
 	if (isBeingDeleted())
 		f(getMainSynthChain());
 	else
-		getKillStateHandler().killVoicesAndCall(getMainSynthChain(), f, KillStateHandler::SampleLoadingThread);
+		getKillStateHandler().killVoicesAndCall(getMainSynthChain(), f, KillStateHandler::TargetThread::SampleLoadingThread);
 }
 
 void MainController::loadPresetFromValueTree(const ValueTree &v, Component* /*mainEditor*/)
 {
 #if USE_BACKEND
     const bool isCommandLine = CompileExporter::isExportingFromCommandLine();
-    const bool isSampleLoadingThread = killStateHandler.getCurrentThread() == KillStateHandler::SampleLoadingThread;
+    const bool isSampleLoadingThread = killStateHandler.getCurrentThread() == KillStateHandler::TargetThread::SampleLoadingThread;
     
 	jassert(isCommandLine || isSampleLoadingThread || !isInitialised());
     ignoreUnused(isCommandLine, isSampleLoadingThread);
 #endif
 
-	if (v.isValid() && v.getProperty("Type", var::undefined()).toString() == "SynthChain")
+
+	if (v.isValid() )
 	{
+		auto isExtendedSnippet = v.getType() == Identifier("extended_snippet");
+		auto isValidPreset = (v.getType() == Identifier("Processor") && v.getProperty("Type", var::undefined()).toString() == "SynthChain");
 
-		if (v.getType() != Identifier("Processor"))
-		{
-			jassertfalse;
-			
-		}
-
-		loadPresetInternal(v);
+		if(isExtendedSnippet || isValidPreset)
+			loadPresetInternal(v);
 	}
 	else
 	{
@@ -303,9 +364,9 @@ void MainController::loadPresetFromValueTree(const ValueTree &v, Component* /*ma
 }
 
 
-void MainController::loadPresetInternal(const ValueTree& v)
+void MainController::loadPresetInternal(const ValueTree& valueTreeToLoad)
 {
-	auto f = [this, v](Processor* )
+	auto f = [this, valueTreeToLoad](Processor* )
 	{
 		LockHelpers::freeToGo(this);
 
@@ -317,7 +378,7 @@ void MainController::loadPresetInternal(const ValueTree& v)
 
 #if USE_BACKEND
 			const bool isCommandLine = CompileExporter::isExportingFromCommandLine();
-			const bool isSampleLoadingThread = killStateHandler.getCurrentThread() == KillStateHandler::SampleLoadingThread;
+			const bool isSampleLoadingThread = killStateHandler.getCurrentThread() == KillStateHandler::TargetThread::SampleLoadingThread;
 
 			jassert(!isInitialised() || isCommandLine || isSampleLoadingThread);
 			ignoreUnused(isCommandLine, isSampleLoadingThread);
@@ -329,7 +390,22 @@ void MainController::loadPresetInternal(const ValueTree& v)
 
 			getSampleManager().setShouldSkipPreloading(true);
 
-			
+			ValueTree v;
+
+			if(valueTreeToLoad.getType() == Identifier("Processor"))
+			{
+				v = valueTreeToLoad;
+			}
+			else
+			{
+				v = valueTreeToLoad.getChildWithName("Processor");
+
+				// restore the included files now...
+
+				restoreIncludedScriptFilesFromSnippet(valueTreeToLoad);
+			}
+
+			jassert(v.isValid());
 
 			// Reset the sample rate so that prepareToPlay does not get called in restoreFromValueTree
 			// synthChain->setCurrentPlaybackSampleRate(-1.0);
@@ -399,6 +475,11 @@ void MainController::loadPresetInternal(const ValueTree& v)
 			allNotesOff(true);
             
 			getUserPresetHandler().initDefaultPresetManager({});
+            
+            Processor::Iterator<HardcodedSwappableEffect> rti(synthChain, false);
+            
+            while(auto m = rti.getNextProcessor())
+                m->connectRuntimeTargets();
 		}
 		catch (String& errorMessage)
 		{
@@ -416,7 +497,7 @@ void MainController::loadPresetInternal(const ValueTree& v)
 		return SafeFunctionCall::OK;
 	};
 	
-	getKillStateHandler().killVoicesAndCall(getMainSynthChain(), f, KillStateHandler::SampleLoadingThread);
+	getKillStateHandler().killVoicesAndCall(getMainSynthChain(), f, KillStateHandler::TargetThread::SampleLoadingThread);
 }
 
 
@@ -497,6 +578,8 @@ void MainController::stopCpuBenchmark()
 	
 	const float lastUsage = usagePercent.load();
 	
+	TRACE_COUNTER("dsp", perfetto::CounterTrack("Audio Thread CPU usage", "%").set_is_incremental(false), thisUsage);
+
 	if (thisUsage > lastUsage)
 	{
 		usagePercent.store(thisUsage);
@@ -509,12 +592,12 @@ void MainController::stopCpuBenchmark()
 
 void MainController::killAndCallOnAudioThread(const ProcessorFunction& f)
 {
-	getKillStateHandler().killVoicesAndCall(getMainSynthChain(), f, KillStateHandler::AudioThread);
+	getKillStateHandler().killVoicesAndCall(getMainSynthChain(), f, KillStateHandler::TargetThread::AudioThread);
 }
 
 void MainController::killAndCallOnLoadingThread(const ProcessorFunction& f)
 {
-	getKillStateHandler().killVoicesAndCall(getMainSynthChain(), f, KillStateHandler::SampleLoadingThread);
+	getKillStateHandler().killVoicesAndCall(getMainSynthChain(), f, KillStateHandler::TargetThread::SampleLoadingThread);
 }
 
 void MainController::sendToMidiOut(const HiseEvent& e)
@@ -526,6 +609,9 @@ void MainController::sendToMidiOut(const HiseEvent& e)
 
 	outputMidiBuffer.addEvent(e);
 }
+
+const AudioSampleBuffer& MainController::getMultiChannelBuffer() const
+{ return getMainSynthChain()->internalBuffer; }
 
 bool MainController::refreshOversampling()
 {
@@ -562,7 +648,7 @@ bool MainController::refreshOversampling()
 		};
 
 		allNotesOff(false);
-		getKillStateHandler().killVoicesAndCall(getMainSynthChain(), f, KillStateHandler::SampleLoadingThread);
+		getKillStateHandler().killVoicesAndCall(getMainSynthChain(), f, KillStateHandler::TargetThread::SampleLoadingThread);
 
 		return true;
 	}
@@ -679,6 +765,17 @@ Processor *MainController::createProcessor(FactoryType *factory,
 };
 
 
+void MainController::addPreviewListener(BufferPreviewListener* l)
+{
+	previewListeners.addIfNotAlreadyThere(l);
+	l->previewStateChanged(previewBufferIndex != -1, previewBuffer);
+}
+
+void MainController::removePreviewListener(BufferPreviewListener* l)
+{
+	previewListeners.removeAllInstancesOf(l);
+}
+
 void MainController::stopBufferToPlay()
 {
 	if (previewBufferIndex != -1)
@@ -686,7 +783,7 @@ void MainController::stopBufferToPlay()
 		bool sendToListeners = true;
 
 		{
-			LockHelpers::SafeLock sl(this, LockHelpers::AudioLock);
+			LockHelpers::SafeLock sl(this, LockHelpers::Type::AudioLock);
 
 			previewFunction = {};
 
@@ -710,7 +807,7 @@ void MainController::stopBufferToPlay()
 
 void MainController::setBufferToPlay(const AudioSampleBuffer& buffer, double bufferSampleRate, const std::function<void(int)>& pf)
 {
-	if (buffer.getNumSamples() > 400000 && getKillStateHandler().getCurrentThread() != KillStateHandler::SampleLoadingThread)
+	if (buffer.getNumSamples() > 400000 && getKillStateHandler().getCurrentThread() != KillStateHandler::TargetThread::SampleLoadingThread)
 	{
 		AudioSampleBuffer copy;
 		copy.makeCopyOf(buffer);
@@ -729,7 +826,7 @@ void MainController::setBufferToPlay(const AudioSampleBuffer& buffer, double buf
         copy.makeCopyOf(buffer);
         
 		{
-			LockHelpers::SafeLock sl(this, LockHelpers::AudioLock);
+			LockHelpers::SafeLock sl(this, LockHelpers::Type::AudioLock);
 
 			previewBufferIndex = 0;
 			std::swap(previewBuffer, copy);
@@ -813,8 +910,30 @@ hise::RLottieManager::Ptr MainController::getRLottieManager()
 }
 #endif
 
+void MainController::connectToRuntimeTargets(scriptnode::OpaqueNode& on, bool shouldAdd)
+{
+    if(auto rm = dynamic_cast<scriptnode::routing::GlobalRoutingManager*>(getGlobalRoutingManager()))
+    {
+        rm->connectToRuntimeTargets(on, shouldAdd);
+    }
+
+#if HISE_INCLUDE_RT_NEURAL
+    for(const auto& id: getNeuralNetworks().getIdList())
+    {
+        auto nn = getNeuralNetworks().getOrCreate(id);
+        
+        auto con = nn->createConnection();
+        on.connectToRuntimeTarget(shouldAdd, con);
+    }
+#endif
+}
+
 void MainController::processBlockCommon(AudioSampleBuffer &buffer, MidiBuffer &midiMessages)
 {
+	getPluginBypassHandler().bumpWatchDog();
+
+	PerfettoHelpers::setCurrentThreadName("Audio Thread");
+	
     if (getKillStateHandler().getStateLoadFlag())
 		return;
 
@@ -906,6 +1025,8 @@ void MainController::processBlockCommon(AudioSampleBuffer &buffer, MidiBuffer &m
 	ModulatorSynthChain *synthChain = getMainSynthChain();
 
 
+	ScopedValueSetter renderFlag(currentlyRenderingThread, {true, Thread::getCurrentThreadId()} );
+
 #if ENABLE_CPU_MEASUREMENT
 	startCpuBenchmark(getOriginalBufferSize());
 #endif
@@ -970,10 +1091,31 @@ void MainController::processBlockCommon(AudioSampleBuffer &buffer, MidiBuffer &m
 		else
 			hostBpm = newTime.bpm;
 
+        // if this is non-zero it means that the buffer coming
+        // from the DAW was split into chunks for processing
+        // so we need to update the playhead to reflect the
+        // "real" position for the given buffer
+        if(offsetWithinProcessBuffer != 0)
+        {
+            newTime.timeInSamples += offsetWithinProcessBuffer;
+            newTime.timeInSeconds += (double)offsetWithinProcessBuffer / processingSampleRate;
+            
+            const auto numSamplesPerQuarter = (double)TempoSyncer::getTempoInSamples(newTime.bpm, processingSampleRate, 1.0f);
+            
+            newTime.ppqPosition += (double)offsetWithinProcessBuffer / numSamplesPerQuarter;
+        }
+        
 	}
 
 	if (getMasterClock().shouldCreateInternalInfo(newTime) || insideInternalExport)
 	{
+		if(insideInternalExport)
+		{
+			// we need to make sure that the BPM is not reset to 120BPM
+			newTime.bpm = bpm;
+		}
+			
+
 		auto externalTime = newTime;
 
 		gridInfo = getMasterClock().processAndCheckGrid(buffer.getNumSamples(), newTime);
@@ -1008,22 +1150,29 @@ void MainController::processBlockCommon(AudioSampleBuffer &buffer, MidiBuffer &m
 	
 	if (hostBpm == -1.0)
 	{
-		// We need to get the host bpm again...
-		if (auto ph = thisAsProcessor->getPlayHead())
-		{
-			AudioPlayHead::CurrentPositionInfo bpmInfo;
-			ph->getCurrentPosition(bpmInfo);
+        if(insideInternalExport)
+        {
+            // AU plugins will not catch the correct
+            // tempo so we need to use the one from
+            // the playhead object
+            hostBpm = newTime.bpm;
+        }
+        else
+        {
+            // We need to get the host bpm again...
+            if (auto ph = thisAsProcessor->getPlayHead())
+            {
+                AudioPlayHead::CurrentPositionInfo bpmInfo;
+                ph->getCurrentPosition(bpmInfo);
 
-			hostBpm = bpmInfo.bpm;
-		}
+                hostBpm = bpmInfo.bpm;
+            }
+        }
 	}
 
-	setBpm(getMasterClock().getBpmToUse(hostBpm, *internalBpmPointer));
-	
+    setBpm(getMasterClock().getBpmToUse(hostBpm, *internalBpmPointer));
+    
 #endif
-
-	
-
 
 #if !FRONTEND_IS_PLUGIN
 
@@ -1357,6 +1506,20 @@ void MainController::storePlayheadIntoDynamicObject(AudioPlayHead::CurrentPositi
 	//hostInfo->setProperty(isLooping, newPosition.isLooping);
 }
 
+MainController::CustomTypeFace::CustomTypeFace(ReferenceCountedObjectPtr<juce::Typeface> tf, Identifier id_):
+	typeface(tf),
+	id(id_)
+{
+	memset(characterWidths, 0, sizeof(float) * 128);
+
+	String s;
+	for(char i = 32; i < 127; i++)
+	{
+		s = String::fromUTF8((&i), 1);
+		characterWidths[i] = tf->getStringWidth(s);
+	}
+}
+
 void MainController::prepareToPlay(double sampleRate_, int samplesPerBlock)
 {
     if(sampleRate_ <= 0.0 || samplesPerBlock <= 0)
@@ -1421,8 +1584,8 @@ void MainController::prepareToPlay(double sampleRate_, int samplesPerBlock)
 	AudioThreadGuard::Suspender suspender;
 	ignoreUnused(suspender);
 
-	LockHelpers::SafeLock itLock(this, LockHelpers::IteratorLock);
-	LockHelpers::SafeLock audioLock(this, LockHelpers::AudioLock);
+	LockHelpers::SafeLock itLock(this, LockHelpers::Type::IteratorLock);
+	LockHelpers::SafeLock audioLock(this, LockHelpers::Type::AudioLock);
 
 	getMainSynthChain()->setIsOnAir(true);
 
@@ -1532,10 +1695,19 @@ void MainController::handleTransportCallbacks(const AudioPlayHead::CurrentPositi
 	}
 }
 
+void MainController::sendArtificialTransportMessage(bool shouldBeOn)
+{
+	for(auto tl: tempoListeners)
+	{
+		if(tl != nullptr)
+			tl->onTransportChange(shouldBeOn, 0.0);
+	}
+}
+
 void MainController::addTempoListener(TempoListener *t)
 {
 	{
-		LockHelpers::SafeLock sl(this, LockHelpers::AudioLock);
+		LockHelpers::SafeLock sl(this, LockHelpers::Type::AudioLock);
 		tempoListeners.addIfNotAlreadyThere(t);
 	}
 	
@@ -1546,19 +1718,19 @@ void MainController::addTempoListener(TempoListener *t)
 
 void MainController::removeTempoListener(TempoListener *t)
 {
-	LockHelpers::SafeLock sl(this, LockHelpers::AudioLock);
+	LockHelpers::SafeLock sl(this, LockHelpers::Type::AudioLock);
 	tempoListeners.removeAllInstancesOf(t);
 }
 
 void MainController::addMusicalUpdateListener(TempoListener* t)
 {
-	LockHelpers::SafeLock sl(this, LockHelpers::AudioLock);
+	LockHelpers::SafeLock sl(this, LockHelpers::Type::AudioLock);
 	pulseListener.addIfNotAlreadyThere(t);
 }
 
 void MainController::removeMusicalUpdateListener(TempoListener* t)
 {
-	LockHelpers::SafeLock sl(this, LockHelpers::AudioLock);
+	LockHelpers::SafeLock sl(this, LockHelpers::Type::AudioLock);
 	pulseListener.removeAllInstancesOf(t);
 }
 
@@ -1573,6 +1745,20 @@ juce::Typeface* MainController::getFont(const String &fontName) const
 	}
 
 	return nullptr;
+}
+
+float MainController::getStringWidthFromEmbeddedFont(const String& text, const String& fontName, float fontSize,
+	                                     float kerningFactor)
+{
+	for(auto& tf: customTypeFaces)
+	{
+		auto nameToUse = tf.id.isValid() ? tf.id.toString() : tf.typeface->getName();
+
+		if (nameToUse == fontName || tf.typeface->getName() == fontName)
+			return tf.getStringWidthFloat(text, fontSize, kerningFactor);
+	}
+
+	return defaultFont.getStringWidthFloat(text, fontSize, kerningFactor);
 }
 
 Font MainController::getFontFromString(const String& fontName, float fontSize) const
@@ -1675,7 +1861,7 @@ void MainController::loadTypeFace(const String& fileName, const void* fontData, 
 
 int MainController::getBufferSizeForCurrentBlock() const noexcept
 {
-	jassert(getKillStateHandler().getCurrentThread() == KillStateHandler::AudioThread);
+	jassert(getKillStateHandler().getCurrentThread() == KillStateHandler::TargetThread::AudioThread);
 
 	return numSamplesThisBlock;
 }
@@ -1839,9 +2025,7 @@ ReferenceCountedObject* MainController::getGlobalPreprocessor()
             auto key = p.name.toString();
             auto v = p.value.toString();
             
-            snex::jit::ExternalPreprocessorDefinition def;
-            
-            def.t = snex::jit::ExternalPreprocessorDefinition::Type::Definition;
+            snex::jit::ExternalPreprocessorDefinition def(snex::jit::ExternalPreprocessorDefinition::Type::Definition);
             def.name = key;
             def.value = v;
             def.fileName = "EXTERNAL_DEFINITION";
@@ -1857,17 +2041,28 @@ ReferenceCountedObject* MainController::getGlobalPreprocessor()
     return preprocessor.get();
 }
 
+bool MainController::isInsideAudioRendering() const
+{
+	if(currentlyRenderingThread.first)
+	{
+		auto t = Thread::getCurrentThreadId();
+		return currentlyRenderingThread.second == t;
+	}
+
+	return false;
+}
+
 float MainController::getGlobalCodeFontSize() const
 {
 	return jmax<float>(14.0f, (float)dynamic_cast<const GlobalSettingManager*>(this)->getSettingsObject().getSetting(HiseSettings::Scripting::CodeFontSize));
 }
 
 
-void MainController::loadUserPresetAsync(const ValueTree& v)
+void MainController::loadUserPresetAsync(const File& f)
 {
 	//getMainSynthChain()->killAllVoices();
 	//presetLoadRampFlag.set(OldUserPresetHandler::FadeOut);
-	userPresetHandler.loadUserPreset(v);
+	userPresetHandler.loadUserPreset(f);
 }
 
 #if USE_BACKEND
@@ -1949,9 +2144,7 @@ void MainController::SampleManager::handleNonRealtimeState()
 	{
 		Processor::Iterator<NonRealtimeProcessor> iter(mc->getMainSynthChain());
 
-		LockHelpers::SafeLock sl(mc, LockHelpers::AudioLock);
-
-		
+		LockHelpers::SafeLock sl(mc, LockHelpers::Type::AudioLock);
 
 		while (auto nrt = iter.getNextProcessor())
 			nrt->nonRealtimeModeChanged(isNonRealtime());
@@ -1959,9 +2152,6 @@ void MainController::SampleManager::handleNonRealtimeState()
 		internalsSetToNonRealtime = isNonRealtime();
 	}
 }
-
-
-
 
 hise::MainController::UserPresetHandler::CustomAutomationData::Ptr MainController::UserPresetHandler::getCustomAutomationData(int index) const
 {
@@ -1993,6 +2183,15 @@ bool MainController::UserPresetHandler::restoreStateManager(const ValueTree& new
 bool MainController::UserPresetHandler::saveStateManager(ValueTree& newPreset, const Identifier& id)
 {
 	return processStateManager(true, newPreset, id);
+}
+
+double MainController::UserPresetHandler::getSecondsSinceLastPresetLoad() const
+{
+	auto now = Time::getMillisecondCounter();
+
+	auto delta = now - timeOfLastPresetLoad;
+
+	return (double)delta / 1000.0;
 }
 
 bool MainController::UserPresetHandler::processStateManager(bool shouldSave, ValueTree& presetRoot, const Identifier& stateId)
@@ -2094,12 +2293,9 @@ void MainController::UserPresetHandler::DefaultPresetManager::resetToDefault()
 	{
 		auto& up = getMainController()->getUserPresetHandler();
 		
-		if (defaultFile.existsAsFile())
-			up.setCurrentlyLoadedFile(defaultFile);
-		
 		MainController::ScopedBadBabysitter sbs(getMainController());
 
-		up.loadUserPreset(defaultPreset, false);
+		up.loadUserPresetFromValueTree(defaultPreset, up.currentlyLoadedFile, defaultFile, false);
 	}
 		
 }

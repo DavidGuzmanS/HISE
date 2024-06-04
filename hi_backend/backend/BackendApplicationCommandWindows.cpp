@@ -86,12 +86,6 @@ END_MARKDOWN()
 END_MARKDOWN_CHAPTER()
 
 
-static bool canConnectToWebsite(const URL& url)
-{
-	auto in = url.createInputStream(false, nullptr, nullptr, String(), 2000, nullptr);
-	return in != nullptr;
-}
-
 static bool areMajorWebsitesAvailable()
 {
 	const char* urlsToTry[] = { "http://google.com/generate_204", "https://amazon.com", nullptr };
@@ -355,105 +349,6 @@ void XmlBackupFunctions::restoreAllScripts(ValueTree& v, ModulatorSynthChain *ma
 		restoreAllScripts(c, masterChain, newId);
 }
 
-class DummyUnlocker : public OnlineUnlockStatus
-{
-public:
-
-	DummyUnlocker(MainController *mc_) :
-		mc(mc_)
-	{
-
-	}
-
-	String getProductID() override
-	{
-		return dynamic_cast<GlobalSettingManager*>(mc)->getSettingsObject().getSetting(HiseSettings::Project::Name).toString();
-	}
-
-	bool doesProductIDMatch(const String & 	returnedIDFromServer)
-	{
-		return returnedIDFromServer == getProductID();
-	}
-
-
-
-
-private:
-
-	MainController* mc;
-
-
-};
-
-
-class ProjectArchiver : public ThreadWithQuasiModalProgressWindow
-{
-public:
-
-	ProjectArchiver(File &archiveFile_, File &projectDirectory_, ThreadWithQuasiModalProgressWindow::Holder *holder) :
-		ThreadWithQuasiModalProgressWindow("Archiving Project", true, true, holder),
-		archiveFile(archiveFile_),
-		projectDirectory(projectDirectory_)
-	{
-		getAlertWindow()->setLookAndFeel(&alaf);
-	}
-
-	void run()
-	{
-		ZipFile::Builder builder;
-
-		StringArray ignoredDirectories;
-
-		ignoredDirectories.add("Binaries");
-		ignoredDirectories.add("git");
-
-		for(auto f: RangedDirectoryIterator(projectDirectory, true, "*", File::findFilesAndDirectories))
-		{
-			File currentFile = f.getFile();
-
-			if (currentFile.isDirectory() ||
-				currentFile.getFullPathName().contains("git") ||
-				currentFile.getParentDirectory().getFullPathName().contains("Binaries"))
-			{
-				continue;
-			}
-
-			builder.addFile(currentFile, 9, currentFile.getRelativePathFrom(projectDirectory));
-		}
-
-		setStatusMessage("Creating ZIP archive of project folder");
-
-		archiveFile.deleteFile();
-
-		archiveFile.create();
-
-		FileOutputStream fos(archiveFile);
-
-		builder.writeToStream(fos, getProgressValue());
-
-
-	}
-
-	void threadComplete(bool userPressedCancel) override
-	{
-		if (!userPressedCancel && PresetHandler::showYesNoWindow("Successfully exported", "Press OK to show the archive", PresetHandler::IconType::Info))
-		{
-			archiveFile.revealToUser();
-		}
-
-		ThreadWithQuasiModalProgressWindow::threadComplete(userPressedCancel);
-	}
-
-private:
-
-	AlertWindowLookAndFeel alaf;
-
-	File archiveFile;
-
-	File projectDirectory;
-};
-
-
 
 /** TODO:
  
@@ -601,9 +496,6 @@ This will analyse the harmonics of each slice and pick a phase from somewhere in
 ### Dynamic Phase
 This will analyse the sample and recreate every cycle with the correct phase information.This will use the Loris library to resynthesise and pitch lock the sample and export it as wavetable.This might vastly increase the wavetable size, but yields the best results for organic material like real world instruments with subtle pitch differences and a complex stereo image.)");
 
-
-		
-
 		row1->addCustomComponent(new PreviewButton("Original"));
 		row1->addCustomComponent(new PreviewButton("Preview"));
 
@@ -611,12 +503,9 @@ This will analyse the sample and recreate every cycle with the correct phase inf
 		row1->getComponent<Button>("Preview")->addListener(&bl_);
 
 		soundProperty = new MarkdownHelpButton();
-
 		soundProperty->setHelpText(WavetableHelp::About());
 
 		row1->addCustomComponent(soundProperty);
-
-
 
 		row1->setSize(768, 40);
 
@@ -844,8 +733,13 @@ This will use Loris to separate the noise from the sinusoidal parts of the sampl
 
 	~WavetableConverterDialog()
 	{
+		converter->spectrumBroadcaster.removeListener(*preview);
+
 		fileHandling = nullptr;
+		row1 = nullptr;
+		row2 = nullptr;
 		preview = nullptr;
+		sm = nullptr;
 		converter = nullptr;
 	}
 
@@ -1094,23 +988,18 @@ This will use Loris to separate the noise from the sinusoidal parts of the sampl
 
 	Result r;
 
+	ScopedPointer<SampleMapToWavetableConverter> converter;
 	ScopedPointer<CombinedPreview> preview;
 	ScopedPointer<SampleMapToWavetableConverter::SampleMapPreview> sm;
-
-    bool rebuildPending = false;
-	
-
-	ModulatorSynthChain* chain;
 	
 	ScopedPointer<AdditionalRow> fileHandling;
 	ScopedPointer<AdditionalRow> row1;
 	ScopedPointer<AdditionalRow> row2;
-	ScopedPointer<SampleMapToWavetableConverter> converter;
 
+	ModulatorSynthChain* chain;
+	bool rebuildPending = false;
 	String currentlyLoadedMap;
-
 	File currentFile;
-
 
 	JUCE_DECLARE_WEAK_REFERENCEABLE(WavetableConverterDialog);
 };
@@ -1842,10 +1731,12 @@ struct ShortcutEditor : public QuasiModalComponent,
 		};
 	};
 
-	Path createPath(const String&) const override
+	Path createPath(const String& url) const override
 	{
 		Path p;
-		p.loadPathFromData(HiBinaryData::ProcessorEditorHeaderIcons::closeIcon, sizeof(HiBinaryData::ProcessorEditorHeaderIcons::closeIcon));
+        
+        LOAD_EPATH_IF_URL("close", HiBinaryData::ProcessorEditorHeaderIcons::closeIcon);
+        
 		return p;
 	}
 
@@ -2200,6 +2091,14 @@ public:
 			int numChannels = ob.getNumChannels();
 			int numSamples = ob.getNumSamples();
 
+			AudioFormatManager afm;
+	    afm.registerBasicFormats(); // Register basic audio formats
+
+	    std::unique_ptr<AudioFormatReader> reader(afm.createReaderFor(fileToUse));
+
+			double sampleRate = reader->sampleRate;
+			int bitDepth = reader->bitsPerSample;
+
 			fileToUse.deleteFile();
 
 			AudioSampleBuffer lut;
@@ -2374,8 +2273,8 @@ public:
 				CascadedEnvelopeLowPass lp(true);
 
 				PrepareSpecs ps;
-				ps.blockSize = 16;
-				ps.sampleRate = 44100.0;
+				ps.blockSize = bitDepth;
+				ps.sampleRate = sampleRate;
 				ps.numChannels = numChannels;
 
 				lp.prepare(ps);
@@ -2392,7 +2291,7 @@ public:
 			}
 
 			propertyData.removeProperty(id, nullptr);
-			hlac::CompressionHelpers::dump(ob, fileToUse.getFullPathName());
+			hlac::CompressionHelpers::dump(ob, fileToUse.getFullPathName(), sampleRate, bitDepth);
 		}
 
 		ValueTree propertyData;
@@ -2766,12 +2665,18 @@ public:
 	{
 		return input.startsWith("const var") || input.startsWith("[");
 	}
+    
+    static bool isCPlusPlusArray(const String& input)
+    {
+        return input.startsWith("{");
+    }
 
 	static String parse(const String& input, OutputFormat format)
 	{
 		String rt = input.trim();
-
-		if (isHiseScriptArray(rt) || format == OutputFormat::Base64SVG)
+        
+		if (isHiseScriptArray(rt) || format == OutputFormat::Base64SVG ||
+            isCPlusPlusArray(rt))
 		{
 			return rt;
 		}
@@ -2909,6 +2814,41 @@ public:
 
 		String result = "No path generated.. Not a valid SVG path string?";
 
+        if (isCPlusPlusArray(inputText))
+        {
+            inputText = inputText.replaceCharacter('{', '[');
+            inputText = inputText.replaceCharacter('}', ']');
+            
+            auto ar = JSON::parse(inputText);
+
+            if (ar.isArray())
+            {
+                MemoryOutputStream mos;
+
+                for (auto v : *ar.getArray())
+                {
+                    auto byte = (uint8)(int)v;
+                    mos.write(&byte, 1);
+                }
+                
+                mos.flush();
+
+                path.clear();
+                path.loadPathFromData(mos.getData(), mos.getDataSize());
+
+                auto b64 = mos.getMemoryBlock().toBase64Encoding();
+
+                result = {};
+
+                if (!inputText.startsWith("["))
+                    result << inputText.upToFirstOccurrenceOf("[", false, false);
+
+                result << b64.quoted();
+
+                if (inputText.endsWith(";"))
+                    result << ";";
+            }
+        }
 		if (isHiseScriptArray(inputText))
 		{
 			auto ar = JSON::parse(inputText.fromFirstOccurrenceOf("[", true, true));
@@ -3123,255 +3063,6 @@ public:
 	juce::ComponentDragger dragger;
 };
 
-class ProjectDownloader : public DialogWindowWithBackgroundThread,
-	public TextEditor::Listener
-{
-public:
-
-	enum class ErrorCodes
-	{
-		OK = 0,
-		InvalidURL,
-		URLNotFound,
-		DirectoryAlreadyExists,
-		FileNotAnArchive,
-		AbortedByUser,
-		numErrorCodes
-	};
-
-	ProjectDownloader(BackendProcessorEditor *bpe_) :
-		DialogWindowWithBackgroundThread("Download new Project"),
-		bpe(bpe_),
-		result(ErrorCodes::OK)
-	{
-		addTextEditor("url", "http://www.", "URL");
-
-#if HISE_IOS
-
-		addTextEditor("projectName", "Project", "Project Name");
-
-#else
-
-		targetFile = new FilenameComponent("Target folder", File(), true, true, true, "", "", "Choose target folder");
-		targetFile->setSize(300, 24);
-		addCustomComponent(targetFile);
-
-#endif
-
-		addBasicComponents(true);
-		addButton("Paste URL from Clipboard", 2);
-	};
-
-	void resultButtonClicked(const String &name)
-	{
-		if (name == "Paste URL from Clipboard")
-		{
-			getTextEditor("url")->setText(SystemClipboard::getTextFromClipboard());
-		}
-	}
-
-	void run() override
-	{
-#if HISE_IOS
-		targetDirectory = File::getSpecialLocation(File::userDocumentsDirectory).getChildFile(getTextEditor("projectName")->getText());
-
-		if (targetDirectory.isDirectory())
-		{
-			result = ErrorCodes::DirectoryAlreadyExists;
-			return;
-		}
-
-		targetDirectory.createDirectory();
-
-#else
-		targetDirectory = targetFile->getCurrentFile();
-
-		if (targetDirectory.isDirectory() && targetDirectory.getNumberOfChildFiles(File::findFilesAndDirectories) != 0)
-		{
-			result = ErrorCodes::DirectoryAlreadyExists;
-			return;
-		}
-
-#endif
-
-		const String enteredURL = getTextEditor("url")->getText();
-
-		const String directURL = replaceHosterLinksWithDirectDownloadURL(enteredURL);
-
-		URL downloadLocation(directURL);
-
-		if (!downloadLocation.isWellFormed())
-		{
-			result = ErrorCodes::InvalidURL;
-			targetDirectory.deleteRecursively();
-			return;
-		}
-
-		showStatusMessage("Downloading the project");
-
-		auto stream = downloadLocation.createInputStream(false, &downloadProgress, this, String(), 0, nullptr, &httpStatusCode, 20);
-
-		if (stream == nullptr || stream->getTotalLength() <= 0)
-		{
-			result = ErrorCodes::URLNotFound;
-			targetDirectory.deleteRecursively();
-			return;
-		}
-
-		File tempFile(File::getSpecialLocation(File::tempDirectory).getChildFile("projectDownload.tmp"));
-
-		tempFile.deleteFile();
-		tempFile.create();
-
-		auto fos = tempFile.createOutputStream();
-
-		MemoryBlock mb;
-		mb.setSize(8192);
-
-		const int64 numBytesTotal = stream->getNumBytesRemaining();
-		int64 numBytesRead = 0;
-
-		while (stream->getNumBytesRemaining() > 0)
-		{
-			const int64 chunkSize = (int64)jmin<int>((int)stream->getNumBytesRemaining(), 8192);
-
-			downloadProgress(this, (int)numBytesRead, (int)numBytesTotal);
-
-			if (threadShouldExit())
-			{
-				result = ErrorCodes::AbortedByUser;
-				fos->flush();
-				fos = nullptr;
-
-				tempFile.deleteFile();
-				targetDirectory.deleteRecursively();
-				return;
-			}
-
-			stream->read(mb.getData(), (int)chunkSize);
-
-			numBytesRead += chunkSize;
-
-			fos->write(mb.getData(), (size_t)chunkSize);
-		}
-
-		fos->flush();
-
-		showStatusMessage("Extracting...");
-
-		setProgress(-1.0);
-
-		FileInputStream fis(tempFile);
-
-		ZipFile input(&fis, false);
-
-		if (input.getNumEntries() == 0)
-		{
-			result = ErrorCodes::FileNotAnArchive;
-			tempFile.deleteFile();
-			targetDirectory.deleteRecursively();
-			return;
-		}
-
-		const int numFiles = input.getNumEntries();
-
-		for (int i = 0; i < numFiles; i++)
-		{
-			if (threadShouldExit())
-			{
-				tempFile.deleteFile();
-				targetDirectory.deleteRecursively();
-				result = ErrorCodes::AbortedByUser;
-
-				break;
-			}
-
-			input.uncompressEntry(i, targetDirectory, true);
-
-			setProgress((double)i / (double)numFiles);
-		}
-
-		tempFile.deleteFile();
-
-	}
-
-
-	static bool downloadProgress(void* context, int bytesSent, int totalBytes)
-	{
-		const double downloadedMB = (double)bytesSent / 1024.0 / 1024.0;
-		const double totalMB = (double)totalBytes / 1024.0 / 1024.0;
-		const double percent = (totalMB > 0.0) ? (downloadedMB / totalMB) : 0.0;
-
-		static_cast<ProjectDownloader*>(context)->showStatusMessage("Downloaded: " + String(downloadedMB, 1) + " MB / " + String(totalMB, 2) + " MB");
-
-		static_cast<ProjectDownloader*>(context)->setProgress(percent);
-
-		return !static_cast<ProjectDownloader*>(context)->threadShouldExit();
-	}
-
-	void threadFinished() override
-	{
-		switch (result)
-		{
-		case ProjectDownloader::ErrorCodes::OK:
-			if (PresetHandler::showYesNoWindow("Switch projects", "Do you want to switch to the downloaded project?", PresetHandler::IconType::Question))
-			{
-				GET_PROJECT_HANDLER(bpe->getMainSynthChain()).setWorkingProject(targetDirectory);
-			}
-			break;
-		case ProjectDownloader::ErrorCodes::InvalidURL:
-			PresetHandler::showMessageWindow("Wrong URL", "The entered URL is not valid", PresetHandler::IconType::Error);
-			break;
-		case ProjectDownloader::ErrorCodes::URLNotFound:
-			PresetHandler::showMessageWindow("Error downloading", "The URL could not be opened. HTTP status code: " + String(httpStatusCode), PresetHandler::IconType::Error);
-			break;
-		case ProjectDownloader::ErrorCodes::DirectoryAlreadyExists:
-			PresetHandler::showMessageWindow("Project already exists.", "You'll need to delete the existing project before downloading.", PresetHandler::IconType::Error);
-			break;
-		case ProjectDownloader::ErrorCodes::FileNotAnArchive:
-			PresetHandler::showMessageWindow("Archive corrupt", "The file could not be extracted because it is either corrupt or not an archive.", PresetHandler::IconType::Error);
-		case ProjectDownloader::ErrorCodes::AbortedByUser:
-			PresetHandler::showMessageWindow("Download cancelled", "The project was not downloaded because the progress was aborted.", PresetHandler::IconType::Error);
-		case ProjectDownloader::ErrorCodes::numErrorCodes:
-			break;
-		default:
-			break;
-		}
-
-
-	}
-
-private:
-
-	/** A small helper function that replaces links to cloud content with their direct download URL. */
-	static String replaceHosterLinksWithDirectDownloadURL(const String url)
-	{
-		const bool dropBox = url.containsIgnoreCase("dropbox");
-		const bool googleDrive = url.containsIgnoreCase("drive.google.com");
-
-		if (dropBox)
-		{
-			return url.replace("dl=0", "dl=1");;
-		}
-		else if (googleDrive)
-		{
-			const String downloadID = url.fromFirstOccurrenceOf("https://drive.google.com/file/d/", false, true).upToFirstOccurrenceOf("/", false, false);
-			const String directLink = "https://drive.google.com/uc?export=download&id=" + downloadID;
-
-			return directLink;
-		}
-		else return url;
-	}
-
-	BackendProcessorEditor *bpe;
-
-	ScopedPointer<FilenameComponent> targetFile;
-
-	File targetDirectory;
-
-	ErrorCodes result;
-	int httpStatusCode;
-};
 
 
 class ProjectImporter : public DialogWindowWithBackgroundThread,
@@ -3727,7 +3418,10 @@ public:
 
 			formats.add(new WavAudioFormat());
 			formats.add(new AiffAudioFormat());
+
+#if JUCE_USE_OGGVORBIS
 			formats.add(new juce::OggVorbisAudioFormat());
+#endif
 
 			for (auto af : formats)
 			{

@@ -32,6 +32,7 @@
 
 #ifndef FILEBROWSER_H_INCLUDED
 #define FILEBROWSER_H_INCLUDED
+#include "hi_tools/hi_markdown/MarkdownRenderer.h"
 
 namespace hise { using namespace juce;
 
@@ -69,6 +70,7 @@ private:
 class BackendProcessorEditor;
 
 class FileBrowser : public Component,
+					public MidiKeyboardFocusTraverser::ParentWithKeyboardFocus,
 					public DragAndDropContainer,
 					public ApplicationCommandTarget,
 					public TextEditor::Listener,
@@ -152,6 +154,8 @@ public:
 	void paint(Graphics &g);
 
 	void previewFile(const File& f);
+
+	void resetToRoot();
 
 	void textEditorTextChanged(TextEditor& editor) override;
 
@@ -395,6 +399,7 @@ private:
 
     JUCE_DECLARE_WEAK_REFERENCEABLE(FileBrowser);
 };
+
 
 } // namespace hise
 

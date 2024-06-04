@@ -97,6 +97,8 @@ struct HiseJavascriptEngine::RootObject::ConstReference : public Expression
 		location.throwError("Can't assign to this expression!");
 	}
 
+	Identifier getVariableName() const override { return ns->constObjects.getName(index); }
+
 	Statement* getChildStatement(int) override { return nullptr; };
 
 	WeakReference<JavascriptNamespace> ns;
@@ -109,6 +111,8 @@ struct HiseJavascriptEngine::RootObject::ArraySubscript : public Expression
 {
 	ArraySubscript(const CodeLocation& l) noexcept : Expression(l) {}
 
+
+    
 	var getResult(const Scope& s) const override
 	{
 		var result = object->getResult(s);
@@ -120,29 +124,32 @@ struct HiseJavascriptEngine::RootObject::ArraySubscript : public Expression
 		}
 		else if (AssignableObject * instance = dynamic_cast<AssignableObject*>(result.getObject()))
 		{
-			cacheIndex(instance, s);
-
-			if(cachedIndex != -1)
-				return instance->getAssignedValue(cachedIndex);
-			else
-			{
-				auto idx = index->getResult(s);
-				return instance->getAssignedValue(idx);
-			}
+            const int i = index->getResult(s);
+            return instance->getAssignedValue(i);
 		}
 		else if (const Array<var>* array = result.getArray())
 			return (*array)[static_cast<int> (index->getResult(s))];
 
         else if (const DynamicObject* obj = result.getDynamicObject())
         {
-            const String name = index->getResult(s).toString();
+            auto hasConstIndex = index->isConstant();
             
-            if(name.isNotEmpty())
+            if(cachedId.isNull() || !hasConstIndex)
             {
-                return obj->getProperty(Identifier(name));
+                WARN_IF_AUDIO_THREAD(true, ScriptAudioThreadGuard::DynamicObjectAccess);
+                
+                const String name = index->getResult(s).toString();
+                auto idToUse = Identifier(name);
+                
+                if(hasConstIndex)
+                    cachedId = idToUse;
+                
+                return obj->getProperty(idToUse);
             }
-            
-            
+            else
+            {
+                return obj->getProperty(cachedId);
+            }
         }
         
 		return var::undefined();
@@ -165,8 +172,6 @@ struct HiseJavascriptEngine::RootObject::ArraySubscript : public Expression
 		{
 			const int i = index->getResult(s);
 
-			
-			
 			WARN_IF_AUDIO_THREAD(i >= ar->getNumAllocated(), ScriptAudioThreadGuard::ArrayResizing);
 
 			while (ar->size() < i)
@@ -177,18 +182,30 @@ struct HiseJavascriptEngine::RootObject::ArraySubscript : public Expression
 		}
 		else if (AssignableObject * instance = dynamic_cast<AssignableObject*>(result.getObject()))
 		{
-			cacheIndex(instance, s);
-
-			instance->assign(cachedIndex, newValue);
-			
+            const int i = index->getResult(s);
+			instance->assign(i, newValue);
 			return;
 		}
         else if (DynamicObject* obj = result.getDynamicObject())
         {
-			WARN_IF_AUDIO_THREAD(true, ScriptAudioThreadGuard::DynamicObjectAccess);
-
-            const String name = index->getResult(s).toString();
-            return obj->setProperty(Identifier(name), newValue);
+            auto hasConstIndex = index->isConstant();
+            
+            if(cachedId.isNull() || !hasConstIndex)
+            {
+                WARN_IF_AUDIO_THREAD(true, ScriptAudioThreadGuard::DynamicObjectAccess);
+                
+                const String name = index->getResult(s).toString();
+                auto idToUse = Identifier(name);
+                
+                if(hasConstIndex)
+                    cachedId = idToUse;
+                
+                return obj->setProperty(idToUse, newValue);
+            }
+            else
+            {
+                return obj->setProperty(cachedId, newValue);
+            }
         }
 
 		Expression::assign(s, newValue);
@@ -206,11 +223,9 @@ struct HiseJavascriptEngine::RootObject::ArraySubscript : public Expression
 		return swapIf(n, r, object) || swapIf(n, r, index);
 	}
 
-	void cacheIndex(AssignableObject *instance, const Scope &s) const;
-
 	ExpPtr object, index;
-
-	mutable int cachedIndex = -1;
+    
+    mutable Identifier cachedId;
 };
 
 #define DECLARE_ID(x) const juce::Identifier x(#x);
@@ -436,6 +451,10 @@ struct HiseJavascriptEngine::RootObject::FunctionCall : public Expression
 	mutable ConstScriptingObject* constObject = nullptr;
 	mutable int numArgs = -1;
 	mutable int functionIndex = -1;
+
+#if ENABLE_SCRIPTING_SAFE_CHECKS
+    mutable VarTypeChecker::ParameterTypes types;
+#endif
 };
 
 struct HiseJavascriptEngine::RootObject::NewOperator : public FunctionCall

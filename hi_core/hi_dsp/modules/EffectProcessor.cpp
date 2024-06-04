@@ -125,6 +125,7 @@ void EffectProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
 
 void EffectProcessor::finaliseModChains()
 {
+	updateParameterSlots();
 	modChains.finalise();
 
 	for (auto& mb : modChains)
@@ -416,7 +417,7 @@ Path MonophonicEffectProcessor::getSpecialSymbol() const
 {
 	Path path;
 
-	path.loadPathFromData (HiBinaryData::ProcessorEditorHeaderIcons::monophonicPath, sizeof (HiBinaryData::ProcessorEditorHeaderIcons::monophonicPath));
+	path.loadPathFromData (HiBinaryData::ProcessorEditorHeaderIcons::monophonicPath, SIZE_OF_PATH(HiBinaryData::ProcessorEditorHeaderIcons::monophonicPath));
 
 	return path;
 }
@@ -627,7 +628,7 @@ juce::Path VoiceEffectProcessor::getSpecialSymbol() const
 {
 	Path path;
 
-	path.loadPathFromData(ProcessorIcons::polyFX, sizeof(ProcessorIcons::polyFX));
+	path.loadPathFromData(ProcessorIcons::polyFX, SIZE_OF_PATH(ProcessorIcons::polyFX));
 	return path;
 }
 

@@ -229,7 +229,9 @@ public:
 
 	/**	Creates a new modulator with the given Identifier. */
 	Modulator(MainController *m, const String &id, int numVoices);
-	virtual ~Modulator();;
+	virtual ~Modulator();
+
+	float getValueForTextConverter(float valueToConvert) const;;
 
 
 	// ====================================================================================================
@@ -707,7 +709,7 @@ class VoiceStartModulatorFactoryType: public FactoryType
 		globalStaticTimeVariantModulator,
 		arrayModulator,
 		scriptVoiceStartModulator,
-
+		eventDataStartModulator
 	};
 
 public:
@@ -752,7 +754,8 @@ class EnvelopeModulatorFactoryType: public FactoryType
 		scriptEnvelope,
 		mpeModulator,
 		voiceKillEnvelope,
-		globalEnvelope
+		globalEnvelope,
+		eventDataEnvelope
 	};
 
 public:

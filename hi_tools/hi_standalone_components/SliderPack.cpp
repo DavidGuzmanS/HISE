@@ -176,6 +176,7 @@ namespace hise { using namespace juce;
 	SliderPackData::SliderPackAction::SliderPackAction(SliderPackData* data_, int sliderIndex_, float oldValue_,
 		float newValue_, NotificationType n_):
 		UndoableAction(),
+		singleValue(true),
 		data(data_),
 		sliderIndex(sliderIndex_),
 		oldValue(oldValue_),
@@ -183,11 +184,33 @@ namespace hise { using namespace juce;
 		n(n_)
 	{}
 
+	SliderPackData::SliderPackAction::SliderPackAction(SliderPackData* data_, const Array<float>& newValues, NotificationType n_):
+		UndoableAction(),
+		singleValue(false),
+		data(data_),
+		n(n_)
+	{
+		newData.addArray(newValues);
+		data->writeToFloatArray(oldData);
+
+		for(int i = 0; i < newValues.size(); i++)
+		{
+			String s;
+			s << String(oldData[i]) + " -> " + String(newData[i]);
+			DBG(s);
+		}
+		
+	}
+
 	bool SliderPackData::SliderPackAction::perform()
 	{
 		if (data != nullptr)
 		{
-			data->setValue(sliderIndex, newValue, n, false);
+			if(singleValue)
+				data->setValue(sliderIndex, newValue, n, false);
+			else
+				data->setFromFloatArray(newData, n, false);
+			
 			return true;
 		}
 
@@ -198,7 +221,11 @@ namespace hise { using namespace juce;
 	{
 		if (data != nullptr)
 		{
-			data->setValue(sliderIndex, oldValue, n, false);
+			if(singleValue)
+				data->setValue(sliderIndex, oldValue, n, false);
+			else
+				data->setFromFloatArray(oldData, n, false);
+
 			return true;
 		}
 
@@ -273,17 +300,29 @@ float SliderPackData::getValue(int index) const
 	return defaultValue;
 }
 
-void SliderPackData::setFromFloatArray(const Array<float> &valueArray, NotificationType n)
+void SliderPackData::setFromFloatArray(const Array<float> &valueArray, NotificationType n, bool useUndoManager)
 {
+	if(auto um = getUndoManager(useUndoManager))
 	{
-        int numToCopy = jmin(valueArray.size(), getNumSliders());
-        FloatSanitizers::sanitizeArray((float*)valueArray.getRawDataPointer(), numToCopy);
-        
-		SimpleReadWriteLock::ScopedReadLock sl(getDataLock());
-        FloatVectorOperations::copy(dataBuffer->buffer.getWritePointer(0), valueArray.begin(), numToCopy);
+		um->perform(new SliderPackAction(this, valueArray, n));
 	}
+	else
+	{
+		{
+			int numToCopy = jmin(valueArray.size(), getNumSliders());
+	        FloatSanitizers::sanitizeArray((float*)valueArray.getRawDataPointer(), numToCopy);
 
-	internalUpdater.sendContentChangeMessage(n, -1);
+			for(int i = 0; i < valueArray.size(); i++)
+			{
+				DBG(valueArray[i]);
+			}
+
+			SimpleReadWriteLock::ScopedReadLock sl(getDataLock());
+	        FloatVectorOperations::copy(dataBuffer->buffer.getWritePointer(0), valueArray.begin(), numToCopy);
+		}
+
+		internalUpdater.sendContentChangeMessage(n, -1);
+	}
 }
 
 void SliderPackData::writeToFloatArray(Array<float> &valueArray) const
@@ -291,8 +330,7 @@ void SliderPackData::writeToFloatArray(Array<float> &valueArray) const
 	SimpleReadWriteLock::ScopedReadLock sl(getDataLock());
 
 	valueArray.ensureStorageAllocated(getNumSliders());
-
-	memcpy(valueArray.begin(), dataBuffer->buffer.getReadPointer(0), sizeof(float)*getNumSliders());
+	valueArray.addArray(dataBuffer->buffer.getReadPointer(0), getNumSliders());
 }
 
 String SliderPackData::dataVarToBase64(const var& data)
@@ -537,6 +575,8 @@ void SliderPack::resized()
 {
 	int w = getWidth();
 
+    setTextAreaPopup(getLocalBounds().removeFromRight(100).removeFromTop(40));
+    
     if(data != nullptr && (sliderWidths.isEmpty() || getNumSliders()+1 != (sliderWidths.size())))
     {
         float widthPerSlider = (float)w / (float)data->getNumSliders();
@@ -599,10 +639,24 @@ void SliderPack::sliderValueChanged(Slider *s)
     
 	NotificationType n = sendNotificationSync;
 
-	if (callbackOnMouseUp)
-		n = dontSendNotification;
+	bool useUndo = true;
 
-	data->setValue(index, (float)s->getValue(), n, true);
+	if (callbackOnMouseUp)
+	{
+		n = dontSendNotification;
+		useUndo = false;
+	}
+
+    auto currentValue = (float)s->getValue();
+    
+	if(this->toggleMaxMode)
+	{
+		data->setValue(index, currentStepSequencerInputValue, n, useUndo);
+	}
+	else
+	{
+		data->setValue(index, currentValue, n, useUndo);
+	}
 }
 
 void SliderPack::mouseDown(const MouseEvent &e)
@@ -613,6 +667,40 @@ void SliderPack::mouseDown(const MouseEvent &e)
 
 	int x = e.getEventRelativeTo(this).getMouseDownPosition().getX();
 	int y = e.getEventRelativeTo(this).getMouseDownPosition().getY();
+
+	auto n = sendNotificationSync;
+
+	if(callbackOnMouseUp)
+		n = dontSendNotification;
+
+	if(toggleMaxMode)
+	{
+        int sliderIndex = getSliderIndexForMouseEvent(e);
+        
+        if(isPositiveAndBelow(sliderIndex, data->getNumSliders()))
+        {
+			auto rng = sliders[sliderIndex]->getRange();
+			auto thisValue = sliders[sliderIndex]->getValue();
+
+			auto useGhostNoteValue = e.mods.isAnyModifierKeyDown();
+			auto ghostNoteValue = rng.getStart() + 0.5 * rng.getLength();
+
+			if(thisValue == rng.getStart())
+			{
+				if(useGhostNoteValue)
+					currentStepSequencerInputValue = ghostNoteValue;
+				else
+					currentStepSequencerInputValue = rng.getEnd();
+			}
+			else
+			{
+				if(useGhostNoteValue == (thisValue == ghostNoteValue))
+					currentStepSequencerInputValue = rng.getStart();
+				else
+					currentStepSequencerInputValue = useGhostNoteValue ? ghostNoteValue : rng.getEnd();
+			}
+        }
+	}
 
 	if (e.mods.isRightButtonDown() || e.mods.isCommandDown())
 	{
@@ -627,8 +715,8 @@ void SliderPack::mouseDown(const MouseEvent &e)
 		int sliderIndex = getSliderIndexForMouseEvent(e);
 
 		
-
-		getData()->setDisplayedIndex(sliderIndex);
+		if(!callbackOnMouseUp)
+			getData()->setDisplayedIndex(sliderIndex);
 
 		Slider *s = sliders[sliderIndex];
 
@@ -637,12 +725,12 @@ void SliderPack::mouseDown(const MouseEvent &e)
 
 		double normalizedValue = (double)(getHeight() - y) / (double)getHeight();
 
-		double value = s->proportionOfLengthToValue(normalizedValue);
+		double value = toggleMaxMode ? currentStepSequencerInputValue : s->proportionOfLengthToValue(normalizedValue);
 
 		currentlyDragged = true;
 		currentlyDraggedSlider = sliderIndex;
 
-		s->setValue(value, sendNotificationSync);
+		s->setValue(value, n);
 
 		currentlyDraggedSliderValue = s->getValue();
 
@@ -664,6 +752,11 @@ void SliderPack::mouseDrag(const MouseEvent &e)
 
 	Rectangle<int> thisBounds(0, 0, getWidth(), getHeight());
 
+	auto n = sendNotificationSync;
+
+	if(callbackOnMouseUp)
+		n = dontSendNotification;
+
 	if (!rightClickLine.getStart().isOrigin())
 	{
 		if (!thisBounds.contains(Point<int>(x, y)))
@@ -677,9 +770,11 @@ void SliderPack::mouseDrag(const MouseEvent &e)
 			if (x < 0) x = 0;
 		}
 
-		rightClickLine.setEnd((float)x, (float)y);
+		repaintWithTextBox(Rectangle<float>(rightClickLine.getStart(), rightClickLine.getEnd()).toNearestInt().expanded(5));
 
-		repaint();
+		rightClickLine.setEnd((float)x, e.mods.isShiftDown() ? rightClickLine.getStartY() : (float)y);
+
+        repaintWithTextBox(Rectangle<float>(rightClickLine.getStart(), rightClickLine.getEnd()).toNearestInt().expanded(5));
 	}
 	else
 	{
@@ -703,17 +798,21 @@ void SliderPack::mouseDrag(const MouseEvent &e)
 		{
 			double normalizedValue = (double)(getHeight() - y) / (double)getHeight();
 
-			double value = s->proportionOfLengthToValue(normalizedValue);
+			double value = toggleMaxMode ? currentStepSequencerInputValue : s->proportionOfLengthToValue(normalizedValue);
+
+			if(isPositiveAndBelow(currentlyDraggedSlider, sliders.size()))
+                repaintWithTextBox(sliders[currentlyDraggedSlider]->getBoundsInParent());
 
 			currentlyDragged = true;
 			currentlyDraggedSlider = sliderIndex;
 			currentlyDraggedSliderValue = value;
 
-			s->setValue(value, sendNotificationSync);
+			s->setValue(value, n);
 
 			currentlyDraggedSliderValue = s->getValue();
 
-			repaint();
+			if(isPositiveAndBelow(currentlyDraggedSlider, sliders.size()))
+                repaintWithTextBox(sliders[currentlyDraggedSlider]->getBoundsInParent());
 		}
 
 		if (std::abs(sliderIndex - lastDragIndex) > 1)
@@ -734,7 +833,7 @@ void SliderPack::mouseDrag(const MouseEvent &e)
 				alpha += delta;
 
 				if (auto s = sliders[i])
-					s->setValue(v, sendNotificationSync);
+					s->setValue(v, n);
 			}
 		}
 
@@ -751,11 +850,23 @@ void SliderPack::mouseUp(const MouseEvent &e)
 
 	currentlyDragged = false;
 
-	if(!rightClickLine.getStart().isOrigin()) setValuesFromLine();
+	if(!rightClickLine.getStart().isOrigin())
+	{
+		setValuesFromLine();
+		return;
+	}
 
 	if (callbackOnMouseUp)
-		getData()->getUpdater().sendContentChangeMessage(sendNotificationSync, -1);
+	{
+		Array<float> newData;
+		newData.ensureStorageAllocated(getNumSliders());
 
+		for(int i = 0; i < getNumSliders(); i++)
+			newData.add((float)sliders[i]->getValue());
+		
+		getData()->setFromFloatArray(newData, sendNotificationAsync, true);
+	}
+	
 	repaint();
 }
 
@@ -763,7 +874,9 @@ void SliderPack::mouseExit(const MouseEvent &)
 {
 	if (!isEnabled()) return;
 
+	showOverlayOnMove = false;
 	currentlyDragged = false;
+	currentlyHoveredSlider = -1;
 	repaint();
 }
 
@@ -820,7 +933,7 @@ void SliderPack::paintOverChildren(Graphics &g)
 			l->drawSliderPackRightClickLine(g, *this, rightClickLine);
 	}
 
-	else if (currentlyDragged && data->isValueOverlayShown())
+	else if ((currentlyDragged || showOverlayOnMove) && data->isValueOverlayShown())
 	{
 		const double logFromStepSize = log10(data->getStepSize());
 		const int unit = -roundToInt(logFromStepSize);
@@ -833,10 +946,10 @@ void SliderPack::paintOverChildren(Graphics &g)
 
 void SliderPack::setValuesFromLine()
 {
-	data->setNewUndoAction();
+	Array<float> newValues;
 
-    int lastIndex = -1;
-    
+	newValues.ensureStorageAllocated(getNumSliders());
+
 	for (int i = 0; i < sliders.size(); i++)
 	{
 		Slider *s = sliders[i];
@@ -852,14 +965,21 @@ void SliderPack::setValuesFromLine()
 			double normalizedValue = ((double)getHeight() - y) / (double)getHeight();
 			double value = s->proportionOfLengthToValue(normalizedValue);
 
-            data->setValue(i, value, dontSendNotification, true);
-            lastIndex = -1;
+			newValues.add(value);
+		}
+		else
+		{
+			newValues.add((float)s->getValue());
 		}
 	}
-    
-	data->getUpdater().sendContentChangeMessage(sendNotificationAsync, lastIndex);
+
+	data->setFromFloatArray(newValues, sendNotificationAsync, true);
+	
+	repaint();
 
 	rightClickLine = Line<float>(0.0f, 0.0f, 0.0f, 0.0f);
+
+	
 }
 
 void SliderPack::displayedIndexChanged(SliderPackData* d, int newIndex)
@@ -915,7 +1035,8 @@ void SliderPack::timerCallback()
 
 void SliderPack::mouseDoubleClick(const MouseEvent &e)
 {
-	if (!isEnabled()) return;
+	if (!isEnabled() || toggleMaxMode) 
+		return;
 
 	if (e.mods.isShiftDown())
 	{
@@ -1178,7 +1299,34 @@ void SliderPack::setComplexDataUIBase(ComplexDataUIBase* newData)
 }
 
 void SliderPack::mouseMove(const MouseEvent& mouseEvent)
-{ repaint(); }
+{
+	auto thisIndex = getSliderIndexForMouseEvent(mouseEvent);
+
+	showOverlayOnMove = mouseEvent.mods.isShiftDown();
+
+	if(showOverlayOnMove)
+	{
+		currentlyDraggedSlider = thisIndex;
+
+		if(auto s = sliders[currentlyDraggedSlider])
+		{
+			currentlyDraggedSliderValue = s->getValue();
+		}
+		
+		repaint();
+	}
+	
+	if(thisIndex != currentlyHoveredSlider)
+	{
+		if(isPositiveAndBelow(currentlyHoveredSlider, sliders.size()))
+            repaintWithTextBox(sliders[currentlyHoveredSlider]->getBoundsInParent());
+
+		currentlyHoveredSlider = thisIndex;
+
+		if(isPositiveAndBelow(currentlyHoveredSlider, sliders.size()))
+            repaintWithTextBox(sliders[currentlyHoveredSlider]->getBoundsInParent());
+	}
+}
 
 void SliderPack::notifyListeners(int index, NotificationType n)
 {

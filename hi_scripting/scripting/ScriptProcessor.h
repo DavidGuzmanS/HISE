@@ -63,11 +63,30 @@ public:
 
 	virtual int getCallbackEditorStateOffset() const;
 
+#if USE_BACKEND
+
+	void toggleSuspension()
+	{
+		simulatedSuspensionState = !simulatedSuspensionState;
+		suspendStateChanged(simulatedSuspensionState);
+	}
+	
+	bool simulatedSuspensionState = false;
+
+#endif
+
 	void suspendStateChanged(bool shouldBeSuspended) override;
 
 	ScriptingApi::Content *getScriptingContent() const;
 
 	Identifier getContentParameterIdentifier(int parameterIndex) const;
+
+	int getContentParameterAmount() const
+	{
+		return content->getNumComponents();
+	}
+
+	int getContentParameterIdentifierIndex(const Identifier& id) const;
 
 	void setControlValue(int index, float newValue);
 
@@ -120,6 +139,11 @@ protected:
 
 		Identifier getParameterId(int parameterIndex) const final override;
 
+		int getParameterIndexForIdentifier(const Identifier& id) const final override
+		{
+			return p.getContentParameterIdentifierIndex(id);
+		}
+		
 		ProcessorWithScriptingContent& p;
 	} contentParameterHandler;
 
@@ -153,11 +177,7 @@ public:
 		numCallbacks
 	};
 
-	ScriptBaseMidiProcessor(MainController *mc, const String &id): 
-		MidiProcessor(mc, id), 
-		ProcessorWithScriptingContent(mc),
-		currentEvent(nullptr)
-	{};
+	ScriptBaseMidiProcessor(MainController *mc, const String &id);;
 
 	virtual ~ScriptBaseMidiProcessor() { masterReference.clear(); }
 
@@ -218,6 +238,8 @@ public:
 
 	File getWatchedFile(int index) const;
 
+	bool isEmbeddedSnippetFile(int index) const;
+
 	CodeDocument& getWatchedFileDocument(int index);
 
 	void setCurrentPopup(DocumentWindow *window);
@@ -232,6 +254,21 @@ public:
 	static ValueTree collectAllScriptFiles(ModulatorSynthChain *synthChainToExport);
 
 private:
+
+	struct ExternalReloader: public Timer
+	{
+		ExternalReloader(FileChangeListener& p):
+		  parent(p)
+		{
+			startTimer(3000);
+		}
+
+		void timerCallback() override;
+
+		FileChangeListener& parent;
+	};
+
+	ScopedPointer<ExternalReloader> reloader;
 
 	friend class ExternalScriptFile;
 	friend class WeakReference < FileChangeListener > ;
@@ -317,6 +354,8 @@ public:
 		int getNumArgs() const;
 
 		void replaceContentAsync(String s, bool shouldBeAsync=true);
+
+		bool isInitialised() const { return pendingNewContent.isEmpty(); }
 
 	private:
 
@@ -651,6 +690,11 @@ struct JavascriptSleepListener
 class JavascriptThreadPool : public Thread,
 							 public ControlledObject
 {
+	static constexpr uint64_t ScriptTrackId = 8999;
+	static constexpr uint64_t CompilationTrackId = 9000;
+	static constexpr uint64_t HighPriorityTrackId = 9001;
+	static constexpr uint64_t LowPriorityTrackId = 9002;
+	
 public:
 
 	using SleepListener = JavascriptSleepListener;
@@ -659,7 +703,7 @@ public:
 
 	~JavascriptThreadPool();
 
-	void cancelAllJobs();
+	void cancelAllJobs(bool stopThread=true);
 
 	class Task
 	{
@@ -742,6 +786,20 @@ public:
 	bool  isCurrentlySleeping() const;;
 
 private:
+
+	void clearCounter(Task::Type t)
+	{
+		numTasks[t] = 0;
+		TRACE_COUNTER("dispatch", perfetto::CounterTrack(taskNames[t].get()), numTasks[t]);
+	}
+
+	void bumpCounter(Task::Type t)
+	{
+		TRACE_COUNTER("dispatch", perfetto::CounterTrack(taskNames[t].get()), ++numTasks[t]);
+	}
+
+	uint16 numTasks[(int)Task::numTypes];
+	dispatch::HashedCharPtr taskNames[(int)Task::numTypes];
 
 	Array<WeakReference<SleepListener>> sleepListeners;
 

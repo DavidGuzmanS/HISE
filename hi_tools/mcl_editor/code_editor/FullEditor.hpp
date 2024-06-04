@@ -30,6 +30,7 @@ namespace TextEditorSettings
 	DECLARE_ID(LineBreaks);
 	DECLARE_ID(EnableHover);
     DECLARE_ID(AutoAutocomplete);
+    DECLARE_ID(ShowStickyLines);
     DECLARE_ID(FixWeirdTab);
 }
 
@@ -166,8 +167,8 @@ struct MarkdownPreviewSyncer : public Timer,
 
     bool recursiveScrollProtector = false;
     
-    MarkdownPreview& p;
-    mcl::FullEditor& e;
+    Component::SafePointer<MarkdownPreview> p;
+    Component::SafePointer<mcl::FullEditor> e;
 };
 
 }

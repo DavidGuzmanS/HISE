@@ -106,6 +106,9 @@ Array<juce::Identifier> HiseSettings::Project::getAllIds()
     ids.add(UseGlobalAppDataFolderWindows);
     ids.add(UseGlobalAppDataFolderMacOS);
 	ids.add(DefaultUserPreset);
+	ids.add(CompileWithPerfetto);
+	ids.add(CompileWithDebugSymbols);
+	ids.add(IncludeLorisInFrontend);
 
 	return ids;
 }
@@ -164,6 +167,7 @@ Array<juce::Identifier> HiseSettings::Scripting::getAllIds()
 	ids.add(EnableDebugMode);
 	ids.add(SaveConnectedFilesOnCompile);
 	ids.add(EnableMousePositioning);
+    ids.add(WarnIfUndefinedParameters);
 
 	return ids;
 }
@@ -265,6 +269,16 @@ Array<juce::Identifier> HiseSettings::SnexWorkbench::getAllIds()
 		D("> **macOS:** `~/Library/Application Support/Company/Product/`");
 		D("Normally you would try to embed them into the binary, however if you have a lot of audio files (> 50MB)");
 		D("the compiler will crash with an **out of heap space** error, so in this case you're better off not embedding them.");
+		P_();
+
+		P(HiseSettings::Project::CompileWithPerfetto);
+		D("If enabled, the project will be compiled with the Perfetto Tracing SDK.");
+		D("> This allows you to profile & track down issues and performance hotspots, during development or troubleshooting.");
+		P_();
+
+		P(HiseSettings::Project::CompileWithDebugSymbols);
+		D("If enabled, the project will be compiled with the debug symbols for better trouble shooting.");
+		D("> With this setting, the crash reports will contain valid source code locations which might be helpful for debugging crashes, but you obviously have to turn this off for a production release!.");
 		P_();
 
 		P(HiseSettings::Project::EmbedImageFiles);
@@ -373,6 +387,11 @@ Array<juce::Identifier> HiseSettings::SnexWorkbench::getAllIds()
 		D("Be aware that this is a system-specific setting so if you load a project from another machine, make sure to tick / untick this box in order to create the expansion folder on this machine");
 		P_();
 
+		P(HiseSettings::Project::IncludeLorisInFrontend);
+		D("If enabled, this will include the Loris library in the compiled plugin.");
+		D("> Be aware that the Loris library is licensed under the GPL license, so you must not enable this flag in a proprietary project!");
+		P_();
+
 		P(HiseSettings::Project::RedirectSampleFolder);
 		D("You can use another location for your sample files. This is useful if you have limited space on your hard drive and need to separate the samples.");
 		D("> HISE will create a file called `LinkWindows` / `LinkOSX` in the samples folder that contains the link to the real folder.");
@@ -431,6 +450,11 @@ Array<juce::Identifier> HiseSettings::SnexWorkbench::getAllIds()
 		D("> It will grey out the save button for all factory presets");
 		P_();
 
+        P(HiseSettings::Scripting::WarnIfUndefinedParameters);
+        D("If enabled, it will print a warning with a callstack if you try to call a function  on a dynamic object reference with an undefined function.");
+        D("> This only works if you haven't set `HISE_WARN_UNDEFINED_PARAMETER_CALLS` to 0, then it will just abort execution and throw an error");
+        P_();
+        
 		P(HiseSettings::Project::VST3Support);
 		D("If enabled, the exported plugins will use the VST3 SDK standard instead of the VST 2.x SDK. Until further notice, this is a experimental feature so proceed with caution.");
 		D("> Be aware that Steinberg stopped support for the VST 2.4 SDK in October 2018 so if you don't have a valid VST2 license agreement in place, you must use the VST3 SDK.");
@@ -900,11 +924,16 @@ juce::StringArray HiseSettings::Data::getOptionsFor(const Identifier& id)
 		id == Project::EnableGlobalPreprocessor ||
         id == Project::UseGlobalAppDataFolderWindows ||
         id == Project::UseGlobalAppDataFolderMacOS ||
+		id == Project::CompileWithPerfetto ||
+		id == Project::CompileWithDebugSymbols ||
+		id == Project::IncludeLorisInFrontend ||
 		id == Documentation::RefreshOnStartup ||
 		id == SnexWorkbench::PlayOnRecompile ||
 		id == SnexWorkbench::AddFade ||
 		id == Scripting::SaveConnectedFilesOnCompile ||
+        id == Scripting::WarnIfUndefinedParameters ||
 		id == Scripting::EnableMousePositioning)
+
 	    return { "Yes", "No" };
 
 	if (id == Compiler::VisualStudioVersion)
@@ -1113,11 +1142,14 @@ var HiseSettings::Data::getDefaultSetting(const Identifier& id) const
 		else if (id == Project::AdminPermissions) return "No";
 	else if (id == Project::VST3Support)			return "No";
 	else if (id == Project::UseRawFrontend)			return "No";
+	else if (id == Project::CompileWithPerfetto)	return "No";
+	else if (id == Project::CompileWithDebugSymbols) return "No";
 	else if (id == Project::ExpansionType)			return "Disabled";
 	else if (id == Project::LinkExpansionsToProject)       return "No";
 	else if (id == Project::EnableGlobalPreprocessor)      return "No";
     else if (id == Project::UseGlobalAppDataFolderWindows) return "No";
     else if (id == Project::UseGlobalAppDataFolderMacOS)   return "No";
+	else if (id == Project::IncludeLorisInFrontend) return "No"; // return "Yes"; everybody straight to jail...
 	else if (id == Other::UseOpenGL)				return "No";
 	else if (id == Other::EnableAutosave)			return "Yes";
 	else if (id == Other::AutosaveInterval)			return 5;
@@ -1161,6 +1193,7 @@ var HiseSettings::Data::getDefaultSetting(const Identifier& id) const
 		return scriptFolder.getFullPathName();
 	}
 	else if (id == Scripting::EnableDebugMode)		return mc->getDebugLogger().isLogging() ? "Yes" : "No";
+    else if (id == Scripting::WarnIfUndefinedParameters) return "Yes";
 	else if (id == Audio::Driver)					return const_cast<Data*>(this)->getDeviceManager()->getCurrentAudioDeviceType();
 	else if (id == Audio::Device)
 	{

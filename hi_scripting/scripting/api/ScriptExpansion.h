@@ -94,7 +94,14 @@ public:
 	void clearAttachedCallbacks();
 
 	/** Updates the given automation values and optionally sends out a message. */
-	void updateAutomationValues(var data, bool sendMessage, bool useUndoManager);
+	void updateAutomationValues(var data, var sendMessage, bool useUndoManager);
+
+	/** Returns the amount of seconds since the last preset has been loaded. */
+	double getSecondsSinceLastPresetLoad();
+
+	/** Loads the default user preset (if it's defined in the project). */
+	void resetToDefaultUserPreset();
+	
 
 	/** Creates an object containing the values for every automation ID. */
 	var createObjectForAutomationValues();
@@ -138,21 +145,24 @@ public:
 
 private:
 
-	struct AttachedCallback: public ReferenceCountedObject
+	struct AttachedCallback:	NEW_AUTOMATION_WITH_COMMA(public dispatch::ListenerOwner)
+								public ReferenceCountedObject
 	{
-		AttachedCallback(ScriptUserPresetHandler* parent, MainController::UserPresetHandler::CustomAutomationData::Ptr cData, var f, bool isSynchronous);
+		AttachedCallback(ScriptUserPresetHandler* parent, MainController::UserPresetHandler::CustomAutomationData::Ptr cData, var f, dispatch::DispatchType n);
 
 		~AttachedCallback();
 
-		String id;
-		WeakCallbackHolder customUpdateCallback;
-		WeakCallbackHolder customAsyncUpdateCallback;
-
 		static void onCallbackSync(AttachedCallback& c, var* args);
-
 		static void onCallbackAsync(AttachedCallback& c, int index, float newValue);
 
+		void onUpdate(int index, float value);
+
 		MainController::UserPresetHandler::CustomAutomationData::Ptr cData;
+		IF_NEW_AUTOMATION_DISPATCH(dispatch::library::CustomAutomationSource::Listener listener);
+		WeakCallbackHolder customAsyncUpdateCallback;
+		WeakCallbackHolder customUpdateCallback;
+
+		dispatch::DispatchType n;
 
 		JUCE_DECLARE_WEAK_REFERENCEABLE(AttachedCallback);
 	};
@@ -584,6 +594,9 @@ struct ScriptUnlocker : public juce::OnlineUnlockStatus,
 		/** Checks if the possibleKeyData might contain a key file. */
 		bool isValidKeyFile(var possibleKeyData);
 
+		/** Returns the license key file as File object. */
+		var getLicenseKeyFile();
+
 		/** Returns the user email that was used for the registration. */
 		String getUserEmail() const;
 
@@ -616,5 +629,79 @@ struct ScriptUnlocker : public juce::OnlineUnlockStatus,
 
 	JUCE_DECLARE_WEAK_REFERENCEABLE(ScriptUnlocker);
 };
+
+/** A wrapper around the beatport authentication system. */
+class BeatportManager: public ConstScriptingObject
+{
+public:
+  
+	BeatportManager(ProcessorWithScriptingContent* sp);
+
+	~BeatportManager();
+
+	Identifier getObjectName() const override { RETURN_STATIC_IDENTIFIER("BeatportManager"); }
+
+	// ======================================================================== API Methods */
+
+	/** Sets the product ID dynamically. */
+	void setProductId(const String& productId);
+	
+	/** Requests DRM validation and returns a JSON object with the validation result. */
+	var validate();
+
+	/** Checks if the beatport access is valid. */
+	bool isBeatportAccess();
+
+	// ===================================================================================== */
+
+	/** Returns the folder inside the project repository where the beatport SDK is located. */
+	static File getBeatportProjectFolder(MainController* mc)
+	{
+#if USE_BACKEND
+		auto f = mc->getCurrentFileHandler().getSubDirectory(FileHandlerBase::AdditionalSourceCode).getChildFile("beatport");
+
+		if(!f.isDirectory())
+			f.createDirectory();
+
+		return f;
+#else
+		// this function should never be called in a compiled plugin because it will call into the real SDK...
+		jassertfalse;
+		return {};
+#endif
+
+	}
+
+private:
+
+#if HISE_INCLUDE_BEATPORT
+	struct Pimpl
+	{
+		Pimpl();
+
+		~Pimpl();
+
+		void setProductId(const String& productId);
+
+		var validate();
+
+		bool isBeatportAccess() const;
+
+	private:
+
+		struct Data;
+		
+		// will be created on first usage;
+		Data* data;
+	};
+
+	ScopedPointer<Pimpl> pimpl;
+#endif
+	
+	struct Wrapper;
+
+	JUCE_DECLARE_WEAK_REFERENCEABLE(BeatportManager);
+};
+
 
 } // namespace hise

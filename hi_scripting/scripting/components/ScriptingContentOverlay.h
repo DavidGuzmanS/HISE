@@ -181,6 +181,7 @@ public:
 	void mouseDrag(const MouseEvent& e) override;
 
 	class Dragger : public Component,
+				    public MidiKeyboardFocusTraverser::ParentWithKeyboardFocus,
 					public ComponentWithDocumentation
 	{
 	public:
@@ -518,6 +519,8 @@ public:
 	ScopedPointer<ShapeButton> dragModeButton;
 
 	LassoComponent<ScriptComponent*> lasso;
+
+	bool lassoActive = false;
 
 	ScriptEditHandler* handler;
 };

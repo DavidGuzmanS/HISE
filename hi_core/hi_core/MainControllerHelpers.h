@@ -566,7 +566,44 @@ private:
 	int numLeftOvers = 0;
 };
 
+class AudioRendererBase: public Thread,
+						 public ControlledObject
+{
+public:
 
+	AudioRendererBase(MainController* mc);;
+	~AudioRendererBase() override;;
+
+protected:
+
+	virtual void callUpdateCallback(bool isFinished, double progress) = 0;
+
+	/** Call this after creating the Event buffer content and it will prepare all internal buffers. */
+	void initAfterFillingEventBuffer();
+
+	Array<VariantBuffer::Ptr> channels;
+	OwnedArray<HiseEventBuffer> eventBuffers;
+	
+    bool skipCallbacks = true;
+	bool sendArtificialTransportMessages = false;
+
+private:
+
+	static constexpr int NumThrowAwayBuffers = 12;
+
+	int thisNumThrowAway = 0;
+
+	void cleanup();
+	void run() override;
+	bool renderAudio();
+	AudioSampleBuffer getChunk(int startSample, int numSamples);
+
+	int numSamplesToRender = 0;
+	int numChannelsToRender = 0;
+	int numActualSamples = 0;
+	float* splitData[NUM_MAX_CHANNELS];
+	int bufferSize = 0;
+};
 
 
 } // namespace hise

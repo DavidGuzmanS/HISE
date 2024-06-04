@@ -46,6 +46,7 @@ public:
 	virtual ~ScriptParameterHandler() {}
 
 	virtual Identifier getParameterId(int index) const = 0;
+	virtual int getParameterIndexForIdentifier(const Identifier& id) const = 0;
 	virtual int getNumParameters() const = 0;
 	virtual void setParameter(int index, float newValue) = 0;
 	virtual float getParameter(int index) const = 0;
@@ -372,9 +373,17 @@ struct WeakCallbackHolder : private ScriptingObject
 
 	void reportError(const Result& r);
 
+	void setTrackIndex(uint64_t trackIndexToUse)
+	{
+		trackIndex = trackIndexToUse;
+	}
+
 private:
 
 	var getThisObject();
+
+	Identifier cid;
+	uint64_t trackIndex = 0;
 
 	bool highPriority = false;
 	int numExpectedArgs;

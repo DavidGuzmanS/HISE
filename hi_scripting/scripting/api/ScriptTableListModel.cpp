@@ -48,6 +48,27 @@ ScriptTableListModel::ScriptTableListModel(ProcessorWithScriptingContent* p, con
 	eventTypesForCallback.add(EventType::DoubleClick);
 	eventTypesForCallback.add(EventType::ReturnKey);
 	eventTypesForCallback.add(EventType::SpaceKey);
+
+	if (tableMetadata.hasProperty("SliderRangeIdSet"))
+	{
+		auto sId = tableMetadata.getProperty("SliderRangeIdSet", "scriptnode").toString();
+
+		static const StringArray list = { "scriptnode", "ScriptComponent", "MidiAutomation" , "MidiAutomationFull" };
+
+		auto idx = list.indexOf(sId);
+
+		if (idx == -1)
+			idx = 0;
+
+		String l;
+
+		for (auto& a : RangeHelpers::getRangeIds(false, (RangeHelpers::IdSet)idx))
+			l << a.toString() << ", ";
+
+		debugToConsole(dynamic_cast<Processor*>(p), "using range ids { " + l.upToLastOccurrenceOf(", ", false, false) + " } for table sliders");
+
+		rangeSet = (RangeHelpers::IdSet)idx;
+	}
 }
 
 bool ScriptTableListModel::isMultiColumn() const
@@ -65,7 +86,7 @@ void ScriptTableListModel::paintCell(Graphics& g, int rowNumber, int columnId, i
         return;
     
 	auto isClicked = lastClickedCell.y == rowNumber && lastClickedCell.x == columnId;
-	auto isHover = hoverPos.y == rowNumber && hoverPos.x == columnId;
+	auto isHover = hoverPos.y == rowNumber && (hoverPos.x == columnId || !isMultiColumn());
 
 	lafToUse->drawTableCell(g, d, s.toString(), rowNumber, columnId - 1, width, height, rowIsSelected, isClicked, isHover);
 }
@@ -79,7 +100,7 @@ struct ComponentUpdateHelpers
 	{
 		void mouseDown(const MouseEvent& e) override
 		{
-			if (onShiftClick(e))
+            if (performModifierAction(e, false))
 				return;
 			else
 				juce::Slider::mouseDown(e);
@@ -167,16 +188,18 @@ struct ComponentUpdateHelpers
 		}
 	}
 
-	static bool updateSliderProperties(ShiftSlider* s, const var& value)
+	static bool updateSliderProperties(ShiftSlider* s, const var& value, RangeHelpers::IdSet idSet, bool changeOnDrag)
 	{
 		if (value.isObject())
 		{
-			auto r = scriptnode::RangeHelpers::getDoubleRange(value);
+			auto r = scriptnode::RangeHelpers::getDoubleRange(value, idSet);
 
 			s->setRange(r.getRange(), r.rng.interval);
 			s->setSkewFactor(r.rng.skew);
 			s->setTextValueSuffix(value["suffix"]);
 			s->setDoubleClickReturnValue(value.hasProperty("defaultValue"), (double)value["defaultValue"]);
+
+			s->setChangeNotificationOnlyOnRelease(!changeOnDrag);
 
 			s->enableShiftTextInput = value.getProperty("showTextBox", true);
 
@@ -261,7 +284,16 @@ Component* ScriptTableListModel::refreshComponentForCell(int rowNumber, int colu
 			{
 				s->getProperties().set("RowIndex", rowNumber);
 
-				ComponentUpdateHelpers::updateSliderProperties(s, value);
+				var vToUse = value;
+
+
+				if(rangeSet != RangeHelpers::IdSet::scriptnode)
+				{
+					SimpleReadWriteLock::ScopedReadLock sl(rowLock);
+					vToUse = rowData[rowNumber];
+				}
+					
+				ComponentUpdateHelpers::updateSliderProperties(s, vToUse, rangeSet, shouldSendCallOnDrag());
 				ComponentUpdateHelpers::updateValue(s, value);
 			}
 			
@@ -317,6 +349,8 @@ Component* ScriptTableListModel::refreshComponentForCell(int rowNumber, int colu
 				
 				auto r = (int)b->getProperties()["RowIndex"];
 
+				SimpleReadWriteLock::ScopedReadLock sl(rowLock);
+
 				if (auto obj = rowData[r].getDynamicObject())
 				{
 					obj->setProperty(id, b->getToggleState());
@@ -352,6 +386,8 @@ Component* ScriptTableListModel::refreshComponentForCell(int rowNumber, int colu
 			{
 				auto id = columnMetadata[c - 1][PropertyIds::ID].toString();
 
+				SimpleReadWriteLock::ScopedReadLock sl(rowLock);
+
 				auto r_ = (int)s_->getProperties()["RowIndex"];
 
 				if (auto obj = rowData[r_].getDynamicObject())
@@ -366,8 +402,17 @@ Component* ScriptTableListModel::refreshComponentForCell(int rowNumber, int colu
 
 			s->setTextBoxStyle(Slider::NoTextBox, false, 0, 0);
 
-			if (!ComponentUpdateHelpers::updateSliderProperties(s, value))
-				ComponentUpdateHelpers::updateSliderProperties(s, cd);
+			var vToUse = value;
+
+			if (rangeSet != RangeHelpers::IdSet::scriptnode)
+			{
+				SimpleReadWriteLock::ScopedReadLock sl(rowLock);
+				vToUse = rowData[rowNumber];
+			}
+				
+
+			if (!ComponentUpdateHelpers::updateSliderProperties(s, vToUse, rangeSet, shouldSendCallOnDrag()))
+				ComponentUpdateHelpers::updateSliderProperties(s, cd, rangeSet, shouldSendCallOnDrag());
 
 			ComponentUpdateHelpers::updateValue(s, value);
 
@@ -400,6 +445,8 @@ Component* ScriptTableListModel::refreshComponentForCell(int rowNumber, int colu
 				auto r_ = (int)cb_->getProperties()["RowIndex"];
 
 				var value = ComponentUpdateHelpers::getValue(cb_, valueMode);
+
+				SimpleReadWriteLock::ScopedReadLock sl(rowLock);
 
 				if (auto obj = rowData[r_].getDynamicObject())
 				{
@@ -438,8 +485,7 @@ void ScriptTableListModel::setup(juce::TableListBox* t)
 
 	t->setLookAndFeel(&fallback);
 
-	if(isMultiColumn())
-		tableRepainters.add(new TableRepainter(t, *this));
+	tableRepainters.add(new TableRepainter(t, *this));
 
 	int idx = 1;
 
@@ -487,6 +533,7 @@ ScriptTableListModel::LookAndFeelMethods::~LookAndFeelMethods()
 
 int ScriptTableListModel::getNumRows()
 {
+	SimpleReadWriteLock::ScopedReadLock sl(rowLock);
 	return rowData.size();
 }
 
@@ -494,13 +541,17 @@ void ScriptTableListModel::paintRowBackground(Graphics& g, int rowNumber, int wi
 {
 	auto lafToUse = laf != nullptr ? laf : &fallback;
 
-	lafToUse->drawTableRowBackground(g, d, rowNumber, width, height, rowIsSelected);
+	auto rowIsHovered = hoverPos.y == rowNumber;
+
+	lafToUse->drawTableRowBackground(g, d, rowNumber, width, height, rowIsSelected, rowIsHovered);
 }
 
 var ScriptTableListModel::getCellValue(int rowIndex, int columnIndex) const
 {
 	if(isPositiveAndBelow(columnIndex, columnMetadata.size()))
 	{
+		SimpleReadWriteLock::ScopedReadLock sl(rowLock);
+
 		auto id = columnMetadata[columnIndex][scriptnode::PropertyIds::ID].toString();
             
 		if(isPositiveAndBelow(rowIndex, rowData.size()))
@@ -539,7 +590,11 @@ void ScriptTableListModel::addAdditionalCallback(const std::function<void(int co
 }
 
 var ScriptTableListModel::getRowData() const
-{ return rowData.clone(); }
+{
+	SimpleReadWriteLock::ScopedReadLock sl(rowLock);
+
+	return rowData.clone();
+}
 
 int ScriptTableListModel::defaultSorter(const var& v1, const var& v2)
 {
@@ -576,7 +631,7 @@ void ScriptTableListModel::TableRepainter::mouseMove(const MouseEvent& e)
 	repaintIfCellChange(e);
 }
 
-void ScriptTableListModel::LookAndFeelMethods::drawTableRowBackground(Graphics& g, const LookAndFeelData& d, int rowNumber, int width, int height, bool rowIsSelected)
+void ScriptTableListModel::LookAndFeelMethods::drawTableRowBackground(Graphics& g, const LookAndFeelData& d, int rowNumber, int width, int height, bool rowIsSelected, bool rowIsHovered)
 {
 	Rectangle<int> a(0, 0, width, height);
 
@@ -730,6 +785,15 @@ void ScriptTableListModel::setTableColumnData(var cd)
 	}
 }
 
+void ScriptTableListModel::handleAsyncUpdate()
+{
+	if(pendingEvent)
+	{
+		sendCallback(pendingEvent.rowId, pendingEvent.columnId, pendingEvent.value, pendingEvent.type, sendNotificationSync);
+		pendingEvent = {};
+	}
+}
+
 void ScriptTableListModel::setFont(Font f, Justification c)
 {
 	d.f = f;
@@ -778,6 +842,8 @@ void ScriptTableListModel::sortOrderChanged(int newSortColumnId, bool isForwards
 		const bool sortForward;
 		SortFunction sf;
 	};
+
+	SimpleReadWriteLock::ScopedReadLock sl(rowLock);
 
 	if (auto a = rowData.getArray())
 	{
@@ -836,6 +902,7 @@ Result ScriptTableListModel::setEventTypesForValueCallback(var eventTypeList)
 
 int ScriptTableListModel::getOriginalRowIndex(int rowIndex) const
 {
+	SimpleReadWriteLock::ScopedReadLock sl(rowLock);
 	auto item = rowData[rowIndex];
 	return originalRowData.indexOf(item);
 }
@@ -853,7 +920,15 @@ void ScriptTableListModel::cellClicked(int rowNumber, int columnId, const MouseE
 
     
 	TableListBoxModel::cellClicked(rowNumber, columnId, e);
-	sendCallback(rowNumber, columnId, rowData[rowNumber], EventType::SingleClick);
+
+	var c;
+
+    {
+		SimpleReadWriteLock::ScopedReadLock sl(rowLock);
+	    c = rowData[rowNumber];
+    }
+
+	sendCallback(rowNumber, columnId, c, EventType::SingleClick);
 }
 
 void ScriptTableListModel::cellDoubleClicked(int rowNumber, int columnId, const MouseEvent& e)
@@ -884,19 +959,41 @@ void ScriptTableListModel::selectedRowsChanged(int lastRowSelected)
 	if (lastRowSelected == -1)
 		return;
 
-	sendCallback(lastRowSelected, lastClickedCell.x, rowData[lastRowSelected], EventType::Selection);
+	var c;
+
+	{
+		SimpleReadWriteLock::ScopedReadLock sl(rowLock);
+		c = rowData[lastRowSelected];
+	}
+
+	sendCallback(lastRowSelected, lastClickedCell.x, c, EventType::Selection);
 }
 
 void ScriptTableListModel::deleteKeyPressed(int lastRowSelected)
 {
 	TableListBoxModel::deleteKeyPressed(lastRowSelected);
-	sendCallback(lastRowSelected, 0, rowData[lastRowSelected], EventType::DeleteRow);
+
+	var c;
+
+	{
+		SimpleReadWriteLock::ScopedReadLock sl(rowLock);
+		c = rowData[lastRowSelected];
+	}
+
+	sendCallback(lastRowSelected, 0, c, EventType::DeleteRow);
 }
 
 void ScriptTableListModel::returnKeyPressed(int lastRowSelected)
 {
 	TableListBoxModel::returnKeyPressed(lastRowSelected);
-	sendCallback(lastRowSelected, lastClickedCell.x, rowData[lastRowSelected], EventType::ReturnKey);
+
+	var c;
+	{
+		SimpleReadWriteLock::ScopedReadLock sl(rowLock);
+		c = rowData[lastRowSelected];
+	}
+
+	sendCallback(lastRowSelected, lastClickedCell.x, c, EventType::ReturnKey);
 }
 
 void ScriptTableListModel::setTableSortFunction(var newSortFunction)
@@ -927,14 +1024,18 @@ void ScriptTableListModel::setTableSortFunction(var newSortFunction)
 
 void ScriptTableListModel::setRowData(var rd)
 {
-	originalRowData = rd.clone();
+	{
+		SimpleReadWriteLock::ScopedWriteLock sl(rowLock);
 
-	Array<var> newData;
+		originalRowData = rd.clone();
 
-	if (auto a = originalRowData.getArray())
-		newData.addArray(*a);
+		Array<var> newData;
 
-	rowData = var(newData);
+		if (auto a = originalRowData.getArray())
+			newData.addArray(*a);
+
+		rowData = var(newData);
+	}
 
 	if (d.sortColumnId != 0)
 	{
@@ -950,13 +1051,27 @@ void ScriptTableListModel::setCallback(var callback)
 	{
 		cellCallback = WeakCallbackHolder(pwsc, nullptr, callback, 1);
 		cellCallback.incRefCount();
+		cellCallback.addAsSource(this, "cellCallback");
 	}
 }
 
-void ScriptTableListModel::sendCallback(int rowId, int columnId, var value, EventType type)
+void ScriptTableListModel::sendCallback(int rowId, int columnId, var value, EventType type, NotificationType n)
 {
 	if (cellCallback)
 	{
+		// a click on a cell will fire a selection with the old row index so we have to defer it and be overriden
+		// with the subsequent click event
+		if(isMultiColumn() && (type == EventType::Selection || type == EventType::SingleClick) && n == sendNotificationAsync)
+		{
+			pendingEvent = {};
+			pendingEvent.rowId = rowId;
+			pendingEvent.columnId = columnId;
+			pendingEvent.value = value;
+			pendingEvent.type = type;
+			triggerAsyncUpdate();
+			return;
+		}
+
 		auto obj = new DynamicObject();
 
 		switch (type)
@@ -992,6 +1107,8 @@ void ScriptTableListModel::sendCallback(int rowId, int columnId, var value, Even
 			obj->setProperty("Type", "Undo");
 		case EventType::SpaceKey:
 			obj->setProperty("Type", "SpaceKey");
+        default:
+            break;
 		}
 
 		if (type == EventType::SetValue ||
@@ -1003,6 +1120,9 @@ void ScriptTableListModel::sendCallback(int rowId, int columnId, var value, Even
 				return;
 
 			lastClickedCell = newCell;
+
+	
+			SimpleReadWriteLock::ScopedReadLock sl(rowLock);
 
 			if(rowData.isArray() && isPositiveAndBelow(rowId, rowData.size()))
 				value = rowData[rowId];
@@ -1074,7 +1194,13 @@ bool ScriptTableListModel::TableRepainter::keyPressed(const KeyPress& key, Compo
 	{
         if(parent.processSpaceKey)
         {
-            parent.sendCallback(parent.lastClickedCell.x, parent.lastClickedCell.y, parent.rowData[parent.lastClickedCell.y], EventType::SpaceKey);
+			var c;
+			{
+				SimpleReadWriteLock::ScopedReadLock sl(parent.rowLock);
+				c = parent.rowData[parent.lastClickedCell.y];
+			}
+			
+            parent.sendCallback(parent.lastClickedCell.x, parent.lastClickedCell.y, c, EventType::SpaceKey);
             
             return true;
         }
@@ -1097,8 +1223,9 @@ void ScriptTableListModel::TableRepainter::mouseDown(const MouseEvent& e)
 	if (parent.lastClickedCell.y == parent.hoverPos.y)
 		send = true;
 
-	parent.lastClickedCell = parent.hoverPos;
-
+	if(dynamic_cast<ScrollBar*>(e.eventComponent) == nullptr)
+		parent.lastClickedCell = parent.hoverPos;
+	
 	if (send)
 		parent.selectedRowsChanged(parent.lastClickedCell.y);
 
@@ -1107,8 +1234,10 @@ void ScriptTableListModel::TableRepainter::mouseDown(const MouseEvent& e)
 
 void ScriptTableListModel::TableRepainter::mouseExit(const MouseEvent& event)
 {
-	t.getComponent()->repaintRow(parent.hoverPos.y);
-	parent.hoverPos = {};
+	if(parent.hoverPos.y != -1)
+		t.getComponent()->repaintRow(parent.hoverPos.y);
+
+	parent.hoverPos = { 0, -1 };
 }
 
 void ScriptTableListModel::TableRepainter::repaintIfCellChange(const MouseEvent& e)
@@ -1117,25 +1246,29 @@ void ScriptTableListModel::TableRepainter::repaintIfCellChange(const MouseEvent&
 	auto pos = te.getPosition();
 
 	Point<int> s;
-
+	
 	s.y = t.getComponent()->getRowContainingPosition(pos.x, pos.y);
 
-	for (int i = 0; i < parent.columnMetadata.size(); i++)
+	if(parent.isMultiColumn())
 	{
-		auto c = t.getComponent()->getCellPosition(i + 1, s.y, true);
-
-		if (c.isEmpty())
-			break;
-
-		if (c.contains(pos))
+		for (int i = 0; i < parent.columnMetadata.size(); i++)
 		{
-			s.x = i + 1;
-			break;
+			auto c = t.getComponent()->getCellPosition(i + 1, s.y, true);
+
+			if (c.isEmpty())
+				break;
+
+			if (c.contains(pos))
+			{
+				s.x = i + 1;
+				break;
+			}
 		}
 	}
 
 	if (parent.hoverPos != s)
 	{
+		if(parent.hoverPos.y != -1)
 		t->repaintRow(parent.hoverPos.y);
 		parent.hoverPos = s;
 		t->repaintRow(parent.hoverPos.y);

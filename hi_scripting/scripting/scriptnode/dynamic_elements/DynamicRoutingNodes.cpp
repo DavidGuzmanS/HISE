@@ -41,10 +41,10 @@ namespace routing
 
 #if USE_BACKEND
 
-struct SelectorEditor: public ScriptnodeExtraComponent<selector>
+struct SelectorEditor: public ScriptnodeExtraComponent<selector_base>
 {
-    SelectorEditor(selector* s, PooledUIUpdater* u):
-        ScriptnodeExtraComponent<selector>(s, u)
+    SelectorEditor(selector_base* s, PooledUIUpdater* u):
+        ScriptnodeExtraComponent<selector_base>(s, u)
     {
         setSize(256, 80);
         
@@ -95,7 +95,7 @@ struct SelectorEditor: public ScriptnodeExtraComponent<selector>
             
             for(int i = 0; i < obj->numChannels; i++)
             {
-                auto sourceIndex = jlimit(0, size-1, obj->channelIndex + i);
+                auto sourceIndex = jlimit(0, size-1, obj->getChannelIndex() + i);
                 auto targetIndex = jlimit(0, size-1, i);
                 
                 if(obj->selectOutput)
@@ -113,7 +113,9 @@ struct SelectorEditor: public ScriptnodeExtraComponent<selector>
     
     static Component* createExtraComponent(void* obj, PooledUIUpdater* updater)
     {
-        return new SelectorEditor(static_cast<ObjectType*>(obj), updater);
+		auto mn = static_cast<mothernode*>(obj);
+		auto t = dynamic_cast<selector_base*>(mn);
+        return new SelectorEditor(t, updater);
     }
     
     void timerCallback() override
@@ -158,6 +160,20 @@ using SelectorEditor = HostHelpers::NoExtraComponent;
 #endif
 
 
+struct ProcessingCheck
+{
+	void initialise(NodeBase* n)
+	{
+		b = n;
+	}
+
+	void prepare(PrepareSpecs ps)
+	{
+		ScriptnodeExceptionHandler::validateMidiProcessingContext(b);
+	}
+
+	NodeBase* b;
+};
 
 Factory::Factory(DspNetwork* n) :
 	NodeFactory(n)
@@ -172,11 +188,14 @@ Factory::Factory(DspNetwork* n) :
 	registerNode<ms_encode>();
 	registerNode<ms_decode>();
 	registerNode<public_mod>();
-    registerNode<selector, SelectorEditor>();
+    registerPolyNode<selector<1>, selector<NUM_POLYPHONIC_VOICES>, SelectorEditor>();
     
 	registerNodeRaw<GlobalSendNode>();
 	registerPolyNodeRaw<GlobalReceiveNode<1>, GlobalReceiveNode<NUM_POLYPHONIC_VOICES>>();
 	registerNodeRaw<GlobalCableNode>();
+
+	registerPolyModNode<event_data_reader<1, ProcessingCheck>, event_data_reader<NUM_POLYPHONIC_VOICES, ProcessingCheck>, ModulationSourceBaseComponent>();
+	registerPolyNode<event_data_writer<1, ProcessingCheck>, event_data_writer<NUM_POLYPHONIC_VOICES, ProcessingCheck>>();
 }
 
 }
@@ -230,6 +249,8 @@ void dynamic::restoreConnections(Identifier id, var newValue)
 		if (safePtr.get() == nullptr)
 			return true;
 
+        auto ok = false;
+        
 		if (id == PropertyIds::Value && safePtr->parentNode != nullptr)
 		{
 			auto ids = StringArray::fromTokens(newValue.toString(), ";", "");
@@ -237,7 +258,6 @@ void dynamic::restoreConnections(Identifier id, var newValue)
 			ids.removeEmptyStrings(true);
 
 			auto network = safePtr->parentNode->getRootNetwork();
-
 			auto list = network->getListOfNodesWithPath(getReceiveId(), false);
 
 			for (auto n : list)
@@ -252,14 +272,14 @@ void dynamic::restoreConnections(Identifier id, var newValue)
 					{
 						source = safePtr.get();
 						source->connect(ro.as<dynamic_receive>());
-						return true;
+                        ok = true;
 					}
 					else
 					{
 						if (source == safePtr.get())
 						{
 							source = &(ro.as<dynamic_receive>().null);
-							return true;
+                            ok = true;
 						}
 							
 					}
@@ -267,7 +287,7 @@ void dynamic::restoreConnections(Identifier id, var newValue)
 			}
 		}
 
-		return false;
+		return ok;
 	};
 
 	parentNode->getRootNetwork()->addPostInitFunction(f);

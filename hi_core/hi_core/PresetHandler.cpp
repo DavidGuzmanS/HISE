@@ -94,7 +94,8 @@ void UserPresetHelpers::saveUserPreset(ModulatorSynthChain *chain, const String&
 
 			if (notify)
 			{
-				chain->getMainController()->getUserPresetHandler().setCurrentlyLoadedFile(presetFile);
+
+				chain->getMainController()->getUserPresetHandler().currentlyLoadedFile = presetFile;
 				chain->getMainController()->getUserPresetHandler().sendRebuildMessage();
 			}
 		}
@@ -191,28 +192,17 @@ StringArray UserPresetHelpers::checkRequiredExpansions(MainController* mc, Value
 
 void UserPresetHelpers::loadUserPreset(ModulatorSynthChain *chain, const File &fileToLoad)
 {
-	auto xml = XmlDocument::parse(fileToLoad);
-    
-    if(xml != nullptr)
-    {
-		ValueTree parent = ValueTree::fromXml(*xml);
-        
-		chain->getMainController()->getDebugLogger().logMessage("### Loading user preset " + fileToLoad.getFileNameWithoutExtension() + "\n");
-
-        if (parent.isValid())
-        {
-			chain->getMainController()->getUserPresetHandler().setCurrentlyLoadedFile(fileToLoad);
-
-            loadUserPreset(chain, parent);
-        }
-    }
+	chain->getMainController()->getDebugLogger().logMessage("### Loading user preset " + fileToLoad.getFileNameWithoutExtension() + "\n");
+	chain->getMainController()->loadUserPresetAsync(fileToLoad);
 }
 
+#if 0
 void UserPresetHelpers::loadUserPreset(ModulatorSynthChain* chain, const ValueTree &parent)
 {
 	chain->getMainController()->loadUserPresetAsync(parent);
 
 }
+#endif
 
 
 
@@ -853,10 +843,15 @@ bool ProjectHandler::isValidProjectFolder(const File &file) const
 
 bool ProjectHandler::anySubdirectoryExists(const File& possibleProjectFolder) const
 {
-	return	possibleProjectFolder.getChildFile("Scripts").isDirectory() ||
-			possibleProjectFolder.getChildFile("SampleMaps").isDirectory() ||
-			possibleProjectFolder.getChildFile("XmlPresetBackups").isDirectory();
+    for(const auto& dir: getSubDirectoryIds())
+    {
+        auto id = getIdentifier(dir);
+        id.removeCharacters("/");
+        if(possibleProjectFolder.getChildFile(id).isDirectory())
+            return true;
+    }
 
+    return false;
 }
 
 File ProjectHandler::getWorkDirectory() const
@@ -3505,15 +3500,30 @@ void ModuleStateManager::restoreFromValueTree(const ValueTree &v)
 
 	for (auto m : v)
 	{
-		didSomething = true;
-
 		auto id = m["ID"].toString();
+
+		bool isModuleState = false;
+
+		for(auto ms: modules)
+		{
+			if(ms->id == id)
+			{
+				didSomething = true;
+				isModuleState = true;
+				break;
+			}
+				
+		}
+
+		if(!isModuleState)
+			continue;
+		
 		auto p = ProcessorHelpers::getFirstProcessorWithName(chain, id);
 
 		if (p != nullptr)
 		{
 			auto mcopy = m.createCopy();
-
+			
 			for (auto ms : modules)
 			{
 				if (ms->id == id)
@@ -3526,7 +3536,7 @@ void ModuleStateManager::restoreFromValueTree(const ValueTree &v)
 			if (p->getType().toString() == mcopy["Type"].toString())
 			{
 				p->restoreFromValueTree(mcopy);
-				p->sendPooledChangeMessage();
+				p->sendOtherChangeMessage(dispatch::library::ProcessorChangeEvent::Preset, dispatch::sendNotificationAsync);
 			}
 		}
 	}

@@ -97,8 +97,14 @@ FilterResponse FilterInfo::getResponse (double inputFrequency) const
     }
     
     std::complex <double> transferFunction = num / den;
-    
-    return FilterResponse (abs (transferFunction) * gainValue, arg (transferFunction));
+
+    auto mag = abs(transferFunction);
+
+    mag = std::pow(mag, (float)order);
+
+    auto phase = arg(transferFunction);
+
+    return FilterResponse (mag * gainValue, phase);
 }
 
 void FilterInfo::zeroCoeffs()
@@ -116,7 +122,7 @@ void FilterInfo::zeroCoeffs()
     denominatorCoeffs [0] = 1;
 }
  
-bool FilterInfo::setCoefficients(int /*filterNum*/, double /*sampleRate*/, IIRCoefficients newCoefficients)
+bool FilterInfo::setCoefficients(int /*filterNum*/, double /*sampleRate*/, std::pair<IIRCoefficients, int> newCoefficients)
 {
 	numNumeratorCoeffs = 3;
     numDenominatorCoeffs = 3;
@@ -124,18 +130,19 @@ bool FilterInfo::setCoefficients(int /*filterNum*/, double /*sampleRate*/, IIRCo
     numeratorCoeffs.resize (3, 0);
     denominatorCoeffs.resize (3, 0);
 
-	coefficients = newCoefficients;
+	coefficients = newCoefficients.first;
+    order = newCoefficients.second;
         
     zeroCoeffs();
 
 	for (int numOrder = 0; numOrder < 3; numOrder++)
     {
-        numeratorCoeffs [numOrder] = newCoefficients.coefficients[numOrder];
+        numeratorCoeffs [numOrder] = newCoefficients.first.coefficients[numOrder];
     }
         
     for (int denOrder = 1; denOrder < 3; denOrder++)
     {
-        denominatorCoeffs [denOrder] = newCoefficients.coefficients [denOrder + 2];
+        denominatorCoeffs [denOrder] = newCoefficients.first.coefficients [denOrder + 2];
     }
     
     gainValue = 1;
@@ -248,7 +255,8 @@ bool FilterDataObject::Broadcaster::registerAtObject(ComplexDataUIBase* obj)
 		InternalData d;
 		d.broadcaster = this;
 		f->internalData.insert(d);
-		return true;
+        f->getUpdater().sendDisplayChangeMessage(f->internalData.size()-1, sendNotificationAsync, true);
+        return true;
 	}
 	
 	return false;
@@ -278,38 +286,16 @@ bool FilterDataObject::Broadcaster::deregisterAtObject(ComplexDataUIBase* obj)
 FilterDataObject::FilterDataObject() :
 	ComplexDataUIBase()
 {
-
+    getUpdater().addEventListener(this);
 }
 
 FilterDataObject::~FilterDataObject()
 {
+    getUpdater().removeEventListener(this);
 	internalData.clear();
 }
 
-void FilterDataObject::setCoefficients(Broadcaster* b, IIRCoefficients newCoefficients)
-{
-	SimpleReadWriteLock::ScopedReadLock sl(getDataLock());
-
-	auto isMessageThread = MessageManager::getInstance()->isThisTheMessageThread();
-
-	bool found = false;
-
-	for (auto& d : internalData)
-	{
-		if (d.broadcaster == b)
-		{
-			d.coefficients = newCoefficients;
-			found = true;
-			break;
-		}
-	}
-
-	if (sampleRate > 0.0 && found)
-		getUpdater().sendDisplayChangeMessage(sampleRate, isMessageThread ? sendNotificationSync : sendNotificationAsync, true);
-}
-
-
-juce::IIRCoefficients FilterDataObject::getCoefficients(int index) const
+std::pair<juce::IIRCoefficients, int> FilterDataObject::getCoefficients(int index) const
 {
 	SimpleReadWriteLock::ScopedReadLock sl(getDataLock());
 
@@ -317,7 +303,7 @@ juce::IIRCoefficients FilterDataObject::getCoefficients(int index) const
 	return internalData[index].coefficients;
 }
 
-juce::IIRCoefficients FilterDataObject::getCoefficientsForBroadcaster(Broadcaster* b) const
+std::pair<juce::IIRCoefficients, int> FilterDataObject::getCoefficientsForBroadcaster(Broadcaster* b) const
 {
 	SimpleReadWriteLock::ScopedReadLock sl(getDataLock());
 
@@ -337,4 +323,17 @@ int FilterDataObject::getNumCoefficients() const
 	return internalData.size();
 }
 
+void FilterDataObject::onComplexDataEvent(ComplexDataUIUpdaterBase::EventType t, var data)
+{
+	if(t == ComplexDataUIUpdaterBase::EventType::DisplayIndex)
+	{
+		for(auto& d: internalData)
+		{
+			if(auto f = dynamic_cast<scriptnode::data::filter_base*>(d.broadcaster.get()))
+			{
+                d.coefficients = f->getApproximateCoefficients();
+			}
+		}
+	}
+}
 } // namespace hise

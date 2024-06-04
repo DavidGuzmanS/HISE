@@ -181,6 +181,8 @@ public:
 
 		virtual bool onDragAction(DragAction a, ScriptComponent* source, var& data) { return false; }
 
+		virtual void suspendStateChanged(bool isSuspended) {};
+
 	private:
 
 		friend class WeakReference<RebuildListener>;
@@ -210,6 +212,7 @@ public:
 		public ConstScriptingObject,
 		public AssignableObject,
 		public SafeChangeBroadcaster,
+		NEW_AUTOMATION_WITH_COMMA(dispatch::ListenerOwner)
 		public UpdateDispatcher::Listener
 	{
 		using Ptr = ReferenceCountedObjectPtr<ScriptComponent>;
@@ -379,8 +382,11 @@ public:
 		var getNonDefaultScriptObjectProperties() const;
 
 		String getScriptObjectPropertiesAsJSON() const;
-		
-		
+
+		void updateAutomation(int, float newValue)
+		{
+			setValue(newValue);
+		}
 
 		bool isPropertyDeactivated(Identifier &id) const;
 		bool hasProperty(const Identifier& id) const;
@@ -524,6 +530,9 @@ public:
 
 		/** Adds a callback to react on key presses (when this component is focused). */
 		void setKeyPressCallback(var keyboardFunction);
+
+		/** Registers a selection of key presses to be consumed by this component. */
+		void setConsumedKeyPresses(var listOfKeys);
 
 		/** Call this method in order to give away the focus for this component. */
 		void loseFocus();
@@ -731,6 +740,10 @@ public:
 
 		MacroControlledObject::ModulationPopupData::Ptr modulationData;
 
+        bool consumedCalled = false;
+		bool catchAllKeys = true;
+		Array<juce::KeyPress> registeredKeys;
+
 		WeakCallbackHolder keyboardCallback;
 
 		struct AsyncControlCallbackSender : private UpdateDispatcher::Listener
@@ -775,6 +788,8 @@ public:
 		ValueTree propertyTree;
 
 		Array<Identifier> scriptChangedProperties;
+
+		IF_NEW_AUTOMATION_DISPATCH(dispatch::library::CustomAutomationSource::Listener automationListener);
 
         struct SubComponentNotifier: public AsyncUpdater
         {
@@ -854,9 +869,47 @@ public:
 			showTextBox,
 			scrollWheel,
 			enableMidiLearn,
+			sendValueOnDrag,
 			numProperties,
 		};
 
+        struct ModifierObject: public ConstScriptingObject
+        {
+            ModifierObject(ProcessorWithScriptingContent* sp):
+               ConstScriptingObject(sp, 12)
+            {
+                using Action = SliderWithShiftTextBox::ModifierObject::Action;
+                using Flags = ModifierKeys::Flags;
+                
+                addConstant("TextInput", "TextInput");
+                addConstant("FineTune", "FineTune");
+                addConstant("ResetToDefault", "ResetToDefault");
+                addConstant("ContextMenu", "ContextMenu");
+                
+                static const String doubleClick("doubleClick");
+                static const String rightClick("rightClick");
+                static const String shiftDown("shiftDown");
+                static const String cmdDown("cmdDown");
+                static const String altDown("altDown");
+                static const String ctrlDown("ctrlDown");
+                static const String disabled("disabled");
+                static const String noModKey("noKeyModifier");
+                
+                addConstant(disabled, 0);
+                addConstant(noModKey, SliderWithShiftTextBox::ModifierObject::noKeyModifier);
+                addConstant(shiftDown, Flags::shiftModifier);
+                addConstant(rightClick, Flags::rightButtonModifier);
+                addConstant(cmdDown, Flags::commandModifier);
+                addConstant(altDown, Flags::altModifier);
+                addConstant(ctrlDown, Flags::ctrlModifier);
+                addConstant(doubleClick, SliderWithShiftTextBox::ModifierObject::doubleClickModifier);
+            };
+            
+            static Identifier getStaticObjectName() { RETURN_STATIC_IDENTIFIER("Modifiers"); }
+            
+            Identifier getObjectName() const override { return getStaticObjectName(); }
+        };
+        
 		ScriptSlider(ProcessorWithScriptingContent *base, Content *parentContent, Identifier name_, int x, int y, int, int);
 		~ScriptSlider();
 
@@ -905,6 +958,12 @@ public:
 		/** Sets the upper range end to the given value. */
 		void setMaxValue(double max) noexcept;
 
+        /** Creates a object with constants for setModifiers(). */
+        var createModifiers();
+        
+        /** Sets the modifiers for different actions using a JSON object. */
+        void setModifiers(String action, var modifiers);
+        
 		/** Returns the lower range end. */
 		double getMinValue() const;
 
@@ -922,9 +981,13 @@ public:
 		Slider::SliderStyle styleId;
 		Image getImage() const { return image ? *image.getData() : Image(); };
 		var sliderValueFunction;
+        var modObject;
 
+        
 	private:
 
+        
+        
 		double minimum, maximum;
 		PooledImage image;
 
@@ -1014,6 +1077,7 @@ public:
 			FontStyle,
 			enableMidiLearn,
             popupAlignment,
+            useCustomPopup,
 			numProperties
 		};
 
@@ -1255,6 +1319,7 @@ public:
 			ShowValueOverlay,
 			SliderPackIndex,
 			CallbackOnMouseUpOnly,
+			StepSequencerMode,
 			numProperties
 		};
 
@@ -1293,6 +1358,9 @@ public:
 
 		/** Sets all slider values to the given value. If value is a number it will be filled with the number. If it's a buffer (or array) it will set the values accordingly (without resizing the slider packs). */
 		void setAllValues(var value);
+
+		/** Like setAllValues, but with undo support (if useUndoManager is enabled). */
+		void setAllValuesWithUndo(var value);
 
 		/** Returns the number of sliders. */
 		int getNumSliders() const;
@@ -1344,6 +1412,7 @@ public:
 			showFileName,
 			sampleIndex,
 			enableRange,
+			loadWithLeftClick,
 			numProperties
 		};
 
@@ -1731,6 +1800,8 @@ public:
 		String fileDropExtension;
 		String fileDropLevel;
 
+		dispatch::AccumulatedFlowManager flowManager;
+
 	private:
 
 #if HISE_INCLUDE_RLOTTIE
@@ -2030,6 +2101,27 @@ public:
 		Type t;
 	};
 
+    struct TextInputDataBase: public ReferenceCountedObject
+    {
+        using Ptr = ReferenceCountedObjectPtr<TextInputDataBase>;
+        
+        TextInputDataBase(const String& parentId_):
+          parentId(parentId_)
+        {};
+        
+        virtual ~TextInputDataBase() {};
+        
+        virtual void show(Component* parentComponent) = 0;
+        
+        bool done = false;
+        String parentId;
+        
+        JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(TextInputDataBase);
+    };
+    
+    LambdaBroadcaster<TextInputDataBase::Ptr> textInputBroadcaster;
+    
+    
 	// ================================================================================================================
 
 	Content(ProcessorWithScriptingContent *p);;
@@ -2127,6 +2219,9 @@ public:
 	/** Creates either a line or rectangle with the given colour. */
 	void addVisualGuide(var guideData, var colour);
 
+    /** Opens a text input box with the given properties and executes the callback when finished. */
+    void showModalTextInput(var properties, var callback);
+    
     /** Sets this script as main interface with the given size. */
     void makeFrontInterface(int width, int height);
     
@@ -2175,7 +2270,41 @@ public:
 	/** Returns the ID of the component under the mouse. */
 	String getComponentUnderDrag();
 
+	/** Sets a callback that will be notified whenever the UI timers are suspended. */
+	void setSuspendTimerCallback(var suspendFunction);
+
+	/** Adds a callback that will be performed asynchronously when the key is pressed. */
+	void setKeyPressCallback(const var& keyPress, var keyPressCallback);
+
 	// ================================================================================================================
+
+	static var createKeyboardCallbackObject(const KeyPress& k)
+	{
+		auto obj = new DynamicObject();
+		var args(obj);
+
+		obj->setProperty("isFocusChange", false);
+
+		auto c = k.getTextCharacter();
+
+		auto printable    = CharacterFunctions::isPrintable(c);
+		auto isWhitespace = CharacterFunctions::isWhitespace(c);
+		auto isLetter     = CharacterFunctions::isLetter(c);
+		auto isDigit      = CharacterFunctions::isDigit(c);
+		
+		obj->setProperty("character", printable ? String::charToString(c) : "");
+		obj->setProperty("specialKey", !printable);
+		obj->setProperty("isWhitespace", isWhitespace);
+		obj->setProperty("isLetter", isLetter);
+		obj->setProperty("isDigit", isDigit);
+		obj->setProperty("keyCode", k.getKeyCode());
+		obj->setProperty("description", k.getTextDescription());
+		obj->setProperty("shift", k.getModifiers().isShiftDown());
+		obj->setProperty("cmd", k.getModifiers().isCommandDown() || k.getModifiers().isCtrlDown());
+		obj->setProperty("alt", k.getModifiers().isAltDown());
+
+		return args;
+	}
 
 	// Restores the content and sets the attributes so that the macros and the control callbacks gets executed.
 	void restoreAllControlsFromPreset(const ValueTree &preset);
@@ -2357,6 +2486,8 @@ public:
 
 		asyncRebuildBroadcaster.notify();
 
+		updateParameterSlots();
+
 		return newComponent;
 	}
 
@@ -2379,9 +2510,36 @@ public:
 
 	Array<VisualGuide> guides;
 
+	bool hasKeyPressCallbacks() const { return !registeredKeyPresses.isEmpty(); }
+
+	bool handleKeyPress(const KeyPress& k)
+	{
+		auto k1 = k.getKeyCode();
+		auto m1 = k.getModifiers();
+
+		for(auto& rkp: registeredKeyPresses)
+		{
+			auto k2 = rkp.first.getKeyCode();
+			auto m2 = rkp.first.getModifiers();
+			
+			if(k1 == k2 && m1 == m2)
+			{
+				auto obj = createKeyboardCallbackObject(k);
+				WeakCallbackHolder f(getScriptProcessor(), nullptr, rkp.second, 1);
+				f.call1(obj);
+				return true;
+			}
+		}
+
+		return false;
+	}
+
 private:
 
 	WeakCallbackHolder dragCallback;
+	WeakCallbackHolder suspendCallback;
+
+	Array<std::pair<KeyPress, var>> registeredKeyPresses;
 
 	struct AsyncRebuildMessageBroadcaster : public AsyncUpdater
 	{
@@ -2450,13 +2608,14 @@ private:
 
 		components.add(t);
 
+		updateParameterSlots();
+		
 		restoreSavedValue(name);
-
 		
 		return t;
 	}
 
-	
+	void updateParameterSlots();
 
 	void restoreSavedValue(const Identifier& id);
 

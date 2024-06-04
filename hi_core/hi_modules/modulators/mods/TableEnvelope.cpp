@@ -47,6 +47,8 @@ TableEnvelope::TableEnvelope(MainController *mc, const String &id, int voiceAmou
 	parameterNames.add("Attack");
 	parameterNames.add("Release");
 
+	updateParameterSlots();
+
 	editorStateIdentifiers.add("AttackChainShown");
 	editorStateIdentifiers.add("ReleaseChainShown");
 
@@ -77,6 +79,9 @@ TableEnvelope::TableEnvelope(MainController *mc, const String &id, int voiceAmou
 
 		return String();
 	};
+
+	attackChain->setTableValueConverter(attackConverter);
+	releaseChain->setTableValueConverter(releaseConverter);
 
 	attackTable->setXTextConverter(attackConverter);
 	releaseTable->setXTextConverter(releaseConverter);
@@ -316,7 +321,6 @@ float TableEnvelope::calculateNewValue(int voiceIndex)
 			else
 			{
 				state->current_state = TableEnvelopeState::SUSTAIN;
-				state->current_value = 1.0f;
 			}
 		}
 		break;

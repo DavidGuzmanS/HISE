@@ -152,7 +152,7 @@ void dynamic::editor::timerCallback()
 
 namespace parameter
 {
-	void clone_holder::callEachClone(int index, double v)
+	void clone_holder::callEachClone(int index, double v, bool)
 	{
 		SimpleReadWriteLock::ScopedReadLock sl(connectionLock);
 
@@ -160,7 +160,9 @@ namespace parameter
 
 		if (auto p = cloneTargets[index])
 		{
-			v = p->getRange().convertFrom0to1(v, true);
+			if(isNormalised)
+				v = p->getRange().convertFrom0to1(v, true);
+
 			p->call(v);
 		}
 	}
@@ -314,7 +316,7 @@ namespace parameter
 
 		for (int i = 0; i < lastValues.size(); i++)
 		{
-			callEachClone(i, lastValues[i]);
+			callEachClone(i, lastValues[i], false);
 		}
 	}
 

@@ -51,7 +51,7 @@ namespace parameter
 
 		static dynamic_base_holder* getParameterFunctionStatic(void* b);
 
-		void callEachClone(int index, double v);
+		void callEachClone(int index, double v, bool);
 
 		void setParameter(NodeBase* n, dynamic_base::Ptr b) override;
 
@@ -67,6 +67,7 @@ namespace parameter
 			parentListener = pl;
 		}
 
+		bool isNormalised = true;
 		WeakReference<scriptnode::wrap::clone_manager::Listener> parentListener;
 
 		JUCE_DECLARE_WEAK_REFERENCEABLE(clone_holder);
@@ -87,7 +88,8 @@ namespace duplilogic
 			Triangle,
 			Fixed,
 			Nyquist,
-			Ducker
+			Ducker,
+			Toggle
 		};
 
 		using NodeType = control::clone_cable<parameter::clone_holder, dynamic>;
@@ -106,6 +108,23 @@ namespace duplilogic
 		{
 			auto m = newValue.toString();
 			currentMode = (DupliMode)getSpreadModes().indexOf(m);
+		}
+
+		bool shouldUpdateNumClones() const
+		{
+			switch (currentMode)
+			{
+			case DupliMode::Spread: return spread::shouldUpdateNumClones();
+			case DupliMode::Scale: return scale::shouldUpdateNumClones();
+			case DupliMode::Harmonics: return harmonics::shouldUpdateNumClones();
+			case DupliMode::Random: return random::shouldUpdateNumClones();
+			case DupliMode::Triangle: return triangle::shouldUpdateNumClones();
+			case DupliMode::Fixed: return fixed::shouldUpdateNumClones();
+			case DupliMode::Nyquist: return nyquist::shouldUpdateNumClones();
+			case DupliMode::Ducker: return ducker::shouldUpdateNumClones();
+			case DupliMode::Toggle: return toggle::shouldUpdateNumClones();
+			default: return false;
+			}
 		}
 
 		static constexpr bool isProcessingHiseEvent() { return true; }
@@ -134,6 +153,7 @@ namespace duplilogic
 			case DupliMode::Fixed: return fixed().getValue(index, numDuplicates, input, gamma);
 			case DupliMode::Nyquist: return nyquist().getValue(index, numDuplicates, input, gamma);
 			case DupliMode::Ducker: return ducker().getValue(index, numDuplicates, input, gamma);
+			case DupliMode::Toggle: return toggle().getValue(index, numDuplicates, input, gamma);
 			}
 
 			return 0.0;
@@ -141,7 +161,7 @@ namespace duplilogic
 
 		static StringArray getSpreadModes()
 		{
-			return { "Spread", "Scale", "Harmonics", "Random", "Triangle", "Fixed", "Nyquist", "Ducker" };
+			return { "Spread", "Scale", "Harmonics", "Random", "Triangle", "Fixed", "Nyquist", "Ducker", "Toggle" };
 		}
 
 		NodePropertyT<String> mode;

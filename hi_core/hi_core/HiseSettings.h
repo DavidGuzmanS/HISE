@@ -98,6 +98,9 @@ DECLARE_ID(OverwriteOldUserPresets);
 DECLARE_ID(UseGlobalAppDataFolderWindows);
 DECLARE_ID(UseGlobalAppDataFolderMacOS);
 DECLARE_ID(DefaultUserPreset);
+DECLARE_ID(CompileWithPerfetto);
+DECLARE_ID(CompileWithDebugSymbols);
+DECLARE_ID(IncludeLorisInFrontend);
 
 Array<Identifier> getAllIds();
 
@@ -149,6 +152,7 @@ DECLARE_ID(CompileTimeout);
 DECLARE_ID(CodeFontSize);
 DECLARE_ID(EnableOptimizations);
 DECLARE_ID(EnableDebugMode);
+DECLARE_ID(WarnIfUndefinedParameters);
 DECLARE_ID(SaveConnectedFilesOnCompile);
 DECLARE_ID(EnableMousePositioning);
 

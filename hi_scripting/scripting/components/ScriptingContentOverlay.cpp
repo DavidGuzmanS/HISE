@@ -297,6 +297,8 @@ Rectangle<float> getFloatRectangle(const Rectangle<int> &r)
 
 void ScriptingContentOverlay::paint(Graphics& g)
 {
+	
+
 	if (dragMode)
 	{
         const bool isInPopup = findParentComponentOfClass<ScriptingEditor>() == nullptr;
@@ -323,6 +325,25 @@ void ScriptingContentOverlay::paint(Graphics& g)
 		g.setFont(GLOBAL_BOLD_FONT().withHeight(24.0f));
 		g.drawText("DISABLED UNTIL UPDATE (Press F5)", getLocalBounds(), Justification::centred);
 	}
+
+	if(lassoActive)
+	{
+		auto b = lasso.getBoundsInParent().constrainedWithin(getLocalBounds());
+
+		auto tb = b.expanded(0, 20).constrainedWithin(getLocalBounds());
+		auto f = GLOBAL_MONOSPACE_FONT();
+		auto r = ApiHelpers::getVarRectangle(b.toFloat(), nullptr);
+		auto t = JSON::toString(r, true).replace(".0", "");
+
+		tb.setWidth(f.getStringWidth(t) + 20);
+		tb.setHeight(20);
+
+		g.setColour(Colours::black.withAlpha(0.1f));
+		g.fillRect(tb);
+		g.setColour(Colours::white.withAlpha(0.8f));
+		g.setFont(f);
+		g.drawText(t, tb.constrainedWithin(getLocalBounds()).toFloat(), Justification::centred);
+	}
 }
 
 
@@ -345,12 +366,8 @@ void ScriptingContentOverlay::scriptComponentSelectionChanged()
 
 		if (draggedComponent == nullptr)
 		{
-			PresetHandler::showMessageWindow("Can't select component", "The component " + c->getName() + " can't be selected", PresetHandler::IconType::Error);
-			clearDraggers();
 			return;
 		}
-
-		
 
 		auto d = new Dragger(c, draggedComponent);
 
@@ -540,6 +557,8 @@ void ScriptingContentOverlay::mouseUp(const MouseEvent &e)
 	{
 		lasso.setVisible(false);
 		lasso.endLasso();
+		lassoActive = false;
+		repaint();
 	}
 	else
 	{
@@ -755,6 +774,7 @@ void ScriptingContentOverlay::mouseDrag(const MouseEvent& e)
 	if (lasso.isVisible())
 	{
 		lasso.dragLasso(e);
+		repaint();
 	}
 	else
 	{
@@ -764,6 +784,8 @@ void ScriptingContentOverlay::mouseDrag(const MouseEvent& e)
 
 			e.eventComponent->addAndMakeVisible(lasso);
 			lasso.beginLasso(e, this);
+			lassoActive = true;
+			repaint();
 		}
 	}
 }

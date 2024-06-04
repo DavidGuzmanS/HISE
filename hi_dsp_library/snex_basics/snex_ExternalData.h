@@ -415,6 +415,8 @@ struct ExternalData
 
     static void forEachType(const std::function<void(DataType)>& f);
 
+	bool isTypeOrEmpty(DataType t) const { return dataType == t || dataType == DataType::numDataTypes; }
+
     /** assigns a block container to the data type. If the external data is pointing to an audio file you can specify the channelIndex. */
 	void referBlockTo(block& b, int channelIndex) const;
 
@@ -456,7 +458,11 @@ struct ExternalData
     /** Returns true if there is no data associated with this object. */
 	bool isEmpty() const
 	{
-		return dataType == DataType::numDataTypes || numSamples == 0 || obj == nullptr || numChannels == 0 || data == nullptr;
+		return dataType == DataType::numDataTypes ||
+               numSamples == 0 ||
+               (obj == nullptr && data == nullptr) || // allow obj to be nullptr for embedded data tables
+               numChannels == 0 ||
+               data == nullptr;
 	}
 
 	bool isNotEmpty() const
@@ -737,7 +743,7 @@ struct base
 	virtual void setExternalData(const snex::ExternalData& d, int index)
 	{
 		// This function must always be called while the writer lock is active
-		jassert(d.isEmpty() || d.obj->getDataLock().writeAccessIsLocked() || d.obj->getDataLock().writeAccessIsSkipped());
+		jassert(d.obj == nullptr || d.obj->getDataLock().writeAccessIsLocked() || d.obj->getDataLock().writeAccessIsSkipped());
 
 		
 
@@ -842,18 +848,30 @@ struct filter_base : public data::base,
 {
 	virtual ~filter_base() {};
 
-	virtual IIRCoefficients getApproximateCoefficients() const = 0;
+	virtual std::pair<IIRCoefficients, int> getApproximateCoefficients() const = 0;
 
-	void setExternalData(const snex::ExternalData& d, int index) override
-	{
-		deregisterAtObject(this->externalData.obj);
-		base::setExternalData(d, index);
-		registerAtObject(this->externalData.obj);
+	void sendCoefficientUpdateMessage();
 
-		if (auto o = dynamic_cast<FilterDataObject*>(d.obj))
-			o->setCoefficients(this, getApproximateCoefficients());
-	}
+	void setExternalData(const snex::ExternalData& d, int index) override;
 };
+
+inline void filter_base::sendCoefficientUpdateMessage()
+{
+	DataReadLock l(this);
+
+	if (this->externalData.obj != nullptr)
+	{
+		auto typed = static_cast<FilterDataObject*>(this->externalData.obj);
+		typed->sendUpdateFromBroadcaster(this);
+	}
+}
+
+inline void filter_base::setExternalData(const snex::ExternalData& d, int index)
+{
+	deregisterAtObject(this->externalData.obj);
+	base::setExternalData(d, index);
+	registerAtObject(this->externalData.obj);
+}
 
 #define SNEX_THROW_IF_MULTIPLE_WRITERS 0
 
@@ -990,7 +1008,7 @@ template <int Index, ExternalData::DataType DType> struct plain : index_type_bas
 
 	template <typename NodeType> void setExternalData(NodeType& n, const ExternalData& b, int index)
 	{
-		if (index == Index && b.dataType == DType)
+		if ((index == Index && b.dataType == DType) || b.dataType == ExternalData::DataType::numDataTypes)
 			n.setExternalData(b, 0);
 	}
 };

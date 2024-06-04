@@ -98,7 +98,7 @@ public:
 
 	float getValue(int index) const;
 
-	void setFromFloatArray(const Array<float> &valueArray, NotificationType n = NotificationType::sendNotificationAsync);
+	void setFromFloatArray(const Array<float> &valueArray, NotificationType n = NotificationType::sendNotificationAsync, bool useUndoManager=false);
 
 	void writeToFloatArray(Array<float> &valueArray) const;
 
@@ -145,16 +145,20 @@ private:
 	struct SliderPackAction : public UndoableAction
 	{
 		SliderPackAction(SliderPackData* data_, int sliderIndex_, float oldValue_, float newValue_, NotificationType n_);
-		;
 
+		SliderPackAction(SliderPackData* data, const Array<float>& newValues, NotificationType n);
+		
 		bool perform() override;
 
 		bool undo() override;
 
 		WeakReference<SliderPackData> data;
 		int sliderIndex;
-		float oldValue, newValue;
+		float oldValue,newValue;
 		NotificationType n;
+
+		const bool singleValue;
+		Array<float> oldData, newData;
 	};
 
 	bool flashActive;
@@ -188,6 +192,7 @@ class SliderPack : public Component,
 				   public Slider::Listener,
 				   public SliderPackData::Listener,
 				   public Timer,
+				   public SettableTooltipClient,
 				   public ComplexDataUIBase::EditorBase
 {
 public:
@@ -228,6 +233,11 @@ public:
 
 	void timerCallback() override;
 
+    void setTextAreaPopup(Rectangle<int> bounds)
+    {
+        textArea = bounds;
+    }
+    
 	/** Sets the number of sliders shown. This clears all values. */
 	void setNumSliders(int numSliders);
 
@@ -303,12 +313,35 @@ public:
 
 	void setCallbackOnMouseUp(bool shouldFireOnMouseUp);
 
+    void setToggleMaxMode(bool shouldToggleMax)
+    {
+        toggleMaxMode = shouldToggleMax;
+    }
+    
+    void repaintWithTextBox(Rectangle<int> dirtyArea)
+    {
+        repaint(dirtyArea);
+        
+        if(!textArea.isEmpty())
+            repaint(textArea);
+    }
+
+	void setStepSequencerMode(bool shouldUseStepSequencerMode)
+    {
+	    toggleMaxMode = shouldUseStepSequencerMode;
+    }
+    
 private:
+	
+    bool toggleMaxMode = true;
+    Rectangle<int> textArea;
 
 	int lastDragIndex = -1;
 	float lastDragValue = -1.0f;
 
 	bool slidersNeedRebuild = false;
+
+    double currentStepSequencerInputValue = 0.0;
 
 	void rebuildSliders();
 
@@ -327,9 +360,13 @@ private:
 
 	bool currentlyDragged;
 
+	bool showOverlayOnMove = false;
+
 	bool callbackOnMouseUp = false;
 
 	int currentlyDraggedSlider;
+
+	int currentlyHoveredSlider = -1;
 
 	double currentlyDraggedSliderValue;
 

@@ -83,7 +83,21 @@ public:
 	const SnippetDocument *getSnippet(int c) const override;
 	int getNumSnippets() const override;
 	void registerApiClasses() override;
-	
+
+	Identifier getIdentifierForParameterIndex(int parameterIndex) const override
+	{
+		return getContentParameterIdentifier(parameterIndex);
+	}
+
+	int getParameterIndexForIdentifier(const Identifier& id) const override
+	{
+		return getContentParameterIdentifierIndex(id);
+	}
+
+	int getNumAttributes() const override
+	{
+		return getContentParameterAmount();
+	}
 
 	void addToFront(bool addToFront_) noexcept;;
 	bool isFront() const;;
@@ -207,9 +221,19 @@ public:
 	/** When the startNote function is called, a previously calculated value (by the handleMidiMessage function) is stored using the supplied voice index. */
 	virtual float startVoice(int voiceIndex) override;;
 
+	int getNumAttributes() const override
+	{
+		return getContentParameterAmount();
+	}
+
 	Identifier getIdentifierForParameterIndex(int parameterIndex) const override
 	{
 		return getContentParameterIdentifier(parameterIndex);
+	}
+
+	int getParameterIndexForIdentifier(const Identifier& id) const override
+	{
+		return getContentParameterIdentifierIndex(id);
 	}
 
 	SnippetDocument *getSnippet(int c) override;
@@ -280,6 +304,23 @@ public:
 	void setInternalAttribute(int index, float newValue) override;
 
 	Identifier getIdentifierForParameterIndex(int parameterIndex) const override;
+
+	int getParameterIndexForIdentifier(const Identifier& id) const override
+	{
+		if (auto n = getActiveOrDebuggedNetwork())
+			return n->networkParameterHandler.getParameterIndexForIdentifier(id);
+		else
+			return contentParameterHandler.getParameterIndexForIdentifier(id);
+	}
+
+	int getNumAttributes() const override
+	{
+		if (auto n = getActiveOrDebuggedNetwork())
+			return n->networkParameterHandler.getNumParameters();
+		else
+			return contentParameterHandler.getNumParameters();
+	}
+
 	ValueTree exportAsValueTree() const override;
 	void restoreFromValueTree(const ValueTree &v) override;
 
@@ -292,8 +333,6 @@ public:
 	Processor *getChildProcessor(int /*processorIndex*/) override final;;
 	const Processor *getChildProcessor(int /*processorIndex*/) const override final;;
 	int getNumChildProcessors() const override final;;
-
-	
 
 	SnippetDocument *getSnippet(int c) override;
 	const SnippetDocument *getSnippet(int c) const override;
@@ -428,6 +467,22 @@ public:
 
 	Identifier getIdentifierForParameterIndex(int index) const override;
 
+	int getParameterIndexForIdentifier(const Identifier& id) const override
+	{
+		if (auto n = getActiveOrDebuggedNetwork())
+			return n->networkParameterHandler.getParameterIndexForIdentifier(id);
+		else
+			return contentParameterHandler.getParameterIndexForIdentifier(id);
+	}
+
+	int getNumAttributes() const override
+	{
+		if (auto n = getActiveOrDebuggedNetwork())
+			return n->networkParameterHandler.getNumParameters();
+		else
+			return contentParameterHandler.getNumParameters();
+	}
+
 	ProcessorEditorBody *createEditor(ProcessorEditor *parentEditor)  override;
 
 	void handleHiseEvent(const HiseEvent &m) override;
@@ -554,6 +609,22 @@ public:
 
 	Identifier getIdentifierForParameterIndex(int parameterIndex) const override;
 
+	int getParameterIndexForIdentifier(const Identifier& id) const override
+	{
+		if (auto n = getActiveOrDebuggedNetwork())
+			return n->networkParameterHandler.getParameterIndexForIdentifier(id);
+		else
+			return contentParameterHandler.getParameterIndexForIdentifier(id);
+	}
+
+	int getNumAttributes() const override
+	{
+		if (auto n = getActiveOrDebuggedNetwork())
+			return n->networkParameterHandler.getNumParameters();
+		else
+			return contentParameterHandler.getNumParameters();
+	}
+
 	ValueTree exportAsValueTree() const override;
 	void restoreFromValueTree(const ValueTree &v) override;
 
@@ -647,6 +718,22 @@ public:
 		return getCurrentNetworkParameterHandler(&contentParameterHandler)->getParameterId(parameterIndex);
 	}
 
+	int getParameterIndexForIdentifier(const Identifier& id) const override
+	{
+		if (auto n = getActiveOrDebuggedNetwork())
+			return n->networkParameterHandler.getParameterIndexForIdentifier(id);
+		else
+			return contentParameterHandler.getParameterIndexForIdentifier(id);
+	}
+
+	int getNumAttributes() const override
+	{
+		if (auto n = getActiveOrDebuggedNetwork())
+			return n->networkParameterHandler.getNumParameters();
+		else
+			return contentParameterHandler.getNumParameters();
+	}
+
 	int getControlCallbackIndex() const override { return (int)Callback::onControl; };
 
 	void renderVoice(int voiceIndex, AudioSampleBuffer &b, int startSample, int numSamples) final override;
@@ -727,7 +814,7 @@ public:
 		bool isVoiceStart = false;
 	};
 	
-	SET_PROCESSOR_NAME("ScriptSynth", "Scriptnode Syntesiser", "A polyphonic scriptable synthesiser.");
+	SET_PROCESSOR_NAME("ScriptSynth", "Scriptnode Synthesiser", "A polyphonic scriptable synthesiser.");
 
 	enum class Callback
 	{
@@ -785,6 +872,22 @@ public:
 	void setInternalAttribute(int index, float newValue) override;
 
 	Identifier getIdentifierForParameterIndex(int parameterIndex) const override;
+
+	int getParameterIndexForIdentifier(const Identifier& id) const override
+	{
+		if (auto n = getActiveOrDebuggedNetwork())
+			return n->networkParameterHandler.getParameterIndexForIdentifier(id);
+		else
+			return contentParameterHandler.getParameterIndexForIdentifier(id);
+	}
+
+	int getNumAttributes() const override
+	{
+		if (auto n = getActiveOrDebuggedNetwork())
+			return n->networkParameterHandler.getNumParameters();
+		else
+			return contentParameterHandler.getNumParameters();
+	}
 
 	int getControlCallbackIndex() const override;;
 
