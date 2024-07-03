@@ -41,29 +41,10 @@ using namespace juce;
 #if HISE_MULTIPAGE_INCLUDE_EDIT
 void addOnValueCodeEditor(const var& infoObject, Dialog::PageInfo& rootList)
 {
-    rootList.addChild<Button>({
-        { mpid::ID, "UseOnValue" },
-        { mpid::Text, "UseOnValue" },
-        { mpid::Value, infoObject[mpid::UseOnValue]},
-        { mpid::Help, "Whether to use the `element.onValue(value)` function defined in the `Code` property"}
-    });
-
     auto code = infoObject[mpid::Code].toString();
 
-    if(code.isEmpty())
-    {
-	    code << "Console.print(value);";
-        infoObject.getDynamicObject()->setProperty(mpid::Code, code);
-    }
-
-#if 0
-	rootList.addChild<CodeEditor>({
-		{ mpid::ID, "Code" },
-		{ mpid::Text, "Code" },
-		{ mpid::Value, infoObject[mpid::Code] },
-        { mpid::Help, "This can be used to attach a callback to any value change. This is not HiseScript but vanilla JS!  \n> If you want to log something to the console, use `Console.print(message);`." } 
-	});
-#endif
+    
+    
     
 }
 
@@ -159,6 +140,14 @@ template <typename T> void addBasicComponents(T& obj, Dialog::PageInfo& rootList
 		{ mpid::Help, "Additional inline properties that will be used by the UI element" }
 	});
 
+    clist.addChild<Choice>({
+		{ mpid::ID, mpid::Visibility.toString() },
+		{ mpid::Text, mpid::Visibility.toString() },
+        { mpid::Items, Dialog::PageBase::getVisibilityNames().joinIntoString("\n") },
+        { mpid::Value, obj.getPropertyFromInfoObject(mpid::Visibility) },
+		{ mpid::Help, "Whether to show or hide the element" }
+	});
+
     clist.addChild<Button>({
 		{ mpid::ID, mpid::NoLabel.toString() },
 		{ mpid::Text, mpid::NoLabel.toString() },
@@ -191,6 +180,8 @@ LabelledComponent::LabelledComponent(Dialog& r, int width, const var& obj, Compo
         setIsInvisibleWrapper(true);
         updateStyleSheetInfo(true);
 	    Helpers::setFallbackStyleSheet(*c, "flex-grow: 1; height: 32px;width: 100%;");
+
+        changeClass(simple_css::Selector(".no-label"), true);
     }
     
     if(!obj.hasProperty(mpid::Enabled))
@@ -247,6 +238,9 @@ void LabelledComponent::postInit()
 	    initValue = infoObject[mpid::InitValue];
     }
 
+    if(!infoObject.hasProperty(mpid::Code))
+        infoObject.getDynamicObject()->setProperty(mpid::Code, "");
+
 	init();
 
     
@@ -262,6 +256,11 @@ void LabelledComponent::postInit()
 void LabelledComponent::resized()
 {
     FlexboxComponent::resized();
+
+    if(helpButton != nullptr)
+	{
+		setHiseShapeButtonColours(*helpButton);
+	}
 }
 
 #if HISE_MULTIPAGE_INCLUDE_EDIT
@@ -578,6 +577,8 @@ void Choice::postInit()
 		    case ValueMode::Text: writeState(cb.getText()); break;
 		    case ValueMode::Index: writeState(cb.getSelectedItemIndex()); break;
 		    case ValueMode::Id: writeState(cb.getSelectedId()); break;
+		    case ValueMode::numValueModes: 
+            default: break;
 		    }
 	    }
 
@@ -589,6 +590,8 @@ void Choice::postInit()
     case ValueMode::Text: cb.setText(t.toString(), dontSendNotification); break;
     case ValueMode::Index: cb.setSelectedItemIndex((int)t, dontSendNotification); break;
     case ValueMode::Id: cb.setSelectedId((int)t, dontSendNotification); break;
+    case ValueMode::numValueModes: 
+    default: break;
     }
     
     getComponent<SubmenuComboBox>().refreshTickState();
@@ -603,6 +606,8 @@ Result Choice::checkGlobalState(var globalState)
     case ValueMode::Text:  writeState(cb.getText()); break;
     case ValueMode::Index: writeState(cb.getSelectedItemIndex()); break;
     case ValueMode::Id:    writeState(cb.getSelectedId()); break;
+    case ValueMode::numValueModes:
+    default: break;
     }
     
 	return Result::ok();
@@ -647,117 +652,26 @@ void Choice::createEditor(Dialog::PageInfo& rootList)
     addOnValueCodeEditor(infoObject, rootList);
 }
 
+using EditorType = AllEditor;
 
-void CodeEditor::AllEditor::addRecursive(mcl::TokenCollection::List& tokens, const String& parentId, const var& obj)
+#else
+struct EditorType: public Component
 {
-	auto thisId = parentId;
-
-	if(obj.isMethod())
-		thisId << "(args)";
-
-	auto isState = thisId.startsWith("state");
-	auto isElement = thisId.startsWith("element");
-
-	auto prio = 100;
-
-	if(isState)
-		prio += 10;
-
-	if(isElement)
-		prio += 20;
-
-	auto stateToken = new mcl::TokenCollection::Token(thisId);
-	stateToken->c = isState ? Colour(0xFFBE6093) : isElement ? Colour(0xFF22BE84) : Colour(0xFF88BE14);
-
-	if(isState)
-		stateToken->markdownDescription << "Global state variable  \n> ";
-
-	stateToken->markdownDescription << "Value: `" << obj.toString() << "`";
-
-	auto apiObject = dynamic_cast<ApiObject*>(obj.getDynamicObject());
-
-	stateToken->priority = prio;
-	tokens.add(stateToken);
-
-	if(auto no = obj.getDynamicObject())
-	{
-		for(auto& nv: no->getProperties())
-		{
-			String p = parentId;
-			p << "." << nv.name;
-			addRecursive(tokens, p, nv.value);
-
-			if(apiObject != nullptr)
-				tokens.getLast()->markdownDescription = apiObject->getHelp(nv.name);
-		}
-	}
-	if(auto ar = obj.getArray())
-	{
-		int idx = 0;
-
-		for(auto& nv: *ar)
-		{
-			String p = parentId;
-			p << "[" << String(idx++) << "]";
-			addRecursive(tokens, p, nv);
-		}
-	}
-}
-
-void CodeEditor::AllEditor::TokenProvider::addTokens(mcl::TokenCollection::List& tokens)
-{
-	if(p == nullptr)
-		return;
-
-	auto infoObject = p->findParentComponentOfClass<Dialog>()->getState().globalState;
-
-	DBG(JSON::toString(infoObject));
-
-	if(auto ms = p->findParentComponentOfClass<ComponentWithSideTab>())
-	{
-		auto* state = ms->getMainState();
-
-		if(engine == nullptr)
-			engine = state->createJavascriptEngine();
-
-		for(auto& nv: engine->getRootObjectProperties())
-		{
-			addRecursive(tokens, nv.name.toString(), nv.value);
-		}
-	}
-}
+    EditorType(const String& unused) {};
+    String syntax;
+    Result compile() { return Result::fail("not implemented"); }
+	CodeDocument doc;
+};
 #endif
 
-CodeEditor::AllEditor::AllEditor(const String& syntax):
-	codeDoc(doc),
-	editor(new mcl::TextEditor(codeDoc))
-{
-	if(syntax == "CSS")
-	{
-		editor->tokenCollection = new mcl::TokenCollection("CSS");
-		editor->tokenCollection->setUseBackgroundThread(false);
-		editor->setLanguageManager(new simple_css::LanguageManager(codeDoc));
-	}
-	else if(syntax == "HTML")
-	{
-		editor->setLanguageManager(new mcl::XmlLanguageManager());
-	}
-	else
-	{
-		editor->tokenCollection = new mcl::TokenCollection("Javascript");
-		editor->tokenCollection->setUseBackgroundThread(false);
-		editor->tokenCollection->addTokenProvider(new TokenProvider(this));
-	}
-            
-	addAndMakeVisible(editor);
-}
 
 CodeEditor::CodeEditor(Dialog& r, int w, const var& obj):
-	LabelledComponent(r, w, obj, new AllEditor(obj[mpid::Syntax].toString()))
+	LabelledComponent(r, w, obj, new EditorType(obj[mpid::Syntax].toString()))
 {
-	Helpers::writeInlineStyle(getComponent<AllEditor>(), "height: 360px;");
+	Helpers::writeInlineStyle(getComponent<EditorType>(), "height: 360px;");
 	setSize(w, 360);
 }
+
 
 void CodeEditor::postInit()
 {
@@ -765,84 +679,20 @@ void CodeEditor::postInit()
 
 	auto code = getValueFromGlobalState(var()).toString();
 
-	getComponent<AllEditor>().doc.replaceAllContent(code);
+    getComponent<EditorType>().syntax = infoObject[mpid::Syntax].toString();
+
+	getComponent<EditorType>().doc.replaceAllContent(code);
 }
 
-bool CodeEditor::keyPressed(const KeyPress& k)
-{
-	if(k == KeyPress::F5Key)
-	{
-		compile();
-		return true;
-	}
 
-	return false;
-}
 
 Result CodeEditor::compile()
 {
-	auto syntax = infoObject[mpid::Syntax].toString();
-
-	auto& editor = *getComponent<AllEditor>().editor.get();
-
-	auto code = getComponent<AllEditor>().doc.getAllContent();
-
-	auto* state = findParentComponentOfClass<ComponentWithSideTab>()->getMainState();
-
-	if(code.startsWith("${"))
-		code = state->loadText(code, true);
-
-	if(syntax == "CSS")
-	{
-		simple_css::Parser p(code);
-		auto ok = p.parse();
-		editor.clearWarningsAndErrors();
-		editor.setError(ok.getErrorMessage());
-
-		for(const auto& w: p.getWarnings())
-			editor.addWarning(w);
-
-		writeState(code);
-
-		if(ok.wasOk())
-		{
-			if(auto d = state->currentDialog.get())
-			{
-				d->positionInfo.additionalStyle = code;
-				d->loadStyleFromPositionInfo();
-			}
-		}
-		else
-			state->eventLogger.sendMessage(sendNotificationSync, MessageType::Javascript, ok.getErrorMessage());
-            
-		return ok;
-	}
-	else if (syntax == "HTML")
-	{
-		writeState(code);
-
-		if(auto d = state->currentDialog.get())
-		{
-			d->refreshCurrentPage();
-		}
-
-		return Result::ok();
-	}
-	else
-	{
-		writeState(code);
-
-		auto e = state->createJavascriptEngine();
-		auto ok = e->execute(code);
-
-		getComponent<AllEditor>().editor->setError(ok.getErrorMessage());
-
-		if(!ok.wasOk())
-			state->eventLogger.sendMessage(sendNotificationSync, MessageType::Javascript, ok.getErrorMessage());
-
-		return ok;
-	}
+    auto code = getComponent<EditorType>().doc.getAllContent();
+    writeState(code);
+    return getComponent<EditorType>().compile();
 }
+
 
 ColourChooser:: ColourChooser(Dialog& r, int w, const var& obj):
 	LabelledComponent(r, w, obj, new ColourSelector(ColourSelector::ColourSelectorOptions::showColourspace | ColourSelector::showColourAtTop | ColourSelector::showAlphaChannel | ColourSelector::ColourSelectorOptions::editableColour, 2, 0))
@@ -885,8 +735,6 @@ void ColourChooser::changeListenerCallback(ChangeBroadcaster* source)
 
 Result ColourChooser::checkGlobalState(var globalState)
 {
-	
-        
 	return Result::ok();
 }
 
@@ -970,7 +818,13 @@ struct TextInput::Autocomplete: public Component,
         setSize(ed.getWidth() + 20, ItemHeight * 4 + 5 + 20);
         
         setWantsKeyboardFocus(true);
-        parent->getTopLevelComponent()->addChildComponent(this);
+
+        auto top = TopLevelWindowWithOptionalOpenGL::findRoot(parent);
+
+        if(top == nullptr)
+            top = parent->getTopLevelComponent();
+
+        top->addChildComponent(this);
         auto topLeft = ed.getTopLevelComponent()->getLocalArea(&ed, ed.getLocalBounds()).getTopLeft();
         
         setTopLeftPosition(topLeft.getX() - 10, topLeft.getY() + ed.getHeight());
@@ -1279,7 +1133,7 @@ void TextInput::postInit()
     
     if(editor.isMultiLine())
     {
-        auto h = jmax(40, (int)infoObject[mpid::Height]);
+        auto h = jmax(80, (int)infoObject[mpid::Height]);
         simple_css::FlexboxComponent::Helpers::writeInlineStyle(*this, "height:"+String(h)+"px;");
         
         String s = Helpers::getInlineStyle(editor);
@@ -1729,7 +1583,7 @@ File FileSelector::getInitialFile(const var& path) const
 {
 	if(path.isString())
 	{
-        auto t = MarkdownText::getString(path.toString(), rootDialog);
+        auto t = MarkdownText::getString(path.toString(), rootDialog.getState());
 		return File(t);
 	}
 	if(path.isInt() || path.isInt64())
@@ -1781,7 +1635,7 @@ void Table::createEditor(Dialog::PageInfo& rootList)
 		{ mpid::Help, "How the table stores the selected item (either the zero based index of the selected row or the `[column, row]` position of the clicked cell" },
 		{ mpid::Items, "Row\nGrid\nFirstColumnText" },
 		{ mpid::Value, infoObject[mpid::ValueMode] },
-		{ mpid::UseOnValue, 0 }
+		
 	});
 
     rootList.addChild<factory::Button>(DefaultProperties::getForSetting(infoObject, mpid::Multiline,
@@ -1792,6 +1646,13 @@ void Table::createEditor(Dialog::PageInfo& rootList)
 		{ mpid::Text, "FilterFunction" },
 		{ mpid::Value, infoObject[mpid::FilterFunction] },
         { mpid::Help, "A function in the root namespace that will be called to filter the items." } 
+	});
+
+    rootList.addChild<Button>({
+		{ mpid::ID, mpid::SelectOnClick.toString() },
+		{ mpid::Text, mpid::SelectOnClick.toString() },
+		{ mpid::Value, infoObject[mpid::SelectOnClick] },
+        { mpid::Help, "Whether to fire the value callback on a single mouse click or double click / return key only." } 
 	});
 
 	rootList.addChild<TextInput>({

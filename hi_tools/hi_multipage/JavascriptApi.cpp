@@ -64,24 +64,25 @@ bool ApiObject::Helpers::callRecursive(const var& obj, const std::function<bool(
 
 void ApiObject::updateWithLambda(const var& infoObject, const Identifier& id, const std::function<void(Component*)>& f)
 {
-	auto dialog = state.currentDialog.get();
-
-	auto paf = [infoObject, id, dialog, f]()
+	for(auto dialog: state.currentDialogs)
 	{
-		Component::callRecursive<Dialog::PageBase>(dialog, [&](Dialog::PageBase* pb)
+		auto paf = [infoObject, id, dialog, f]()
 		{
-			if( pb->getInfoObject() == infoObject ||
-			   (id.isValid() && pb->getId() == id))
-				f(pb);
-					
-			return false;
-		});
-	};
+			Component::callRecursive<Dialog::PageBase>(dialog, [&](Dialog::PageBase* pb)
+			{
+				if( pb->getInfoObject() == infoObject ||
+				   (id.isValid() && pb->getId() == id))
+					f(pb);
+						
+				return false;
+			});
+		};
 
-	if(State::getNotificationTypeForCurrentThread() == sendNotificationAsync)
-		MessageManager::callAsync(paf);
-	else
-		paf();
+		if(State::getNotificationTypeForCurrentThread() == sendNotificationAsync)
+			MessageManager::callAsync(paf);
+		else
+			paf();
+	}
 }
 
 void ApiObject::setMethodWithHelp(const Identifier& id, var::NativeFunction f, const String& helpText)
@@ -113,16 +114,17 @@ String ApiObject::getHelp(Identifier methodName) const
 
 bool ApiObject::callForEachInfoObject(const std::function<bool(const var& obj)>& f) const
 {
-	auto pageInfo = state.currentDialog->getPageListVar();
+	
+	auto pageInfo = state.getFirstDialog()->getPageListVar();
 
 	if(isPositiveAndBelow(state.currentPageIndex, pageInfo.size()))
 	{
-		auto currentPageInfo = state.currentDialog->getPageListVar()[state.currentPageIndex];
+		auto currentPageInfo = state.currentDialogs.getFirst()->getPageListVar()[state.currentPageIndex];
 		return Helpers::callRecursive(currentPageInfo, f);
 	}
 	else
 	{
-		return Component::callRecursive<Dialog::PageBase>(state.currentDialog, [&](Dialog::PageBase* pb)
+		return Component::callRecursive<Dialog::PageBase>(state.getFirstDialog(), [&](Dialog::PageBase* pb)
 		{
 			return f(pb->getInfoObject());
 		});
@@ -317,11 +319,6 @@ var HtmlParser::getElement(DataProvider* d, HeaderInformation& hi, XmlElement* x
 			}
 		}
 
-		if(nv->hasProperty(mpid::Code))
-		{
-			nv->setProperty(mpid::UseOnValue, true);
-		}
-
 		if(itemList.isNotEmpty())
 			nv->setProperty(mpid::Items, var(itemList.upToLastOccurrenceOf("\n", false, false)));
 
@@ -382,12 +379,16 @@ struct LogFunction: public ApiObject
 		expectArguments(args, 2);
 
 		auto id = args.arguments[0].toString();
-		
-		if(auto p = state.currentDialog->findPageBaseForID(id))
+
+		for(auto d: state.currentDialogs)
 		{
-			p->setModalHelp(args.arguments[1].toString());
-			state.currentDialog->setCurrentErrorPage(p);
+			if(auto p = d->findPageBaseForID(id))
+			{
+				p->setModalHelp(args.arguments[1].toString());
+				d->setCurrentErrorPage(p);
+			}
 		}
+		
 
 		return var();
 	}
@@ -741,6 +742,7 @@ struct Dom: public ApiObject
 		setMethodWithHelp("getStyleData", BIND_MEMBER_FUNCTION_1(Dom::getStyleData), "Returns the global markdown style data.");
 		setMethodWithHelp("setStyleData", BIND_MEMBER_FUNCTION_1(Dom::setStyleData), "Sets the global markdown style data");
 		setMethodWithHelp("getClipboardContent", BIND_MEMBER_FUNCTION_1(Dom::getClipboardContent), "Returns the current clipboard content");
+        setMethodWithHelp("copyToClipboard", BIND_MEMBER_FUNCTION_1(Dom::copyToClipboard), "Copies the string to the system clipboard");
 		setMethodWithHelp("writeFile", BIND_MEMBER_FUNCTION_1(Dom::writeFile), "Writes the string content to the file");
 		setMethodWithHelp("readFile", BIND_MEMBER_FUNCTION_1(Dom::readFile), "Loads string content of the file");
 		setMethodWithHelp("navigate", BIND_MEMBER_FUNCTION_1(Dom::navigate), "Navigates to the page with the given index");
@@ -762,11 +764,11 @@ struct Dom: public ApiObject
 		expectArguments(args, 1);
 		Array<var> matches;
 
-		if(state.currentDialog != nullptr)
+		if(state.getFirstDialog() != nullptr)
 		{
 			auto id = args.arguments[0].toString();
 
-			Component::callRecursive<Dialog::PageBase>(state.currentDialog.get(), [&](Dialog::PageBase* pb)
+			Component::callRecursive<Dialog::PageBase>(state.getFirstDialog(), [&](Dialog::PageBase* pb)
 			{
 				if(pb->getPropertyFromInfoObject(mpid::Type) == id)
 					matches.add(pb->getInfoObject());
@@ -816,11 +818,11 @@ struct Dom: public ApiObject
 		if(args.numArguments == 2)
 		{
 			auto f = args.arguments[0].toString();
-			f = factory::MarkdownText::getString(f, *state.currentDialog.get());
+			f = factory::MarkdownText::getString(f, state);
 
 			if(File::isAbsolutePath(f))
 			{
-				state.currentDialog->logMessage(MessageType::FileOperation, "write " + f + " from JS");
+				state.logMessage(MessageType::FileOperation, "write " + f + " from JS");
 				File(f).getParentDirectory().createDirectory();
 				return File(f).replaceWithText(args.arguments[1].toString());
 			}
@@ -849,25 +851,23 @@ struct Dom: public ApiObject
 				pageIndex = 0;//state.currentDialog->getPageIndex(newIndex.toString());
 			}
 			
-			if(isPositiveAndBelow(newIndex, state.currentDialog->getNumPages()))
+			if(isPositiveAndBelow(newIndex, state.getFirstDialog()->getNumPages()))
 			{
 				WeakReference<State> s = &state;
 
 				auto f = [s, pageIndex, shouldCheck]()
 				{
-					if(s != nullptr && s.get()->currentDialog != nullptr)
+					s->currentPageIndex = pageIndex;
+
+					for(auto dialog: s.get()->currentDialogs)
 					{
-						if(shouldCheck)
+						if(s != nullptr && s.get()->getFirstDialog() != nullptr)
 						{
-							s->currentPageIndex = pageIndex-1;
-							s->currentDialog->navigate(true);
+							if(shouldCheck)
+								dialog->navigate(true);
+							else
+								dialog->refreshCurrentPage();
 						}
-						else
-						{
-							s->currentPageIndex = pageIndex;
-							s->currentDialog->refreshCurrentPage();
-						}
-						
 					}
 				};
 
@@ -886,11 +886,11 @@ struct Dom: public ApiObject
 		{
 			auto f = args.arguments[0].toString();
 
-			f = factory::MarkdownText::getString(f, *state.currentDialog.get());
+			f = factory::MarkdownText::getString(f, state);
 
 			if(File::isAbsolutePath(f))
 			{
-				state.currentDialog->logMessage(MessageType::FileOperation, "load " + f + " into JS");
+				state.getFirstDialog()->logMessage(MessageType::FileOperation, "load " + f + " into JS");
 				return File(f).loadFileAsString();
 			}
 		}
@@ -902,6 +902,18 @@ struct Dom: public ApiObject
 	{
 		return var(SystemClipboard::getTextFromClipboard());
 	}
+    
+    var copyToClipboard(const var::NativeFunctionArgs& args) const
+    {
+        if(args.numArguments == 1)
+        {
+            auto f = args.arguments[0].toString();
+            SystemClipboard::copyTextToClipboard(f);
+        }
+        
+        return var();
+    }
+
 
 	var callAction(const var::NativeFunctionArgs& args)
 	{
@@ -997,9 +1009,9 @@ struct Dom: public ApiObject
 	{
 		expectArguments(args, 0);
 
-		if(state.currentDialog != nullptr)
+		if(auto fd = state.getFirstDialog())
 		{
-			return state.currentDialog->getStyleData().toDynamicObject();
+			return fd->getStyleData().toDynamicObject();
 		}
 
 		return var();
@@ -1009,14 +1021,12 @@ struct Dom: public ApiObject
 	{
 		expectArguments(args, 1);
 
-		if(state.currentDialog != nullptr)
-		{
-			MarkdownLayout::StyleData sd;
-			sd.fromDynamicObject(args.arguments[0], std::bind(&State::loadFont, &state, std::placeholders::_1));
-			state.currentDialog->setStyleData(sd);
-			
-		}
+		MarkdownLayout::StyleData sd;
+		sd.fromDynamicObject(args.arguments[0], std::bind(&State::loadFont, &state, std::placeholders::_1));
 
+		for(auto d: state.currentDialogs)
+			d->setStyleData(sd);
+		
 		return var();
 	}
 };

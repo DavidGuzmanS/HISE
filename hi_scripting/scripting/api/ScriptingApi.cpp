@@ -170,6 +170,21 @@ melatonin::ShadowParameters ApiHelpers::getShadowParameters(const var& shadowDat
 	}
 }
 
+var ApiHelpers::convertStyleSheetProperty(const var& value, const String& type)
+{
+	if(type == "path")
+	{
+		if(auto p = dynamic_cast<ScriptingObjects::PathObject*>(value.getObject()))
+			return var(p->toBase64());
+	}
+	else if(type == "color")
+	{
+		return var(String("#") + ApiHelpers::getColourFromVar(value).toDisplayString(true));
+	}
+
+	return value;
+}
+
 Colour ApiHelpers::getColourFromVar(const var& value)
 {
 	int64 colourValue = 0;
@@ -2048,10 +2063,16 @@ struct ScriptUndoableAction : public UndoableAction,
 
 			break;
 		}
+		case MainController::KillStateHandler::TargetThread::UnknownThread: break;
 		case MainController::KillStateHandler::TargetThread::MessageThread:
 		{
 			callback.call(args);
 		}
+		case MainController::KillStateHandler::TargetThread::AudioThread: break;
+		case MainController::KillStateHandler::TargetThread::AudioExportThread: break;
+		case MainController::KillStateHandler::TargetThread::numTargetThreads: break;
+		case MainController::KillStateHandler::TargetThread::Free: break;
+		default: ;
 		}
 	}
 
@@ -3763,30 +3784,7 @@ sampler(sampler_)
 	ADD_API_METHOD_1(setTimestretchOptions);
 	ADD_API_METHOD_0(getTimestretchOptions);
 
-	sampleIds.add(SampleIds::ID);
-	sampleIds.add(SampleIds::FileName);
-	sampleIds.add(SampleIds::Root);
-	sampleIds.add(SampleIds::HiKey);
-	sampleIds.add(SampleIds::LoKey);
-	sampleIds.add(SampleIds::LoVel);
-	sampleIds.add(SampleIds::HiVel);
-	sampleIds.add(SampleIds::RRGroup);
-	sampleIds.add(SampleIds::Volume);
-	sampleIds.add(SampleIds::Pan);
-	sampleIds.add(SampleIds::Normalized);
-	sampleIds.add(SampleIds::Pitch);
-	sampleIds.add(SampleIds::SampleStart);
-	sampleIds.add(SampleIds::SampleEnd);
-	sampleIds.add(SampleIds::SampleStartMod);
-	sampleIds.add(SampleIds::LoopStart);
-	sampleIds.add(SampleIds::LoopEnd);
-	sampleIds.add(SampleIds::LoopXFade);
-	sampleIds.add(SampleIds::LoopEnabled);
-	sampleIds.add(SampleIds::LowerVelocityXFade);
-	sampleIds.add(SampleIds::UpperVelocityXFade);
-	sampleIds.add(SampleIds::SampleState);
-	sampleIds.add(SampleIds::Reversed);
-    sampleIds.add(SampleIds::NumQuarters);
+	sampleIds = SampleIds::Helpers::getAllIds();
 
 	for (int i = 1; i < sampleIds.size(); i++)
 	{
