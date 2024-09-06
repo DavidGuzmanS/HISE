@@ -108,6 +108,7 @@ public:
         bool confirmClose = true;
         String styleSheet = "Dark";
         String additionalStyle;
+        String closeMessage = "Do you want to close this popup?";
         bool useViewport = true;
     } positionInfo;
 
@@ -133,6 +134,8 @@ public:
         void updateStyleSheetInfo(bool forceUpdate=false);
 
         void forwardInlineStyleToChildren();
+
+        bool updateInfoProperty(const Identifier& pid);
 
         VisibleState getVisibility() const;
 
@@ -494,6 +497,15 @@ public:
         }
         
         return *p;
+    }
+
+    bool useGlobalAppDataDirectory() const
+    {
+#if JUCE_MAC
+        return (bool)getGlobalProperty(mpid::UseGlobalAppData);
+#else
+        return false;
+#endif
     }
 
     Result getCurrentResult();
