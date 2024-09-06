@@ -394,7 +394,7 @@ namespace hise { using namespace juce;
 	FloatingTileContent(parent)
 {
 	setDefaultPanelColour(PanelColourId::bgColour, Colours::black.withAlpha(0.0f));
-	setDefaultPanelColour(PanelColourId::itemColour1, Colours::green);
+	setDefaultPanelColour(PanelColourId::itemColour1, Colours::mediumpurple);
 	setDefaultPanelColour(PanelColourId::itemColour2, Colours::black);
 
 	startTimer(100);

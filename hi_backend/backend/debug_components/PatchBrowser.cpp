@@ -1175,7 +1175,7 @@ void PatchBrowser::ModuleDragTarget::drawDragStatus(Graphics &g, Rectangle<float
 	switch (getDragState())
 	{
 	case ModuleDragTarget::DragState::Allowed:
-		g.setColour(Colours::green.withMultipliedBrightness(isOver ? 1.5f : 0.6f).withAlpha(0.3f)); break;
+		g.setColour(Colours::mediumpurple.withMultipliedBrightness(isOver ? 1.5f : 0.6f).withAlpha(0.3f)); break;
 	case ModuleDragTarget::DragState::Forbidden:
 		g.setColour(Colours::red.withMultipliedBrightness(isOver ? 1.5f : 0.6f).withAlpha(0.3f)); break;
 	case ModuleDragTarget::DragState::Inactive:

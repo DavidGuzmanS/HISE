@@ -376,7 +376,7 @@ struct MidiProcessor::EventLogger
                         c[0] = Colours::red;
                         c[1] = Colours::violet;
                         c[2] = Colours::brown;
-                        c[3] = Colours::green;
+                        c[3] = Colours::mediumpurple;
                         c[4] = Colours::pink;
                         c[5] = Colours::yellow;
                         c[6] = Colours::orange;

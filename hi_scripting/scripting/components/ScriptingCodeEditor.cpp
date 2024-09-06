@@ -88,7 +88,7 @@ void DebugConsoleTextEditor::scriptWasCompiled(JavascriptProcessor *jp)
             setText(fullErrorMessage.upToFirstOccurrenceOf("{", false, false), dontSendNotification);
         }
 
-		setColour(TextEditor::backgroundColourId, r.wasOk() ? Colours::green.withBrightness(0.1f) : Colours::red.withBrightness((0.1f)));
+		setColour(TextEditor::backgroundColourId, r.wasOk() ? Colours::mediumpurple.withBrightness(0.1f) : Colours::red.withBrightness((0.1f)));
 	}
 }
 

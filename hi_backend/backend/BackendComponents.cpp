@@ -259,7 +259,7 @@ void CachedViewport::itemDragEnter(const SourceDetails &dragSourceDetails)
 {
 	dragNew = isInterestedInDragSource(dragSourceDetails);
 
-	viewport->setColour(backgroundColourId, dragNew ? Colours::green.withAlpha(0.1f) :
+	viewport->setColour(backgroundColourId, dragNew ? Colours::mediumpurple.withAlpha(0.1f) :
 		Colours::lightgrey);
 
 	repaint();
@@ -269,7 +269,7 @@ void CachedViewport::itemDragExit(const SourceDetails &/*dragSourceDetails*/)
 {
 	dragNew = false;
 
-	viewport->setColour(backgroundColourId, dragNew ? Colours::green.withAlpha(0.1f) :
+	viewport->setColour(backgroundColourId, dragNew ? Colours::mediumpurple.withAlpha(0.1f) :
 		Colours::lightgrey);
 	repaint();
 }
@@ -286,7 +286,7 @@ void CachedViewport::itemDropped(const SourceDetails &dragSourceDetails)
 	}
 	dragNew = false;
 
-	viewport->setColour(backgroundColourId, dragNew ? Colours::green.withAlpha(0.1f) :
+	viewport->setColour(backgroundColourId, dragNew ? Colours::mediumpurple.withAlpha(0.1f) :
 		Colours::lightgrey);
 	repaint();
 }

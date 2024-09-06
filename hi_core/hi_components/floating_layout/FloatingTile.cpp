@@ -1237,8 +1237,8 @@ void FloatingTile::paintOverChildren(Graphics& g)
 		}
 		else
 		{
-			g.fillAll(Colours::green.withAlpha(0.1f));
-			g.setColour(Colours::green.withAlpha(0.2f));
+			g.fillAll(Colours::mediumpurple.withAlpha(0.1f));
+			g.setColour(Colours::mediumpurple.withAlpha(0.2f));
 			g.drawRect(getLocalBounds());
 		}
 			

@@ -399,7 +399,7 @@ void JavascriptCodeEditor::paintOverChildren(Graphics& g)
 				const int w = (int)(getCharWidth() * (float)highlightedSelection[i].getLength());
 				const int h = getLineHeight();
 
-				g.setColour(Colours::green.withAlpha(0.4f));
+				g.setColour(Colours::mediumpurple.withAlpha(0.4f));
 				g.fillRoundedRectangle((float)x - 1.0f, (float)y, (float)w + 2.0f, (float)h, 2.0f);
 				g.setColour(Colours::white.withAlpha(0.5f));
 				g.drawRoundedRectangle((float)x - 1.0f, (float)y, (float)w + 2.0f, (float)h, 2.0f, 1.0f);

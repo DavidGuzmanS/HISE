@@ -1437,7 +1437,7 @@ struct ServerController: public Component,
 			{ 
 				Colours::grey,				// Inactive
 				Colours::yellow,			// Pause
-				Colours::green,				// Idle
+				Colours::mediumpurple,				// Idle
 				Colours::blue,				// Pending
 				Colours::transparentBlack	// uninitialised
 			};
@@ -1631,7 +1631,7 @@ struct ServerController: public Component,
 				}
 				case Columns::StatusLed:
 				{
-					g.setColour(Colours::green);
+					g.setColour(Colours::mediumpurple);
 					auto circle = area.withSizeKeepingCentre(12.0f, 12.0f);
 					g.fillEllipse(circle);
 					g.setColour(Colours::white.withAlpha(0.4f));
@@ -1901,7 +1901,7 @@ struct ServerController: public Component,
 		}
 
 		if (data->status == 200)
-			return Colours::green;
+			return Colours::mediumpurple;
 
 		if (data->status == 0 && data->requestTimeMs != 0)
 		{

@@ -997,7 +997,7 @@ SnexMenuBar::SnexMenuBar(SnexSource* s) :
 
 void SnexMenuBar::wasCompiled(bool ok)
 {
-	iconColour = ok ? Colours::green : Colours::red;
+	iconColour = ok ? Colours::mediumpurple : Colours::red;
 	iconColour = iconColour.withSaturation(0.2f).withAlpha(0.8f);
 
 	if (auto nc = findParentComponentOfClass<NodeComponent>())

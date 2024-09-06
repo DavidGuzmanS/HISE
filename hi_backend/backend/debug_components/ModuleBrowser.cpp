@@ -56,7 +56,7 @@ void ModuleBrowser::ModuleItem::paint(Graphics& g)
 		c = Colours::red;
 		break;
 	case ModuleBrowser::ModuleItem::Legal:
-		c = Colours::green;
+		c = Colours::mediumpurple;
 		break;
 	case ModuleBrowser::ModuleItem::numDragStates:
 	default:

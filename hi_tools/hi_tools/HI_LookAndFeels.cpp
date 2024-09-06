@@ -197,7 +197,7 @@ void VUSliderLookAndFeel::drawLinearSlider(Graphics &g,
 
 		g.setGradientFill (ColourGradient (Colour (0x55ffa000),
                                     0.0f, 0.0f,
-									Colours::green.withMultipliedAlpha(0.8f),
+									Colours::mediumpurple.withMultipliedAlpha(0.8f),
                                     (float)width, 0.0f,
                                     false));
 		g.fillRect (367, 171, 225, 21);
