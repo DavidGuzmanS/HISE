@@ -31,7 +31,7 @@ public:
 	    if(auto mc = dynamic_cast<MainController*>(standaloneProcessor->getCurrentProcessor()))
 	    {
             String n;
-            n << "HISE - ";
+            n << "TRIBE - ";
             n <<  GET_HISE_SETTING(mc->getMainSynthChain(), HiseSettings::Project::Name).toString();
 
             if(auto d = findParentComponentOfClass<DocumentWindow>())
