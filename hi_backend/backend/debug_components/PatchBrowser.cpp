@@ -2155,36 +2155,20 @@ PatchBrowser::MiniPeak::~MiniPeak()
 
 void PatchBrowser::MiniPeak::mouseDown(const MouseEvent& e)
 {
-	auto root = GET_BACKEND_ROOT_WINDOW(this)->getRootFloatingTile();
-
-	
-
 	if (type == ProcessorType::Audio)
 	{
 		if(auto rp = dynamic_cast<RoutableProcessor*>(p.get()))
-		{
-			if(root->setTogglePopupFlag(*this, clicked))
-			{
-				rp->editRouting(this);
-			}
-		}
-			
+			rp->editRouting(this);
 	}
     if(type == ProcessorType::Midi)
     {
-		if(root->setTogglePopupFlag(*this, clicked))
-		{
-			auto pl = dynamic_cast<MidiProcessor*>(p.get())->createEventLogComponent();
-			root->showComponentInRootPopup(pl, getParentComponent(), { 100, 35 }, false);
-		}
+        auto pl = dynamic_cast<MidiProcessor*>(p.get())->createEventLogComponent();
+        GET_BACKEND_ROOT_WINDOW(this)->getRootFloatingTile()->showComponentInRootPopup(pl, getParentComponent(), { 100, 35 }, false);
     }
 	if (type == ProcessorType::Mod)
 	{
-		if(root->setTogglePopupFlag(*this, clicked))
-		{
-			auto pl = new PlotterPopup(p);
-			root->showComponentInRootPopup(pl, getParentComponent(), { 100, 35 }, false);
-		}
+		auto pl = new PlotterPopup(p);
+		GET_BACKEND_ROOT_WINDOW(this)->getRootFloatingTile()->showComponentInRootPopup(pl, getParentComponent(), { 100, 35 }, false);
 	}
 }
 

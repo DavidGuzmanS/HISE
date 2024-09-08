@@ -371,7 +371,13 @@ void ConsolePanel::resized()
 
 void ScriptContentPanel::scriptWasCompiled(JavascriptProcessor *processor)
 {
-	updateInterfaceListener(dynamic_cast<ProcessorWithScriptingContent*>(processor));
+	if (processor == dynamic_cast<JavascriptProcessor*>(getConnectedProcessor()))
+	{
+		
+		resized();
+		if (getContent<Editor>() != nullptr)
+			getContent<Editor>()->refreshContent();
+	}
 }
 
 var ScriptContentPanel::toDynamicObject() const

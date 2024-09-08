@@ -1426,13 +1426,6 @@ select::after:hover
     background: #ccc;
     
 }
-
-.no-label
-{
- color: white;
- width: 100%;
-}
-
 )";
 
 } // default_css

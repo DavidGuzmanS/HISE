@@ -532,9 +532,9 @@ void PopupIncludeEditor::compileInternal()
 		else
 		{
 			auto top = getTopLevelComponent();
+
 			auto css = p.getCSSValues();
-			auto scriptFolder = dynamic_cast<Processor*>(getScriptProcessor())->getMainController()->getActiveFileHandler()->getSubDirectory(FileHandlerBase::Scripts);
-			auto fileName = getFile().getRelativePathFrom(scriptFolder).replaceCharacter('\\', '/');
+			auto fileName = getFile().getFileName();
 
 			Component::callRecursive<ScriptContentComponent>(top, [&](ScriptContentComponent* c)
 			{

@@ -66,9 +66,7 @@ DspNodeList::NodeItem::NodeItem(DspNetwork* parent, const String& id):
 	label(),
 	powerButton("on", this, f)
 {
-    auto vt = node->getValueTree();
-    
-	label.setText(vt[PropertyIds::Name].toString(), dontSendNotification);
+	label.setText(id, dontSendNotification);
 	usePopupMenu = false;
 
 	addAndMakeVisible(powerButton);
@@ -90,7 +88,7 @@ DspNodeList::NodeItem::NodeItem(DspNetwork* parent, const String& id):
             
 	powerButton.setToggleModeWithColourChange(true);
 
-	idListener.setCallback(node->getValueTree(), { PropertyIds::Name }, valuetree::AsyncMode::Asynchronously,
+	idListener.setCallback(node->getValueTree(), { PropertyIds::ID }, valuetree::AsyncMode::Asynchronously,
 	                       BIND_MEMBER_FUNCTION_2(NodeItem::updateId));
 
 	bypassListener.setCallback(node->getValueTree(), { PropertyIds::Bypassed }, valuetree::AsyncMode::Asynchronously,
