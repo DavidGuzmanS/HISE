@@ -398,10 +398,10 @@ void ProcessorEditorChainBar::paintOverChildren(Graphics &g)
 		
 		if (b != nullptr)
 		{
-			g.setColour(canBeDropped ? Colours::mediumpurple : Colours::red);
+			g.setColour(canBeDropped ? Colours::green : Colours::red);
 			g.drawRect(chainButtons[insertPosition]->getBounds(), 2);
 
-			g.setColour(canBeDropped ? Colours::mediumpurple.withAlpha(0.2f) : Colours::red.withAlpha(0.2f));
+			g.setColour(canBeDropped ? Colours::green.withAlpha(0.2f) : Colours::red.withAlpha(0.2f));
 			g.fillRect(chainButtons[insertPosition]->getBounds());
 		}	
 	}

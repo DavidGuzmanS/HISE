@@ -148,7 +148,7 @@ void ScriptComponentListItem::paintItem(Graphics& g, int width, int height)
 			
 		}
 
-		Colour c3 = saveInPreset ? Colours::mediumpurple : Colours::red;
+		Colour c3 = saveInPreset ? Colours::green : Colours::red;
 
 		c3 = c3.withAlpha(JUCE_LIVE_CONSTANT_OFF(0.3f));
 

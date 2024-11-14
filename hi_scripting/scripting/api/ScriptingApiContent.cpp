@@ -239,6 +239,7 @@ struct ScriptingApi::Content::ScriptComponent::Wrapper
 	API_VOID_METHOD_WRAPPER_2(ScriptComponent, fadeComponent);
 	API_VOID_METHOD_WRAPPER_3(ScriptComponent, setStyleSheetProperty);
 	API_VOID_METHOD_WRAPPER_1(ScriptComponent, setStyleSheetClass);
+	API_VOID_METHOD_WRAPPER_1(ScriptComponent, setStyleSheetPseudoState);
 	API_VOID_METHOD_WRAPPER_0(ScriptComponent, updateValueFromProcessorConnection);
 };
 
@@ -435,6 +436,7 @@ ScriptingApi::Content::ScriptComponent::ScriptComponent(ProcessorWithScriptingCo
 	ADD_API_METHOD_0(updateValueFromProcessorConnection);
 	ADD_API_METHOD_3(setStyleSheetProperty);
 	ADD_API_METHOD_1(setStyleSheetClass);
+	ADD_API_METHOD_1(setStyleSheetPseudoState);
 
 	//setName(name_.toString());
 
@@ -838,9 +840,20 @@ void ScriptComponent::setStyleSheetClass(const String& classIds)
 	styleSheetProperties.setProperty("class", selfClass, nullptr);
 }
 
+void ScriptComponent::setStyleSheetPseudoState(const String& pseudoStateString)
+{
+	pseudoState = simple_css::PseudoState::getPseudoClassIndex(pseudoStateString);
+
+	sendRepaintMessage();
+}
+
 void ScriptComponent::setStyleSheetProperty(const String& variableId, const var& value, const String& type)
 {
 	auto v = ApiHelpers::convertStyleSheetProperty(value, type);
+
+	if(!styleSheetProperties.isValid())
+        styleSheetProperties = ValueTree("ComponentStyleSheetProperties");
+
 	styleSheetProperties.setProperty(variableId, v, nullptr);
 }
 
@@ -1582,8 +1595,7 @@ void ScriptComponent::setConsumedKeyPresses(var listOfKeys)
 
 	if(listOfKeys.isArray())
 	{
-		catchAllKeys = false;
-				
+		catchAllKeys = AllCatchBehaviour::Inactive;
 		for(const auto& v: *listOfKeys.getArray())
 		{
 			auto k = ApiHelpers::getKeyPress(v, &r);
@@ -1598,15 +1610,19 @@ void ScriptComponent::setConsumedKeyPresses(var listOfKeys)
 	{
         if(listOfKeys.toString() == "all")
         {
-            catchAllKeys = true;
+            catchAllKeys = AllCatchBehaviour::Exclusive;
         }
+		else if(listOfKeys.toString() == "all_nonexclusive")
+		{
+			catchAllKeys = AllCatchBehaviour::NonExlusive;
+		}
         else
         {
             auto k = ApiHelpers::getKeyPress(listOfKeys, &r);
 
             if(r.wasOk())
             {
-                catchAllKeys = false;
+                catchAllKeys = AllCatchBehaviour::Inactive;
                 registeredKeys.add(k);
             }
             else
@@ -1623,18 +1639,16 @@ bool ScriptingApi::Content::ScriptComponent::handleKeyPress(const KeyPress& k)
 {
 	if (keyboardCallback)
 	{
-		if(catchAllKeys || registeredKeys.contains(k))
+		auto matchesKey = registeredKeys.contains(k);
+
+		if((catchAllKeys != AllCatchBehaviour::Inactive) || matchesKey)
 		{
 			auto args = Content::createKeyboardCallbackObject(k);
-
-			var rv;
-
 			keyboardCallback.call(&args, 1); 
 
-			return true;
+			bool consumed = matchesKey || catchAllKeys == AllCatchBehaviour::Exclusive;
+			return consumed;
 		}
-
-		
 	}
 
 	return false;
@@ -1724,7 +1738,23 @@ juce::LookAndFeel* ScriptingApi::Content::ScriptComponent::createLocalLookAndFee
 			if(!styleSheetProperties.isValid())
 			{
 				styleSheetProperties = ValueTree("ComponentStyleSheetProperties");
-				
+			}
+            
+            auto initProperty = [&](const Identifier& id)
+            {
+                if(!propertyTree.hasProperty(id))
+                    propertyTree.setProperty(id, defaultValues[id], nullptr);
+            };
+            
+            initProperty("bgColour");
+            initProperty("itemColour");
+            initProperty("itemColour2");
+            initProperty("textColour");
+            
+            removePropertyIfDefault = false;
+
+			if(!styleSheetProperties.hasProperty("class"))
+			{
 				simple_css::Selector classType(simple_css::SelectorType::Class, propertyTree["type"].toString().toLowerCase());
 				styleSheetProperties.setProperty("class", classType.toString(), nullptr);
 			}
@@ -1746,6 +1776,9 @@ void ScriptingApi::Content::ScriptComponent::setLocalLookAndFeel(var lafObject)
 {
 	if (auto l = dynamic_cast<ScriptingObjects::ScriptedLookAndFeel*>(lafObject.getObject()))
 	{
+		if(l->currentStyleSheet.isNotEmpty())
+			setStyleSheetClass({});
+
 		localLookAndFeel = lafObject;
 
 		ChildIterator<ScriptComponent> iter(this);
@@ -2418,6 +2451,7 @@ ScriptComponent(base, name)
 	ADD_SCRIPT_PROPERTY(i04, "isMomentary");	ADD_TO_TYPE_SELECTOR(SelectorTypes::ToggleSelector);
 	ADD_SCRIPT_PROPERTY(i06, "enableMidiLearn"); ADD_TO_TYPE_SELECTOR(SelectorTypes::ToggleSelector);
     ADD_SCRIPT_PROPERTY(i07, "setValueOnClick"); ADD_TO_TYPE_SELECTOR(SelectorTypes::ToggleSelector);
+	ADD_SCRIPT_PROPERTY(i08, "mouseCursor"); ADD_TO_TYPE_SELECTOR(SelectorTypes::ChoiceSelector);
 
 	handleDefaultDeactivatedProperties();
 
@@ -2433,6 +2467,7 @@ ScriptComponent(base, name)
 	setDefaultValue(ScriptButton::Properties::isMomentary, 0);
 	setDefaultValue(ScriptButton::Properties::enableMidiLearn, true);
     setDefaultValue(ScriptButton::Properties::setValueOnClick, false);
+	setDefaultValue(ScriptButton::Properties::mouseCursor, "ParentCursor");
 
 	initInternalPropertyFromValueTreeOrDefault(filmstripImage);
 
@@ -2486,6 +2521,8 @@ StringArray ScriptingApi::Content::ScriptButton::getOptionsFor(const Identifier 
 
 		return sa;
 	}
+	if(id == getIdFor(mouseCursor))
+		return ApiHelpers::getMouseCursorNames();
 
 	return ScriptComponent::getOptionsFor(id);
 }
@@ -2740,9 +2777,29 @@ String ScriptingApi::Content::ScriptComboBox::getItemText() const
 {
 	StringArray items = getItemList();
 
-    if(isPositiveAndBelow((int)value, (items.size()+1)))
+	auto customPopup = getScriptObjectProperty(Properties::useCustomPopup);
+
+	if(customPopup)
+	{
+		for(int i = 0; i < items.size(); i++)
+		{
+			auto s = items[i];
+			auto isHeadline = s.startsWith("**");
+			auto isSeparator = s.startsWith("___");
+
+			if(isHeadline || isSeparator)
+				items.remove(i--);
+		}
+	}
+
+	if(isPositiveAndBelow((int)value, (items.size()+1)))
     {
-        return items[(int)value - 1];
+        auto itemText = items[(int)value - 1];
+
+		if(customPopup)
+			return itemText.fromLastOccurrenceOf("::", false, false);
+		else
+			return itemText;
     }
     
     return "No options";
@@ -4660,39 +4717,13 @@ void ScriptingApi::Content::ScriptPanel::setMouseCursor(var pathIcon, var colour
 	}
 	else if (pathIcon.isString())
 	{
-		static const StringArray iconIds =
-		{
-		"ParentCursor",               /**< Indicates that the component's parent's cursor should be used. */
-		"NoCursor",                       /**< An invisible cursor. */
-		"NormalCursor",                   /**< The standard arrow cursor. */
-		"WaitCursor",                     /**< The normal hourglass or spinning-beachball 'busy' cursor. */
-		"IBeamCursor",                    /**< A vertical I-beam for positioning within text. */
-		"CrosshairCursor",                /**< A pair of crosshairs. */
-		"CopyingCursor",                  /**< The normal arrow cursor, but with a "+" on it to indicate that you're dragging a copy of something. */
-		"PointingHandCursor",             /**< A hand with a pointing finger, for clicking on web-links. */
-		"DraggingHandCursor",             /**< An open flat hand for dragging heavy objects around. */
-		"LeftRightResizeCursor",          /**< An arrow pointing left and right. */
-		"UpDownResizeCursor",             /**< an arrow pointing up and down. */
-		"UpDownLeftRightResizeCursor",    /**< An arrow pointing up, down, left and right. */
-		"TopEdgeResizeCursor",            /**< A platform-specific cursor for resizing the top-edge of a window. */
-		"BottomEdgeResizeCursor",         /**< A platform-specific cursor for resizing the bottom-edge of a window. */
-		"LeftEdgeResizeCursor",           /**< A platform-specific cursor for resizing the left-edge of a window. */
-		"RightEdgeResizeCursor",          /**< A platform-specific cursor for resizing the right-edge of a window. */
-		"TopLeftCornerResizeCursor",      /**< A platform-specific cursor for resizing the top-left-corner of a window. */
-		"TopRightCornerResizeCursor",     /**< A platform-specific cursor for resizing the top-right-corner of a window. */
-		"BottomLeftCornerResizeCursor",   /**< A platform-specific cursor for resizing the bottom-left-corner of a window. */
-		"BottomRightCornerResizeCursor"  /**< A platform-specific cursor for resizing the bottom-right-corner of a window. */
-		};
+		auto r = Result::ok();
 
-		auto index = iconIds.indexOf(pathIcon.toString());
+		auto standardCursor = ApiHelpers::getMouseCursorFromString(pathIcon.toString(), &r);
+		mouseCursorPath = MouseCursorInfo(standardCursor);
 
-		if (isPositiveAndBelow(index, (MouseCursor::NumStandardCursorTypes)))
-		{
-			auto standardCursor = (MouseCursor::StandardCursorType)index;
-			mouseCursorPath = MouseCursorInfo(standardCursor);
-		}
-		else
-			reportScriptError("Unknown Cursor name. Use the JUCE enum as string");
+		if(r.failed())
+			reportScriptError(r.getErrorMessage());
 	}
 	else
 		reportScriptError("pathIcon is not a path");
@@ -5657,6 +5688,8 @@ struct ScriptingApi::Content::ScriptMultipageDialog::Wrapper
 	API_METHOD_WRAPPER_3(ScriptMultipageDialog, add);
 	API_METHOD_WRAPPER_2(ScriptMultipageDialog, navigate);
 	API_METHOD_WRAPPER_3(ScriptMultipageDialog, bindCallback);
+	API_METHOD_WRAPPER_0(ScriptMultipageDialog, addModalPage);
+	API_VOID_METHOD_WRAPPER_3(ScriptMultipageDialog, showModalPage);
 	API_VOID_METHOD_WRAPPER_1(ScriptMultipageDialog, setOnFinishCallback);
 	API_VOID_METHOD_WRAPPER_1(ScriptMultipageDialog, setOnPageLoadCallback);
 	API_VOID_METHOD_WRAPPER_1(ScriptMultipageDialog, show);
@@ -5707,11 +5740,13 @@ ScriptingApi::Content::ScriptMultipageDialog::ScriptMultipageDialog(ProcessorWit
 	
 	ADD_API_METHOD_0(resetDialog);
 	ADD_API_METHOD_0(addPage);
+	ADD_API_METHOD_0(addModalPage);
 	ADD_API_METHOD_3(add);
 	ADD_API_METHOD_3(bindCallback);
 	ADD_API_METHOD_1(setOnFinishCallback);
 	ADD_API_METHOD_1(setOnPageLoadCallback);
 	ADD_API_METHOD_1(show);
+	ADD_API_METHOD_3(showModalPage);
 	ADD_API_METHOD_2(navigate);
 	ADD_API_METHOD_0(cancel);
 	ADD_API_METHOD_3(setElementProperty);
@@ -5836,6 +5871,11 @@ void ScriptingApi::Content::ScriptMultipageDialog::resetDialog()
 
 int ScriptingApi::Content::ScriptMultipageDialog::addPage()
 {
+	return addPageInternal(false);
+}
+
+int ScriptingApi::Content::ScriptMultipageDialog::addPageInternal(bool isModal)
+{
 	using namespace multipage;
 
 	DynamicObject::Ptr no = new DynamicObject();
@@ -5843,10 +5883,69 @@ int ScriptingApi::Content::ScriptMultipageDialog::addPage()
 	no->setProperty(mpid::Type, "List");
 	no->setProperty(mpid::Children, Array<var>());
 
-	pages.add(var(no.get()));
+	if(isModal)
+		modalPages.add(var(no.get()));
+	else
+		pages.add(var(no.get()));
 
 	elementData.add(var(no.get()));
+
 	return elementData.size()-1;
+}
+
+int ScriptingApi::Content::ScriptMultipageDialog::addModalPage()
+{
+	return addPageInternal(true);
+	
+}
+
+void ScriptingApi::Content::ScriptMultipageDialog::showModalPage(int pageIndex, var modalState, var finishCallback)
+{
+	if(isPositiveAndBelow(pageIndex, elementData.size()))
+	{
+		auto v = elementData[pageIndex];
+
+		if(modalPages.contains(v))
+		{
+			onModalFinish = new ValueCallback(this, "onModalFinish", finishCallback, dispatch::DispatchType::sendNotificationAsync);
+
+			MessageManager::callAsync([v, modalState, pageIndex, this]()
+			{
+				multipage::Factory f;
+
+				if(auto x = f.create(v))
+				{
+					x->setStateObject(modalState);
+
+					x->setCustomCheckFunction([this, modalState, pageIndex](multipage::Dialog::PageBase*, const var& obj)
+					{
+						var thisObject;
+						var a[2];
+
+						a[0] = var(pageIndex);
+						a[1] = modalState;
+
+						var::NativeFunctionArgs args(thisObject, a, 2);
+						this->onModalFinish->operator()(args);
+						return Result::ok();
+					});
+
+					if(auto fd = getMultipageState()->getFirstDialog())
+						fd->showModalPopup(true, x);
+				}
+
+				
+				
+				
+
+				
+			});
+		}
+		else
+		{
+			reportScriptError(String(pageIndex) + " is not a modal page");
+		}
+	}
 }
 
 int ScriptingApi::Content::ScriptMultipageDialog::add(int parentIndex, String type, const var& properties)
@@ -5943,10 +6042,27 @@ void ScriptingApi::Content::ScriptMultipageDialog::setElementProperty(int elemen
 {
 	if(isPositiveAndBelow(elementId, elementData.size()))
 	{
-		DynamicObject::Ptr obj = elementData[elementId].getDynamicObject();
+		
+
+		auto infoObject = elementData[elementId];
+		DynamicObject::Ptr obj = infoObject.getDynamicObject();
 
 		obj->setProperty(propertyId, newValue);
-		sendRepaintMessage();
+
+		auto pid = Identifier(propertyId);
+
+		for(auto c: getMultipageState()->currentDialogs)
+		{
+			SafeAsyncCall::call<multipage::Dialog>(*c, [infoObject, pid](multipage::Dialog& d)
+			{
+				if(auto pb = d.findPageBaseForInfoObject(infoObject))
+				{
+					if(pb->updateInfoProperty(pid))
+						return;
+				}
+			});
+		}
+
 	}
 }
 
@@ -6656,43 +6772,32 @@ void ScriptingApi::Content::beginInitialization()
 
 void ScriptingApi::Content::setHeight(int newHeight) noexcept
 {
-	if (!allowGuiCreation)
+	if(height != newHeight)
 	{
-		reportScriptError("the height can't be changed after onInit()");
-		return;
-	}
+		height = newHeight;
 
-	if (newHeight > 800)
-	{
-		reportScriptError("Go easy on the height! (" + String(800) + "px is enough)");
-		return;
+		if(width != 0)
+			interfaceSizeBroadcaster.sendMessage(sendNotificationAsync, width, height);
 	}
-
-	height = newHeight;
 };
 
 void ScriptingApi::Content::setWidth(int newWidth) noexcept
 {
-	if (!allowGuiCreation)
+	if(width != newWidth)
 	{
-		reportScriptError("the width can't be changed after onInit()");
-		return;
-	}
+		width = newWidth;
 
-	if (newWidth > 1280)
-	{
-		reportScriptError("Go easy on the width! (1280px is enough)");
-		return;
+		if(height != 0)
+			interfaceSizeBroadcaster.sendMessage(sendNotificationAsync, width, height);
 	}
-
-	width = newWidth;
-	
 };
 
 void ScriptingApi::Content::makeFrontInterface(int newWidth, int newHeight)
 {
     width = newWidth;
     height = newHeight;
+
+	interfaceSizeBroadcaster.sendMessage(sendNotificationAsync, width, height);
 
     dynamic_cast<JavascriptMidiProcessor*>(getProcessor())->addToFront(true);
     
@@ -7474,7 +7579,7 @@ struct TextInputData: public ScriptingApi::Content::TextInputDataBase,
         
         inputLabel->setText(prop["text"].toString(), dontSendNotification);
         inputLabel->selectAll();
-        inputLabel->grabKeyboardFocus();
+        inputLabel->grabKeyboardFocusAsync();
     }
     
     void dismissAndCall(bool ok)
@@ -7484,7 +7589,11 @@ struct TextInputData: public ScriptingApi::Content::TextInputDataBase,
 
         var args[2] = {var(ok), var(inputLabel->getText())};
         
-        inputLabel->getParentComponent()->removeChildComponent(inputLabel);
+        if(auto pc = inputLabel->getParentComponent())
+        {
+            pc->removeChildComponent(inputLabel);
+        }
+        
         inputLabel = nullptr;
         
         if(callback)

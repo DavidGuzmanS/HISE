@@ -481,7 +481,7 @@ struct ExpressionPropertyComponent : public PropertyComponent
 				auto b = getLocalBounds();
 
 				
-				auto c = ok ? Colours::mediumpurple : Colours::red;
+				auto c = ok ? Colours::green : Colours::red;
 				c = c.withSaturation(0.3f);
 				c = c.withBrightness(0.4f);
 

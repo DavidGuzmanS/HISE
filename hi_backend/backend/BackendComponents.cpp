@@ -259,7 +259,7 @@ void CachedViewport::itemDragEnter(const SourceDetails &dragSourceDetails)
 {
 	dragNew = isInterestedInDragSource(dragSourceDetails);
 
-	viewport->setColour(backgroundColourId, dragNew ? Colours::mediumpurple.withAlpha(0.1f) :
+	viewport->setColour(backgroundColourId, dragNew ? Colours::green.withAlpha(0.1f) :
 		Colours::lightgrey);
 
 	repaint();
@@ -269,7 +269,7 @@ void CachedViewport::itemDragExit(const SourceDetails &/*dragSourceDetails*/)
 {
 	dragNew = false;
 
-	viewport->setColour(backgroundColourId, dragNew ? Colours::mediumpurple.withAlpha(0.1f) :
+	viewport->setColour(backgroundColourId, dragNew ? Colours::green.withAlpha(0.1f) :
 		Colours::lightgrey);
 	repaint();
 }
@@ -286,7 +286,7 @@ void CachedViewport::itemDropped(const SourceDetails &dragSourceDetails)
 	}
 	dragNew = false;
 
-	viewport->setColour(backgroundColourId, dragNew ? Colours::mediumpurple.withAlpha(0.1f) :
+	viewport->setColour(backgroundColourId, dragNew ? Colours::green.withAlpha(0.1f) :
 		Colours::lightgrey);
 	repaint();
 }
@@ -348,6 +348,25 @@ void CachedViewport::InternalViewport::paint(Graphics &g)
 
 		g.drawImageTransformed(clippedImage, backScaler);
 	}
+}
+
+multipage::EncodedDialogBase::EncodedDialogBase(BackendRootWindow* bpe_, bool addBorder_):
+	ControlledObject(bpe_->getBackendProcessor()),
+	rootWindow(bpe_),
+	closeButton("close", nullptr, factory),
+	addBorder(addBorder_)
+{
+	addAndMakeVisible(closeButton);
+
+	closeButton.onClick = [this]()
+	{
+		if(dialog != nullptr)
+		{
+			dialog->cancel();
+		}
+	};
+
+	closeButton.setVisible(addBorder);
 }
 
 BreadcrumbComponent::BreadcrumbComponent(ProcessorEditorContainer* container_) :

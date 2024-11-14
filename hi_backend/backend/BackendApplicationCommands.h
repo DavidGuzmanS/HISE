@@ -82,6 +82,8 @@ public:
 		MenuProjectNew = 0x20000,
 		MenuProjectLoad,
 		MenuProjectShowInFinder,
+		MenuFileShowHiseAppDataFolder,
+		MenuFileShowProjectAppDataFolder,
 		MenuProjectRecentOffset,
 		// ------------------------
 		MenuSnippetFileNew = 0x22000,
@@ -128,6 +130,7 @@ public:
 		MenuExportUnloadAllSampleMaps,
 		MenuExportUnloadAllAudioFiles,
 		MenuExportCleanBuildDirectory,
+		MenuExportCleanDspNetworkFiles,
 		// --------------------------------------
 		MenuExportSampleDataForInstaller,
 		MenuExportCompileFilesInPool,
@@ -193,6 +196,7 @@ public:
 		MenuToolsSimulateChangingBufferSize,
         MenuToolsCreateRnboTemplate,
 		MenuToolsCreateThirdPartyNode,
+		MenuToolsCreateGlobalCableCppCode,
 		// ----------------------------------
 		// License Management
 		MenuToolsCreateRSAKeys,
@@ -273,13 +277,7 @@ public:
 
 	bool perform(const InvocationInfo &info) override;
 	
-	void updateCommands()
-	{
-		mainCommandManager->commandStatusChanged();
-		createMenuBarNames();
-
-		menuItemsChanged();
-	}
+	void updateCommands();
 
 	void setCopyPasteTarget(CopyPasteTarget *newTarget);
 
@@ -330,9 +328,9 @@ public:
 
 		static void loadFirstXmlAfterProjectSwitch(BackendRootWindow * bpe);
 
-		
 
-		
+		static void showAppDataFolder(BackendRootWindow* bpe, bool getProjectAppData);
+
 		static void showProjectInFinder(BackendRootWindow *bpe);
 		
 		static void loadUserPreset(BackendRootWindow *bpe, const File &fileToLoad);
@@ -353,7 +351,6 @@ public:
 		static void exportHiseProject(BackendRootWindow * bpe);
 		static Result exportInstrumentExpansion(BackendProcessor* bp);
 		static Result createSampleArchive(BackendProcessor* bp);
-
 
 		static void compileNetworksToDll(BackendRootWindow* bpe);
 		static void cleanBuildDirectory(BackendRootWindow * bpe);
@@ -398,6 +395,12 @@ public:
 		static void setupExportWizard(BackendRootWindow* bpe);
 
 		static void exportProject(BackendRootWindow* bpe, int buildOption);
+
+		static void cleanDspNetworkFiles(BackendRootWindow* bpe);
+
+		static void createGlobalCableCppCode(BackendRootWindow* bpe);
+
+		static void exportAudio(BackendRootWindow* bpe);
 	};
 
 private:
@@ -445,6 +448,11 @@ struct XmlBackupFunctions
 private:
 
 	static String getSanitiziedName(const String &id);
+};
+
+struct GitHashManager
+{
+	static void checkHash(const String& hashToUse, const std::function<void(const var&)>& finishCallbackWithNextHash);
 };
 
 } // namespace hise

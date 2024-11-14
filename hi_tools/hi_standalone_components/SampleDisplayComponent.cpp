@@ -912,7 +912,8 @@ void AudioDisplayComponent::SampleArea::setGamma(float newGamma)
 	repaint();
 }
 
-void AudioDisplayComponent::SampleArea::EdgeLookAndFeel::drawStretchableLayoutResizerBar (Graphics &g, 
+void AudioDisplayComponent::SampleArea::EdgeLookAndFeel::drawStretchableLayoutResizerBar (Graphics &g,
+																   Component& resizer,
 																   int w, int h, 
 																   bool isVerticalBar, 
 																   bool isMouseOver, 
@@ -1032,7 +1033,7 @@ void HiseAudioThumbnail::LoadingThread::run()
 		if (spec.parameters->Spectrum2DSize == 0)
 			spec.parameters->setFromBuffer(specBuffer);
 
-		auto b = spec.createSpectrumBuffer();
+		auto b = spec.createSpectrumBuffer(false);
 		newSpec = spec.createSpectrumImage(b);
 		parent->specDirty = false;
 	}

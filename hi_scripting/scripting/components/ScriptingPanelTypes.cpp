@@ -371,13 +371,7 @@ void ConsolePanel::resized()
 
 void ScriptContentPanel::scriptWasCompiled(JavascriptProcessor *processor)
 {
-	if (processor == dynamic_cast<JavascriptProcessor*>(getConnectedProcessor()))
-	{
-		
-		resized();
-		if (getContent<Editor>() != nullptr)
-			getContent<Editor>()->refreshContent();
-	}
+	updateInterfaceListener(dynamic_cast<ProcessorWithScriptingContent*>(processor));
 }
 
 var ScriptContentPanel::toDynamicObject() const
@@ -704,9 +698,13 @@ ScriptContentPanel::Editor::Editor(Canvas* c):
 
 	overlaySelector = new ComboBox("Zoom");
 
-	auto overlayDirectory = dynamic_cast<Processor*>(c->getScriptEditHandlerProcessor())->getMainController()->getCurrentFileHandler().getSubDirectory(FileHandlerBase::SubDirectories::Images).getChildFile("overlays");
+	auto& handler = dynamic_cast<Processor*>(c->getScriptEditHandlerProcessor())->getMainController()->getCurrentFileHandler();
 
-	currentOverlays = overlayDirectory.findChildFiles(File::findFiles, false, "*.png");
+	if(handler.getRootFolder().isDirectory())
+	{
+		auto overlayDirectory = handler.getSubDirectory(FileHandlerBase::SubDirectories::Images).getChildFile("overlays");
+		currentOverlays = overlayDirectory.findChildFiles(File::findFiles, false, "*.png");
+	}
 
 	overlaySelector->addItem("No overlay", 1);
 	overlaySelector->setTextWhenNothingSelected("Select overlay");
@@ -1443,7 +1441,7 @@ struct ServerController: public Component,
 			{ 
 				Colours::grey,				// Inactive
 				Colours::yellow,			// Pause
-				Colours::mediumpurple,				// Idle
+				Colours::green,				// Idle
 				Colours::blue,				// Pending
 				Colours::transparentBlack	// uninitialised
 			};
@@ -1637,7 +1635,7 @@ struct ServerController: public Component,
 				}
 				case Columns::StatusLed:
 				{
-					g.setColour(Colours::mediumpurple);
+					g.setColour(Colours::green);
 					auto circle = area.withSizeKeepingCentre(12.0f, 12.0f);
 					g.fillEllipse(circle);
 					g.setColour(Colours::white.withAlpha(0.4f));
@@ -1907,7 +1905,7 @@ struct ServerController: public Component,
 		}
 
 		if (data->status == 200)
-			return Colours::mediumpurple;
+			return Colours::green;
 
 		if (data->status == 0 && data->requestTimeMs != 0)
 		{

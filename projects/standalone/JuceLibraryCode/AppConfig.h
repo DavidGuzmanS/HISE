@@ -90,6 +90,10 @@
  //#define USE_WORKBENCH_EDITOR 0
 #endif
 
+#ifndef    HISE_PAINT_GLOBAL_MOD_CONNECTIONS
+ //#define HISE_PAINT_GLOBAL_MOD_CONNECTIONS 0
+#endif
+
 //==============================================================================
 // hi_core flags:
 
@@ -238,11 +242,11 @@
 #endif
 
 #ifndef    HISE_USE_OPENGL_FOR_PLUGIN
- #define   HISE_USE_OPENGL_FOR_PLUGIN 1
+ //#define HISE_USE_OPENGL_FOR_PLUGIN 0
 #endif
 
 #ifndef    HISE_DEFAULT_OPENGL_VALUE
- #define   HISE_DEFAULT_OPENGL_VALUE 0
+ //#define HISE_DEFAULT_OPENGL_VALUE 1
 #endif
 
 #ifndef    HISE_USE_SYSTEM_APP_DATA_FOLDER
@@ -402,6 +406,10 @@
 
 #ifndef    HISE_SAMPLER_CUBIC_INTERPOLATION
  //#define HISE_SAMPLER_CUBIC_INTERPOLATION 0
+#endif
+
+#ifndef    HISE_SAMPLER_ALLOW_RELEASE_START
+ //#define HISE_SAMPLER_ALLOW_RELEASE_START 1
 #endif
 
 //==============================================================================

@@ -2209,6 +2209,60 @@ struct FFTHelpers
 
 struct Spectrum2D
 {
+	static void testImage(const Image& test, bool invertAxis, const String& m)
+	{
+		Image::BitmapData cd(test, 0, 0, test.getWidth(), test.getHeight());
+
+		String t;
+		t << m << ": ";
+		int i = 0;
+
+		if(invertAxis)
+		{
+			for(int x = 0; x < cd.width; x++)
+	        {
+	            auto c = cd.getPixelColour(x, cd.height - 1);
+	            
+	            auto r = (int)c.getRed();
+	            auto g = (int)c.getGreen();
+	            auto b = (int)c.getBlue();
+	            auto a = c.getAlpha();
+
+				t << "p[" << String(i++) << "]: " << String(r) << ", ";
+
+				if(i >= 5)
+				{
+					DBG(t);
+					return;
+				}
+					
+	            int funky = 5;
+	        }
+		}
+		else
+		{
+			for(int y = 0; y < cd.height; y++)
+	        {
+	            auto c = cd.getPixelColour(0, y);
+	            
+	            auto r = (int)c.getRed();
+	            auto g = (int)c.getGreen();
+	            auto b = (int)c.getBlue();
+	            auto a = c.getAlpha();
+
+				t << "p[" << String(i++) << "]: " << String(r) << ", ";
+
+				if(i >= 5)
+				{
+					DBG(t);
+					return;
+				}
+					
+	            int funky = 5;
+	        }
+		}
+	}
+
 	struct LookupTable: public ReferenceCountedObject
 	{
 		using Ptr = ReferenceCountedObjectPtr<LookupTable>;
@@ -2229,7 +2283,7 @@ struct Spectrum2D
 
 		static constexpr int LookupTableSize = 512;
 
-		PixelRGB getColouredPixel(float normalisedInput);
+		PixelARGB getColouredPixel(float normalisedInput, bool useAlphaValue);
 
 		LookupTable();
 
@@ -2341,7 +2395,7 @@ struct Spectrum2D
 
 	bool useAlphaChannel = false;
 
-    AudioSampleBuffer createSpectrumBuffer();
+    AudioSampleBuffer createSpectrumBuffer(bool useFallback);
 };
 
 /** A interface class that can attach mouse events to the JSON object provided in the mouse event callback of a broadcaster. */
@@ -2379,7 +2433,13 @@ public:
 
     SemanticVersionChecker(const String& oldVersion_, const String& newVersion_);;
 
+	SemanticVersionChecker(const std::array<int, 3>& oldVersion_, const std::array<int, 3>& newVersion_);
+
     bool isUpdate() const;
+	bool isExactMatch() const
+	{
+		return newVersion.validVersion && newVersion == oldVersion;
+	}
 
     bool isMajorVersionUpdate() const;;
     bool isMinorVersionUpdate() const;;
@@ -2387,10 +2447,32 @@ public:
     bool oldVersionNumberIsValid() const;
     bool newVersionNumberIsValid() const;
 
+	String getErrorMessage(const String& oldVersionName, const String& newVersionName) const
+	{
+	    String m;
+		m << oldVersionName << ": " << oldVersion.toString();
+		m << ", " << newVersionName << ": " << newVersion.toString();
+		return m;
+	}
+
 private:
 
     struct VersionInfo
     {
+		bool operator== (const VersionInfo& other) const
+		{
+		    return majorVersion == other.majorVersion &&
+				   minorVersion == other.minorVersion &&
+				   patchVersion == other.patchVersion;
+		}
+
+		String toString() const
+		{
+		    String m;
+			m << String(majorVersion) << "." << String(minorVersion) << "." << String(patchVersion);
+			return m;
+		}
+
         bool validVersion = false;
         int majorVersion = 0;
         int minorVersion = 0;
@@ -2427,6 +2509,9 @@ struct AdditionalEventStorage
 
 	std::pair<bool, double> getValue(uint16 eventId, uint8 slotIndex) const
 	{
+		if(eventId == 0)
+			return { false, 0.0 };
+
 		auto i1 = eventId & (NumEventSlots -1);
 		auto i2 = slotIndex & (NumDataSlots - 1);
 
@@ -2444,7 +2529,7 @@ struct AdditionalEventStorage
 	{
 		auto nv = getValue(eventId, slotIndex);
 
-		if(nv.first && nv.second != value)
+		if(nv.first)
 		{
 			value = nv.second;
 			return true;
