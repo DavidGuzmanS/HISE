@@ -32,56 +32,58 @@
 
 namespace hise { using namespace juce;
 
-void GlobalModulatorContainer::GlobalModulatorCable::send(int voiceIndex, bool isEnvelope /*= false*/, int startSample /*= 0*/)
+struct GlobalModulatorContainer::GlobalModulatorCable
 {
-	if (auto c = cable.getObject())
-	{
-		auto cable = static_cast<scriptnode::routing::GlobalRoutingManager::Cable*>(c);
+    WeakReference<Modulator> mod;
+    var cable;
+    
+	
 
-		double modValue = 1.0;
-
-		if (voiceIndex == -1)
-		{
-			if (auto m = static_cast<TimeVariantModulator*>(mod.get()))
+    void send(int voiceIndex, bool isEnvelope=false, int startSample=0)
+    {
+        if (auto c = cable.getObject())
+        {
+            auto cable = static_cast<scriptnode::routing::GlobalRoutingManager::Cable*>(c);
+            
+            double modValue = 1.0;
+            
+            if(voiceIndex == -1)
+            {
+                if(auto m = static_cast<TimeVariantModulator*>(mod.get()))
+                {
+                    modValue = m->getLastConstantValue();
+                }
+            }
+			else if (isEnvelope)
 			{
-				modValue = m->getLastConstantValue();
-			}
-		}
-		else if (isEnvelope)
-		{
-			auto gs = dynamic_cast<GlobalModulatorContainer*>(mod->getParentProcessor(true));
+				auto gs = dynamic_cast<GlobalModulatorContainer*>(mod->getParentProcessor(true));
 
-			auto ev = static_cast<ModulatorSynthVoice*>(gs->getVoice(voiceIndex))->getCurrentHiseEvent();
-
-			if (!mod->isBypassed())
-			{
-				auto idx = gs->getEnvelopeIndex(mod);
-
-				if (auto data = gs->getEnvelopeValuesForModulator(idx, startSample, ev))
-				{
+				if (auto data = gs->getEnvelopeValuesForModulator(mod, startSample, voiceIndex))
 					modValue = *data;
-				}
-				else
-				{
-					return;
-				}
 			}
-		}
-		else
-		{
-			if (auto m = static_cast<VoiceStartModulator*>(mod.get()))
-			{
-				modValue = m->getVoiceStartValue(voiceIndex);
-			}
-		}
-
-		cable->sendValue(nullptr, modValue);
-	}
-}
+			else
+            {
+                if(auto m = static_cast<VoiceStartModulator*>(mod.get()))
+                {
+                    modValue = m->getVoiceStartValue(voiceIndex);
+                }
+            }
+            
+            cable->sendValue(nullptr, modValue);
+        }
+        
+        
+    }
+    
+    bool operator==(const GlobalModulatorCable& other) const
+    {
+        return other.mod == mod &&
+               cable == other.cable;
+    }
+};
 
 GlobalModulatorContainer::GlobalModulatorContainer(MainController *mc, const String &id, int numVoices) :
-  ModulatorSynth(mc, id, numVoices),
-  runtimeSource(*this)
+ModulatorSynth(mc, id, numVoices)
 {
 	finaliseModChains();
 
@@ -97,8 +99,7 @@ GlobalModulatorContainer::GlobalModulatorContainer(MainController *mc, const Str
 		{
 			if (ev.getModulator() == m)
 			{
-				auto e = static_cast<ModulatorSynthVoice*>(this->getVoice(voiceIndex))->getCurrentHiseEvent();
-				ev.saveValues(e, data, offset, numSamples);
+				ev.saveValues(voiceIndex, data, offset, numSamples);
 			}
 		}
 	});
@@ -123,9 +124,6 @@ GlobalModulatorContainer::GlobalModulatorContainer(MainController *mc, const Str
 	gainChain->setTableValueConverter(f);
 
 	gainChain->getHandler()->addListener(this);
-
-	dragBroadcaster.setEnableQueue(true);
-	currentMatrixSourceBroadcaster.sendMessage(dontSendNotification, -1);
 }
 
 GlobalModulatorContainer::~GlobalModulatorContainer()
@@ -134,46 +132,24 @@ GlobalModulatorContainer::~GlobalModulatorContainer()
 
 	data.clear();
 	allParameters.clear();
-	runtimeSource.clear();
 }
 
 void GlobalModulatorContainer::restoreFromValueTree(const ValueTree &v)
 {
 	ModulatorSynth::restoreFromValueTree(v);
 
-	auto md = v.getChildWithName(MatrixIds::MatrixData);
-
-	if (md.isValid())
-		runtimeSource.restore(md, nullptr);
-	else
-		runtimeSource.clear();
-
 	refreshList();
 }
 
-int GlobalModulatorContainer::getEnvelopeIndex(Processor* p) const
+const float* GlobalModulatorContainer::getEnvelopeValuesForModulator(Processor* p, int startIndex, int voiceIndex)
 {
-	int idx = 0;
-
-	for(const auto& tv: envelopeData)
+	for (auto& tv : envelopeData)
 	{
-		if(tv.getModulator() == p)
-		{
-			return idx;
-		}
-
-		idx++;
+		if (tv.getModulator() == p)
+			return tv.getReadPointer(voiceIndex, startIndex);
 	}
 
-	jassertfalse;
-	return -1;
-}
-
-const float* GlobalModulatorContainer::getEnvelopeValuesForModulator(int envelopeIndex, int startIndex, const HiseEvent& voiceEvent)
-{
-	jassert(isPositiveAndBelow(envelopeIndex, envelopeData.size()));
-
-	return envelopeData.getReference(envelopeIndex).getReadPointer(voiceEvent, startIndex);
+	return nullptr;
 }
 
 float GlobalModulatorContainer::getVoiceStartValueFor(const Processor * /*voiceStartModulator*/)
@@ -239,183 +215,6 @@ void GlobalModulatorContainer::sendVoiceStartCableValue(Modulator* m, const Hise
             }
         }
     }
-}
-
-void GlobalModulatorContainer::connectToRuntimeTargets(scriptnode::OpaqueNode& on, bool shouldAdd)
-{
-	auto useLock = !LockHelpers::freeToGo(getMainController());
-	LockHelpers::SafeLock sl(getMainController(), LockHelpers::Type::AudioLock, useLock);
-	runtimeSource.connectToRuntimeTargets(on, shouldAdd);
-}
-
-struct GlobalContainerMatrixModulationPopupData: public MacroControlledObject::ModulationPopupData,
-												 public ControlledObject
-{
-	static constexpr int MenuOffset = 9000;
-	static constexpr int AssignOffset = 1000;
-	static constexpr int RemoveOffset = 2000;
-	static constexpr int SpecialCommandOffset = 3000;
-
-	GlobalContainerMatrixModulationPopupData(GlobalModulatorContainer* gc_, const String& targetId):
-	  ControlledObject(gc_->getMainController()),
-	  ModulationPopupData(targetId),
-	  gc(gc_),
-	  data(gc->getMatrixModulatorData())
-	{
-		MatrixIds::Helpers::fillModSourceList(gc->getMainController(), sources);
-	};
-
-	void addToPopupMenu(MacroControlledObject* parent, PopupMenu& m) override
-	{
-		m.addSeparator();
-		m.addSectionHeader("Modulation for " + targetId);
-
-		PopupMenu assignMenu;
-
-		int idx = 0;
-
-		bool anyEnabled = false;
-
-		for(auto s: sources)
-		{
-			if(!isAssigned(s))
-				assignMenu.addItem(MenuOffset + AssignOffset + idx, s, true, false);
-
-			idx++;
-		}
-
-		m.addSubMenu("Assign", assignMenu, !sources.isEmpty());
-
-		idx = 0;
-
-		assignedSources.clear();
-
-		for(auto s: sources)
-		{
-			if(isAssigned(s))
-			{
-				assignedSources.add(s);
-				m.addItem(MenuOffset + RemoveOffset + idx++, "Remove " + s);
-				anyEnabled = true;
-			}
-		}
-
-		int cidx = 0;
-
-		if(gc->customEditCallbacks.size() > 1)
-			m.addSeparator();
-
-		for(auto item: gc->customEditCallbacks)
-		{
-			auto mi = MenuOffset + SpecialCommandOffset + cidx++;
-			m.addItem(mi, item, true, false);
-		}
-	}
-
-	/** Override this method and perform the result if matching and return true if consumed. */
-	bool onPopupMenuResult(MacroControlledObject* parent, int result) override
-	{
-		if(result >= MenuOffset)
-		{
-			result -= MenuOffset;
-
-			if(result >= SpecialCommandOffset)
-			{
-				result -= SpecialCommandOffset;
-				gc->editCallbackHandler.sendMessage(sendNotificationSync, result, targetId);
-			}
-			else if(result >= RemoveOffset)
-			{
-				result -= RemoveOffset;
-
-				auto sourceIndex = sources.indexOf(assignedSources[result]);
-				MatrixIds::Helpers::removeConnection(data, getMainController()->getControlUndoManager(), targetId, sourceIndex);
-
-				if(auto s = dynamic_cast<HiSlider*>(parent))
-				{
-					s->showModHoverPopup(false, true);
-				}
-			}
-			else if (result >= AssignOffset)
-			{
-				result -= AssignOffset;
-				MatrixIds::Helpers::addConnection(data, getMainController(), targetId, result);
-
-				if(auto s = dynamic_cast<HiSlider*>(parent))
-				{
-					// refresh the hover popup by closing & reopening it
-					s->showModHoverPopup(false, true);
-					s->showModHoverPopup(true, true);
-				}
-			}
-
-			return true;
-		}
-
-		return false;
-	}
-
-private:
-
-	bool isAssigned(String sourceIndex) const
-	{
-		auto idx = sources.indexOf(sourceIndex);
-
-		for(auto d: data)
-		{
-			if((int)d[MatrixIds::SourceIndex] == idx && d[MatrixIds::TargetId].toString() == targetId)
-				return true;
-		}
-
-		return false;
-	}
-
-	WeakReference<GlobalModulatorContainer> gc;
-	ValueTree data;
-	StringArray sources;
-	StringArray assignedSources;
-};
-
-MacroControlledObject::ModulationPopupData::Ptr GlobalModulatorContainer::createMatrixModulationPopupData(Processor* p,
-	int parameterIndex)
-{
-	auto targetId = p->getModulationTargetId(parameterIndex);
-	return createMatrixModulationPopupData(targetId);
-}
-
-MacroControlledObject::ModulationPopupData::Ptr GlobalModulatorContainer::createMatrixModulationPopupData(const String& targetId)
-{
-	return new GlobalContainerMatrixModulationPopupData(this, targetId);
-}
-
-
-void GlobalModulatorContainer::RuntimeSource::restore(const ValueTree& v, UndoManager* um)
-{
-	jassert(v.getType() == MatrixIds::MatrixData);
-	matrixData.removeAllChildren(um);
-
-	for(auto c: v)
-	{
-		matrixData.addChild(c.createCopy(), -1, um);
-	}
-}
-
-void GlobalModulatorContainer::RuntimeSource::clear()
-{
-	matrixData.removeAllChildren(nullptr);
-
-	if(!connectedNodes.isEmpty())
-	{
-		auto c = createConnection();
-
-		for(auto on: connectedNodes)
-			on->connectToRuntimeTarget(false, c);
-
-		connectedNodes.clear();
-	}
-
-	// must be cleared from the connectStatic method...
-	jassert(connectedTargets.isEmpty());
 }
 
 void GlobalModulatorContainer::preStartVoice(int voiceIndex, const HiseEvent& e)
@@ -486,26 +285,6 @@ void GlobalModulatorContainer::preVoiceRendering(int startSample, int numThisTim
 	
 	auto scratchBuffer = modChains[GainChain].getScratchBuffer();
 
-	for(auto& ev: envelopeData)
-	{
-		if(auto mod = ev.getModulator())
-		{
-			if (mod->isInMonophonicMode())
-			{
-				if(!mod->isBypassed())
-				{
-					auto modBuffer = ev.initialiseMonophonicBuffer(startSample_cr, numSamples_cr);
-					mod->setScratchBuffer(scratchBuffer, startSample_cr + numSamples_cr);
-					mod->render(0, modBuffer, scratchBuffer, startSample_cr, numSamples_cr);
-				}
-			}
-			else
-			{
-				ev.updateThisBufferSize();
-			}
-		}
-	}
-
 	for (auto& tv : timeVariantData)
 	{
 		if (auto mod = tv.getModulator())
@@ -527,9 +306,7 @@ void GlobalModulatorContainer::preVoiceRendering(int startSample, int numThisTim
 	}
     
     SimpleReadWriteLock::ScopedReadLock sl(cableLock);
-
-	lastBlockSize = numThisTime;
-
+    
     for(auto& c: timeVariantCables)
     {
         c.send(-1);
@@ -540,15 +317,11 @@ void GlobalModulatorContainer::prepareToPlay(double newSampleRate, int samplesPe
 {
 	ModulatorSynth::prepareToPlay(newSampleRate, samplesPerBlock);
 
-	{
-		for (auto& d : timeVariantData)
-			d.prepareToPlay(samplesPerBlock);
+	for (auto& d : timeVariantData)
+		d.prepareToPlay(samplesPerBlock);
 
-		for (auto& d : envelopeData)
-			d.prepareToPlay(samplesPerBlock);
-
-		runtimeSource.updateTargets();
-	}
+	for (auto& d : envelopeData)
+		d.prepareToPlay(samplesPerBlock);
 
 	for (int i = 0; i < data.size(); i++)
 	{
@@ -635,8 +408,6 @@ void GlobalModulatorContainer::restoreModulatedParameters(const ValueTree& v)
 
 void GlobalModulatorContainer::refreshList()
 {
-	jassert(isIdleOrHasAudioLock());
-
 	// Delete all old datas
 
 	voiceStartData.clearQuick();
@@ -660,12 +431,9 @@ void GlobalModulatorContainer::refreshList()
 	envelopeData.clearQuick();
 
 	for (auto& mod : handler_->activeEnvelopesList)
+	{
 		envelopeData.add(EnvelopeData(mod, getLargestBlockSize()));
-
-	for(auto& mod: handler_->activeMonophonicEnvelopesList)
-		envelopeData.add(EnvelopeData(mod, getLargestBlockSize()));
-
-	runtimeSource.updateTargets();
+	}
 }
 
 void GlobalModulatorContainerVoice::startNote(int midiNoteNumber, float /*velocity*/, SynthesiserSound*, int /*currentPitchWheelPosition*/)
@@ -675,18 +443,6 @@ void GlobalModulatorContainerVoice::startNote(int midiNoteNumber, float /*veloci
 	voiceUptime = 0.0;
 
 	uptimeDelta = 1.0;
-
-	auto gc = static_cast<GlobalModulatorContainer*>(getOwnerSynth());
-
-	ModulatorChain *g = static_cast<ModulatorChain*>(gc->getChildProcessor(ModulatorSynth::GainModulation));
-
-	if (g->hasActiveEnvelopesAtAll())
-	{
-		for (auto& e : gc->envelopeData)
-		{
-			e.startVoice(getCurrentHiseEvent());
-		}
-	}
 }
 
 void GlobalModulatorContainerVoice::calculateBlock(int startSample, int numSamples)
@@ -696,15 +452,10 @@ void GlobalModulatorContainerVoice::calculateBlock(int startSample, int numSampl
 
 	auto gs = static_cast<GlobalModulatorContainer*>(getOwnerSynth());
 
-	if(gs->getLastStartedVoice() == this)
+	for (auto& e : gs->envelopeCables)
 	{
-		for (auto& e : gs->envelopeCables)
-		{
-			e.send(getVoiceIndex(), true, startSample);
-		}
+		e.send(getVoiceIndex(), true, startSample);
 	}
-
-	
 		
 
 #if 0
@@ -725,28 +476,16 @@ void GlobalModulatorContainerVoice::checkRelease()
 		return;
 	}
 
-	bool somePlaying = false;
-
-	if (g->hasActiveEnvelopesAtAll())
+	if (g->hasActivePolyEnvelopes())
 	{
 		for (auto& e : gc->envelopeData)
 		{
-			auto thisPlaying = e.clearIfPending(getCurrentHiseEvent());
-
-			somePlaying |= thisPlaying;
-
-			if(thisPlaying)
-			{
-				thisPlaying = e.getModulator()->isPlaying(getVoiceIndex());
-
-				if(!thisPlaying)
-					e.clear(getCurrentHiseEvent());
-			}
+			if (e.getModulator()->isPlaying(getVoiceIndex()))
+				return;
 		}
 	}
 
-	if(!somePlaying)
-		resetVoice();
+	resetVoice();
 }
 
 GlobalModulatorData::GlobalModulatorData(Processor *modulator_):
@@ -846,18 +585,6 @@ void GlobalModulatorData::handleVoiceStartControlledParameters(int noteNumber)
 	
 
 
-}
-
-void GlobalModulatorData::restoreParameterConnections(const ValueTree& v)
-{
-	connectedParameters.clear();
-
-	for (const auto& c : v)
-	{
-		auto p = new ParameterConnection(nullptr, -1, {});
-		p->restoreFromValueTree(c);
-		connectedParameters.add(p);
-	}
 }
 
 void GlobalModulatorData::handleTimeVariantControlledParameters(int startSample, int numThisTime) const

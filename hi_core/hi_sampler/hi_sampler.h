@@ -69,9 +69,7 @@ END_JUCE_MODULE_DECLARATION
 
 
 #include "sampler/ModulatorSamplerData.h"
-#include "sampler/ComplexGroupManager.h"
 #include "sampler/ModulatorSamplerSound.h"
-
 #include "sampler/ModulatorSamplerVoice.h"
 #include "sampler/ModulatorSampler.h"
 
@@ -93,7 +91,6 @@ END_JUCE_MODULE_DECLARATION
 #include "sampler/components/SampleMapEditor.h"
 #include "sampler/components/SamplerTable.h"
 #include "sampler/components/SampleEditHandler.h"
-#include "sampler/components/ComplexGroupManagerComponent.h"
 #endif
 
 

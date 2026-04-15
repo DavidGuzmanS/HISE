@@ -268,10 +268,9 @@ public:
 	static constexpr int getFixChannelAmount() { return NumChannels; };
 
 	/** Forwards the callback to its wrapped object. */
-	void initialise(ObjectWithValueTree* n)
+	void initialise(NodeBase* n)
 	{
-		if constexpr(prototypes::check::initialise<T>::value)
-			this->obj.initialise(n);
+		this->obj.initialise(n);
 	}
 
 	/** Forwards the callback to its wrapped object, but it will change the channel amount to NumChannels. */
@@ -355,7 +354,7 @@ public:
 	SN_DEFAULT_PROCESS(T);
 	SN_DEFAULT_MOD(T);
 
-	void initialise(ObjectWithValueTree* n)
+	void initialise(NodeBase* n)
 	{
 		if constexpr(prototypes::check::initialise<T>::value)
 			obj.initialise(n);
@@ -402,10 +401,9 @@ public:
 
 	SN_OPAQUE_WRAPPER(skip, T);
 
-	void initialise(ObjectWithValueTree* n)
+	void initialise(NodeBase* n)
 	{
-		if constexpr (prototypes::check::initialise<T>::value)
-			this->obj.initialise(n);
+		this->obj.initialise(n);
 	}
 
 	void prepare(PrepareSpecs) {}
@@ -547,8 +545,6 @@ public:
 private:
 };
 
-
-
 template <class T> class no_data
 {
 public:
@@ -573,11 +569,7 @@ public:
 
 	}
 
-	void connectToRuntimeTarget(bool add, const runtime_target::connection& c)
-    {
-        if constexpr (prototypes::check::connectToRuntimeTarget<T>::value)
-            obj.connectToRuntimeTarget(add, c);
-    }
+	
 
 	template <int P> void setParameter(double v)
 	{
@@ -595,10 +587,9 @@ public:
 
 	SN_OPAQUE_WRAPPER(frame_x, T);
 
-	void initialise(ObjectWithValueTree* n)
+	void initialise(NodeBase* n)
 	{
-		if constexpr (prototypes::check::initialise<T>::value)
-			this->obj.initialise(n);
+		obj.initialise(n);
 	}
 
 	void prepare(PrepareSpecs ps)
@@ -690,8 +681,6 @@ struct oversample_base
 
 	using Oversampler = juce::dsp::Oversampling<float>;
 
-	using FilterType = Oversampler::FilterType;
-
 	oversample_base(int factor) :
 		oversamplingFactor(jmax(1, factor))
 	{};
@@ -710,7 +699,7 @@ struct oversample_base
 
         ScopedPointer<Oversampler> newOverSampler;
         
-        newOverSampler = new Oversampler(numChannels, (int)std::log2(oversamplingFactor), filterType, false);
+        newOverSampler = new Oversampler(numChannels, (int)std::log2(oversamplingFactor), Oversampler::FilterType::filterHalfBandPolyphaseIIR, false);
 
         if (originalBlockSize > 0)
             newOverSampler->initProcessing(originalBlockSize);
@@ -758,28 +747,6 @@ struct oversample_base
 		if(originalSpecs)
 			prepare(originalSpecs);
     }
-
-	FilterType getFilterType() const { return filterType; }
-
-	void setFilterType(int nt)
-    {
-		span<FilterType, 2> types = {
-			FilterType::filterHalfBandPolyphaseIIR,
-			FilterType::filterHalfBandFIREquiripple
-		};
-
-		auto newType = types[jlimit(0, 1, nt)];
-
-	    if(newType != filterType)
-	    {
-			SimpleReadWriteLock::ScopedWriteLock sl(this->lock);
-
-		    filterType = newType;
-
-			if(originalSpecs)
-				prepare(originalSpecs);
-	    }
-    }
     
 protected:
 
@@ -790,9 +757,7 @@ protected:
     int oversamplingFactor = 0;
     int originalBlockSize = 0;
     int numChannels = 0;
-
-	FilterType filterType = FilterType::filterHalfBandPolyphaseIIR;
-
+	
 	void* pObj = nullptr;
 	prototypes::prepare prepareFunc;
 
@@ -975,15 +940,10 @@ public:
 
     template <int P> void setParameter(double newValue)
     {
-		static_assert(P == 0 || P == 1, "illegal parameter index");
-		static_assert(OversamplingFactor == 0 || P == 0, "wrong filter type index for static oversampling");
+		static_assert(P == 0, "illegal parameter index");
 
-		if constexpr(P == 0 && OversamplingFactor == 0)
-			this->setOversamplingFactor((int)newValue);
-        else
-			this->setFilterType((int)newValue);
-            
-		
+        if constexpr(P == 0)
+            this->setOversamplingFactor((int)newValue);
     }
 	SN_FORWARD_PARAMETER_TO_MEMBER(oversample);
 
@@ -1031,10 +991,9 @@ public:
 		oversampler->processSamplesDown(bl);
 	}
 
-	void initialise(ObjectWithValueTree* n)
+	void initialise(NodeBase* n)
 	{
-		if constexpr (prototypes::check::initialise<T>::value)
-			this->obj.initialise(n);
+		obj.initialise(n);
 	}
 
 private:
@@ -1132,12 +1091,6 @@ template <class T, class DataHandler = default_data<T>> struct data : public wra
 		T::template setParameterStatic<P>(&this->obj, v);
 	}
 
-	void connectToRuntimeTarget(bool addConnection, const runtime_target::connection& c)
-	{
-		if constexpr (prototypes::check::connectToRuntimeTarget<T>::value)
-			this->obj.connectToRuntimeTarget(addConnection, c);
-	}
-
 	JUCE_DECLARE_WEAK_REFERENCEABLE(data);
 };
 
@@ -1158,11 +1111,7 @@ public:
 	SN_EMPTY_PROCESS_FRAME;
 	SN_EMPTY_HANDLE_EVENT;
 	
-	void initialise(ObjectWithValueTree* n)
-	{
-		if constexpr (prototypes::check::initialise<T>::value)
-			this->obj.initialise(n);
-	}
+	void initialise(NodeBase* n) { obj.initialise(n); }
 
 	void prepare(PrepareSpecs ps) { obj.prepare(ps); }
 
@@ -1250,16 +1199,15 @@ template <class T, typename FixBlockClass> struct fix_blockx
 {
 	SN_OPAQUE_WRAPPER(fix_blockx, T);
 
+	
 	SN_DEFAULT_RESET(T);
 	SN_DEFAULT_MOD(T);
 	SN_DEFAULT_HANDLE_EVENT(T);
 
-	void initialise(ObjectWithValueTree* n)
+	void initialise(NodeBase* n)
 	{
 		fbClass.initialise(n);
-
-		if constexpr (prototypes::check::initialise<T>::value)
-			this->obj.initialise(n);
+		obj.initialise(n);
 	}
 
 	void prepare(PrepareSpecs ps)
@@ -1318,10 +1266,9 @@ template <class T> struct dynamic_blocksize
 		obj.prepare(ps);
 	}
 
-	void initialise(ObjectWithValueTree* n)
+	void initialise(NodeBase* n)
 	{
-		if constexpr (prototypes::check::initialise<T>::value)
-			this->obj.initialise(n);
+		obj.initialise(n);
 	}
 
 	void handleHiseEvent(HiseEvent& e)
@@ -1421,10 +1368,9 @@ public:
 
 	constexpr static bool isModulationSource = false;
 
-	void initialise(ObjectWithValueTree* n)
+	void initialise(NodeBase* n)
 	{
-		if constexpr (prototypes::check::initialise<T>::value)
-			this->obj.initialise(n);
+		obj.initialise(n);
 	}
 
 	void prepare(PrepareSpecs ps)
@@ -1540,10 +1486,9 @@ template <class ParameterClass, class T> struct mod
 		checkModValue();
 	}
 
-	void initialise(ObjectWithValueTree* n)
+	inline void initialise(NodeBase* n)
 	{
-		if constexpr (prototypes::check::initialise<T>::value)
-			this->obj.initialise(n);
+		obj.initialise(n);
 	}
 
 	/** Calls handleHiseEvent on the wrapped object and sends out a modulation signal if required. */
@@ -1598,13 +1543,7 @@ template <class ParameterClass, class T> struct mod
             obj.createParameters(data);
         
     }
-
-	void connectToRuntimeTarget(bool add, const runtime_target::connection& c)
-    {
-        if constexpr (prototypes::check::connectToRuntimeTarget<T>::value)
-            obj.connectToRuntimeTarget(add, c);
-    }
-
+    
 	void setExternalData(const ExternalData& d, int index)
 	{
 		if constexpr (prototypes::check::setExternalData<T>::value)
@@ -1637,7 +1576,7 @@ template <typename T> struct illegal_poly: public scriptnode::data::base,
 
 	static Identifier getStaticId() { return T::getStaticId(); }
 
-	static constexpr bool isPolyphonic() { return false; }
+	static constexpr bool isPolyphonic() { return true; }
 
 	void prepare(PrepareSpecs ps)
 	{
@@ -1658,18 +1597,12 @@ template <typename T> struct illegal_poly: public scriptnode::data::base,
 	SN_EMPTY_HANDLE_EVENT;
 	SN_EMPTY_MOD;
 	
-	void initialise(ObjectWithValueTree* n)
-	{
-		if constexpr (prototypes::check::initialise<T>::value)
-			this->obj.initialise(n);
-	}
+	void initialise(NodeBase* n) { obj.initialise(n); }
 
 	void createParameters(ParameterDataList& l) { obj.createParameters(l); }
-
-	SN_DEFAULT_CREATE_MOD_INFO(T);
-
 	T obj;
 };
+
 
 
 /** A "base class for the node template". */
@@ -1706,8 +1639,6 @@ template <class T> struct node : public scriptnode::data::base
 
 	static constexpr int getFixChannelAmount() { return NumChannels; };
 
-	static constexpr std::pair<int, int> getModulationProperties() { return T::getModulationProperties(); }
-
 	// We treat everything in this node as opaque...
 	SN_GET_SELF_AS_OBJECT(node);
 
@@ -1723,10 +1654,9 @@ template <class T> struct node : public scriptnode::data::base
 	{
 	}
 
-	void initialise(ObjectWithValueTree* n)
+	void initialise(NodeBase* n)
 	{
-		if constexpr (prototypes::check::initialise<T>::value)
-			this->obj.initialise(n);
+		obj.initialise(n);
 	}
 
 	template <int P> static void setParameterStatic(void* ptr, double v)
@@ -1770,9 +1700,12 @@ template <class T> struct node : public scriptnode::data::base
 		obj.handleHiseEvent(e);
 	}
 
-	constexpr bool isPolyphonic()
+	bool isPolyphonic() const
 	{
-		return obj.isPolyphonic();
+		if constexpr (prototypes::check::isPolyphonic<T>::value)
+			return obj.isPolyphonic();
+		else
+			return false;
 	}
 
 	static constexpr bool isProcessingHiseEvent()
@@ -1783,10 +1716,7 @@ template <class T> struct node : public scriptnode::data::base
 			return false;
 	}
 
-	void reset() noexcept 
-	{ 
-		obj.reset(); 
-	}
+	void reset() noexcept { obj.reset(); }
 
 	bool handleModulation(double& value) noexcept
 	{
@@ -1808,22 +1738,14 @@ template <class T> struct node : public scriptnode::data::base
             obj.connectToRuntimeTarget(add, c);
     }
 
-	void createExternalModulationInfo(OpaqueNode::ModulationProperties& info) const
-	{
-		if constexpr (prototypes::check::createExternalModulationInfo<T>::value)
-			obj.createExternalModulationInfo(info);
-		else
-		{
-			info.template fromNode<node>();
-		}
-	}
-
 	void createParameters(ParameterDataList& data)
 	{
 		ParameterDataList l;
-		obj.getObject().parameters.addToList(l);
+		obj.parameters.addToList(l);
 
 		auto peList = parameter::encoder::fromNode<node>();
+
+		
 
 		for (const parameter::pod& p : peList)
 		{

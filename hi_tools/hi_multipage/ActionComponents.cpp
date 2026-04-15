@@ -679,7 +679,7 @@ Result FileAction::onAction()
 
 		switch(ft)
 		{
-		case CheckIfExists2:
+		case CheckIfExists:
 		{
 			File f(source);
 
@@ -690,7 +690,7 @@ Result FileAction::onAction()
 			
 			break;
 		}
-		case ASDDeleteFile222:
+		case DeleteFile:
 		{
 			File f(target);
 
@@ -704,7 +704,7 @@ Result FileAction::onAction()
 
 			break;
 		}
-		case CopyFile2:
+		case CopyFile:
 		{
 			File sf(source);
 			File tf(target);
@@ -716,7 +716,7 @@ Result FileAction::onAction()
 			}
 			break;
 		}
-		case MoveFile2:
+		case MoveFile:
 		{
 			File sf(source);
 			File tf(target);
@@ -728,7 +728,7 @@ Result FileAction::onAction()
 			}
 			break;
 		};
-		case LoadAsString2:
+		case LoadAsString:
 		{
 			File sf(source);
 
@@ -741,7 +741,7 @@ Result FileAction::onAction()
 
 			break;
 		};
-		case LoadAsObject2:
+		case LoadAsObject:
 		{
 			File sf(source);
 
@@ -754,7 +754,7 @@ Result FileAction::onAction()
 
 			break;
 		};
-		case WriteString2:
+		case WriteString:
 		{
 			File tf(target);
 			
@@ -766,7 +766,7 @@ Result FileAction::onAction()
 
 			break;
 		};
-		case WriteObject2:
+		case WriteObject:
 		{
 			File tf(target);
 			
@@ -2859,7 +2859,7 @@ Result HiseActivator::performTaskStatic(WaitJob& t)
 
 		auto isOnline = []()
 		{
-			const char* urlsToTry[] = { "https://google.com/generate_204", "https://amazon.com", nullptr };
+			const char* urlsToTry[] = { "http://google.com/generate_204", "https://amazon.com", nullptr };
 
 			for (const char** url = urlsToTry; *url != nullptr; ++url)
 			{

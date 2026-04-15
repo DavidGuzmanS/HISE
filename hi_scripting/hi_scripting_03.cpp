@@ -123,6 +123,9 @@
 #include "scripting/scriptnode/api/DspHelpers.cpp"
 
 #include "scripting/scriptnode/api/NodeBase.cpp"
+#include "scripting/scriptnode/api/NodeProperty.cpp"
+
+
 
 #include "scripting/scriptnode/api/ModulationSourceNode.cpp"
 #include "scripting/scriptnode/api/DspNetwork.cpp"

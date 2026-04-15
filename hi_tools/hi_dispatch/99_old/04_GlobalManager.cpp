@@ -30,6 +30,8 @@
 *   ===========================================================================
 */
 
+#include "JuceHeader.h"
+
 namespace hise {
 namespace dispatch {	
 using namespace juce;

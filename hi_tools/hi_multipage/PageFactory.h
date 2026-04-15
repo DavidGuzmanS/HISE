@@ -260,42 +260,14 @@ struct DummyContent: public Component,
 
     void paint(Graphics& g) override
     {
-        if(dynamicContent == nullptr)
-        {
-	        g.fillAll(Colours::white.withAlpha(0.1f));
-	        g.setColour(Colours::white.withAlpha(0.7f));
-	        g.setFont(GLOBAL_MONOSPACE_FONT());
-	        g.drawRect(getLocalBounds(), 1);
-	        g.drawText("Placeholder for " + classId, getLocalBounds().toFloat(), Justification::centred);
-        }
+	    g.fillAll(Colours::white.withAlpha(0.1f));
+        g.setColour(Colours::white.withAlpha(0.7f));
+        g.setFont(GLOBAL_MONOSPACE_FONT());
+        g.drawRect(getLocalBounds(), 1);
+        g.drawText("Placeholder for " + classId, getLocalBounds().toFloat(), Justification::centred);
     }
 
-    void resized() override
-    {
-	    if(dynamicContent != nullptr)
-	    {
-		    dynamicContent->setBounds(getLocalBounds());
-	    }
-    }
-    
-    void postInit() override
-    {
-        auto& s = rootDialog.getState();
-
-        if(s.dynamicComponentFactory)
-        {
-	        auto newComponent = s.dynamicComponentFactory(classId);
-
-	        if(newComponent != nullptr)
-	        {
-		        addAndMakeVisible(dynamicContent = newComponent);
-	            resized();
-	        }
-        }
-    };
-
-    ScopedPointer<Component> dynamicContent;
-
+    void postInit() override {};
     Result checkGlobalState(var state) override { return Result::ok(); }
 
     String classId;

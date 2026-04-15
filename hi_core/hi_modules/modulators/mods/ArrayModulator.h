@@ -39,13 +39,11 @@ namespace hise { using namespace juce;
 *	@ingroup modulatorTypes
 */
 class ArrayModulator : public VoiceStartModulator,
-                        public SliderPackProcessor
+                       public SliderPackProcessor
 {
 public:
 
-	SET_PROCESSOR_NAME("ArrayModulator", "Array Modulator", "")
-
-	static ProcessorMetadata createMetadata();
+	SET_PROCESSOR_NAME("ArrayModulator", "Array Modulator", "Creates a modulation signal from an array (note-number based).")
 
 		/// Additional Parameters for the constant modulator
 	enum SpecialParameters

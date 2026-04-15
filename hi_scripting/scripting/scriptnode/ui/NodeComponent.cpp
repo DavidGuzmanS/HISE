@@ -47,7 +47,7 @@ NodeComponent::Header::Header(NodeComponent& parent_) :
 	powerButton(getPowerButtonId(false), this, f, getPowerButtonId(true)),
 	deleteButton("close", this, f),
 	parameterButton("parameter", this, f),
-	autofixButton("Auto Fix")
+	freezeButton("freeze", this, f)
 {
     String tooltip;
     
@@ -77,7 +77,7 @@ NodeComponent::Header::Header(NodeComponent& parent_) :
 	colourUpdater.setCallback(parent.node->getValueTree(), { PropertyIds::NodeColour }, valuetree::AsyncMode::Synchronously,
 		BIND_MEMBER_FUNCTION_2(NodeComponent::Header::updateColour));
 
-	dynamicPowerUpdater.setTypesToWatch({ PropertyIds::Nodes, PropertyIds::Connections, PropertyIds::ModulationTargets });
+	dynamicPowerUpdater.setTypesToWatch({ PropertyIds::Nodes, PropertyIds::Connections });
 
 	dynamicPowerUpdater.setCallback(parent.node->getRootNetwork()->getValueTree(), valuetree::AsyncMode::Asynchronously, [this](ValueTree v, bool wasAdded)
 	{
@@ -94,8 +94,9 @@ NodeComponent::Header::Header(NodeComponent& parent_) :
 	addAndMakeVisible(powerButton);
 	addAndMakeVisible(deleteButton);
 	addAndMakeVisible(parameterButton);
+	addAndMakeVisible(freezeButton);
 
-	addChildComponent(autofixButton);
+	freezeButton.setToggleModeWithColourChange(true);
 
 	bool isContainer = false;
 
@@ -111,11 +112,13 @@ NodeComponent::Header::Header(NodeComponent& parent_) :
 		parameterUpdater.setCallback(parent.node->getValueTree(), {PropertyIds::ShowParameters}, valuetree::AsyncMode::Asynchronously, BIND_MEMBER_FUNCTION_2(Header::updateConnectionButton));
 	}
 
-	autofixButton.onClick = [this]()
-	{
-		parent.node->getRootNetwork()->getExceptionHandler().autofix(parent.node.get());
-	};
+	freezeButton.setEnabled(parent.node->getRootNetwork()->canBeFrozen());
 
+	freezeButton.setToggleStateAndUpdateIcon(parent.node->getRootNetwork()->isFrozen());
+	
+	if (!freezeButton.isEnabled())
+		freezeButton.setAlpha(0.1f);
+    
     setRepaintsOnMouseActivity(true);
 }
 
@@ -132,6 +135,11 @@ void NodeComponent::Header::buttonClicked(Button* b)
 
 		parent.dataReference.getParent().removeChild(
 			parent.dataReference, parent.node->getUndoManager());
+	}
+	if (b == &freezeButton)
+	{
+		parent.node->getRootNetwork()->setUseFrozenNode(b->getToggleState());
+		parent.repaint();
 	}
 	if (b == &parameterButton)
 	{
@@ -169,15 +177,19 @@ void NodeComponent::Header::resized()
 {
 	auto b = getLocalBounds();
 
-	if(autofixButton.isVisible())
-		autofixButton.setBounds(b.removeFromLeft(70).reduced(3));
-
 	powerButton.setBounds(b.removeFromLeft(getHeight()).reduced(3));
+
 	parameterButton.setBounds(b.removeFromLeft(getHeight()).reduced(3));
+
 	deleteButton.setBounds(b.removeFromRight(getHeight()).reduced(3));
+	freezeButton.setBounds(deleteButton.getBounds());
+
 	powerButton.setVisible(!parent.isRoot());
 
+	
+
 	deleteButton.setVisible(!parent.isRoot());
+	freezeButton.setVisible(false);
 }
 
 void NodeComponent::Header::mouseDown(const MouseEvent& e)
@@ -185,7 +197,9 @@ void NodeComponent::Header::mouseDown(const MouseEvent& e)
 	CHECK_MIDDLE_MOUSE_DOWN(e);
 
 	if (e.mods.isRightButtonDown())
+	{
 		parent.handlePopupMenuResult((int)MenuActions::EditProperties);
+	}
 }
 
 void NodeComponent::Header::mouseUp(const MouseEvent& e)
@@ -336,6 +350,10 @@ void NodeComponent::Header::paint(Graphics& g)
 	if(parameterButton.isVisible())
 		leftMargin += textArea.getHeight();
 
+	if(freezeButton.isVisible())
+		rightMargin += textArea.getHeight();
+
+
 	auto ar = getLocalBounds().toFloat();
 	ar.removeFromRight(ar.getHeight());
 
@@ -390,6 +408,11 @@ NodeComponent::NodeComponent(NodeBase* b) :
 	node(b),
 	header(*this)
 {
+	if (auto en = node->getEmbeddedNetwork())
+	{
+		addAndMakeVisible(embeddedNetworkBar = new EmbeddedNetworkBar(b));
+	}
+
 	node->getRootNetwork()->addSelectionListener(this);
 
 	setName(b->getId());
@@ -408,17 +431,6 @@ NodeComponent::NodeComponent(NodeBase* b) :
 
 		repaint();
 	});
-
-	node->getRootNetwork()->getExceptionHandler().errorBroadcaster.addListener(*this, [](NodeComponent& n, NodeBase* node, Error e)
-	{
-		auto shouldBeVisible = node != nullptr && n.node.get() == node && !e.isOk() && node->getRootNetwork()->getExceptionHandler().canBeAutofixed(node, e);
-
-		if(n.header.autofixButton.isVisible() != shouldBeVisible)
-		{
-			n.header.autofixButton.setVisible(shouldBeVisible);
-			n.header.resized();
-		}
-	});
 }
 
 
@@ -433,73 +445,57 @@ NodeComponent::~NodeComponent()
 juce::Rectangle<int> NodeComponent::PositionHelpers::getPositionInCanvasForStandardSliders(const NodeBase* n,
 	Point<int> topLeft)
 {
-	auto pTree = n->getValueTree().getChildWithName(PropertyIds::Parameters);
+	auto numParameters = n->getNumParameters();
 
-	auto forceNoLayout = (int)n->getValueTree()[PropertyIds::CurrentPageIndex] == -1;
-
-	if(PageInfo::hasPageData(pTree) && !forceNoLayout)
-	{
-		auto pageTree = PageInfo::createPageTree(pTree);
-		auto a = DefaultParameterNodeComponent::getPageBounds(*pageTree, topLeft);
-		return withExtraBoundsApplied(n, a);
-	}
+	if (numParameters == 7)
+		return createRectangleForParameterSliders(n, 4).withPosition(topLeft);
+	else if (numParameters == 0)
+		return createRectangleForParameterSliders(n, 0).withPosition(topLeft);
+	else if (numParameters % 5 == 0)
+		return createRectangleForParameterSliders(n, 5).withPosition(topLeft);
+	else if (numParameters % 4 == 0)
+		return createRectangleForParameterSliders(n, 4).withPosition(topLeft);
+	else if (numParameters % 3 == 0)
+		return createRectangleForParameterSliders(n, 3).withPosition(topLeft);
+	else if (numParameters % 2 == 0)
+		return createRectangleForParameterSliders(n, 2).withPosition(topLeft);
+	else if (numParameters == 1)
+		return createRectangleForParameterSliders(n, 1).withPosition(topLeft);
 	else
-	{
-		auto a = getPageBounds(n->getNumParameters()).withPosition(topLeft);
-		return withExtraBoundsApplied(n, a);
-	}
+		return createRectangleForParameterSliders(n, 5).withPosition(topLeft);
+
 }
 
 
-juce::Rectangle<int> NodeComponent::PositionHelpers::createRectangleForParameterSliders(int numParameters, int numColumns)
+juce::Rectangle<int> NodeComponent::PositionHelpers::createRectangleForParameterSliders(const NodeBase* n,
+                                                                                        int numColumns)
 {
 	int h = UIValues::HeaderHeight;
+		
+	if (n->getEmbeddedNetwork() != nullptr)
+		h += 24;
+
+	auto eb = n->getExtraComponentBounds();
+
+	h += eb.getHeight();
 	int w = 0;
 
 	if (numColumns == 0)
-		w = UIValues::NodeWidth * 2;
+		w = eb.getWidth() > 0 ? eb.getWidth() : UIValues::NodeWidth * 2;
 	else
 	{
+		int numParameters = n->getNumParameters();
 		int numRows = (int)std::ceil((float)numParameters / (float)numColumns);
 
 		h += numRows * (48 + 28) - 10;
 		w = jmin(numColumns * 100, numParameters * 100);
 	}
 
+
+	w = jmax(w, eb.getWidth());
+
 	auto b = Rectangle<int>(0, 0, w, h);
 	return b.expanded(UIValues::NodeMargin);
-}
-
-juce::Rectangle<int> NodeComponent::PositionHelpers::withExtraBoundsApplied(const NodeBase* n, Rectangle<int> sliderBounds)
-{
-	auto eb = n->getExtraComponentBounds();
-
-	sliderBounds.setWidth(jmax(sliderBounds.getWidth(), eb.getWidth()));
-	sliderBounds.setHeight(sliderBounds.getHeight() + eb.getHeight());
-	return sliderBounds;
-
-}
-
-juce::Rectangle<int> NodeComponent::PositionHelpers::getPageBounds(int numParameters)
-{
-	if (numParameters == 7)
-		return createRectangleForParameterSliders(numParameters, 4);
-	if(numParameters == 6)
-		return createRectangleForParameterSliders(numParameters, 3);
-	else if (numParameters == 0)				   
-		return createRectangleForParameterSliders(numParameters, 0);
-	else if (numParameters % 5 == 0)			   
-		return createRectangleForParameterSliders(numParameters, 5);
-	else if (numParameters % 4 == 0)			   
-		return createRectangleForParameterSliders(numParameters, 4);
-	else if (numParameters % 3 == 0)			   
-		return createRectangleForParameterSliders(numParameters, 3);
-	else if (numParameters % 2 == 0)			   
-		return createRectangleForParameterSliders(numParameters, 2);
-	else if (numParameters == 1)				   
-		return createRectangleForParameterSliders(numParameters, 1);
-	else										   
-		return createRectangleForParameterSliders(numParameters, 5);
 }
 
 void NodeComponent::paint(Graphics& g)
@@ -531,6 +527,45 @@ void NodeComponent::paint(Graphics& g)
 
 void NodeComponent::paintOverChildren(Graphics& g)
 {
+	if (isRoot() && node->getRootNetwork()->isFrozen())
+	{
+		auto b = getLocalBounds().reduced(1);
+		b.removeFromTop(header.getHeight());
+
+		if (header.parameterButton.getToggleState())
+			b.removeFromTop(UIValues::ParameterHeight + UIValues::MacroDragHeight);
+
+		auto hashMatches = node->getRootNetwork()->hashMatches();
+
+		g.setColour(hashMatches ? Colour(0xEE171717) : Colour(0xEE221111));
+		g.fillRect(b);
+
+		g.setFont(GLOBAL_BOLD_FONT());
+
+		if (!hashMatches)
+		{
+			g.setColour(Colours::white);
+			g.setFont(GLOBAL_BOLD_FONT());
+			g.drawText("The compiled node doesn't match the interpreted network. Recompile this node in order to ensure consistent behaviour", b.toFloat(), Justification::centred);
+		}
+
+		Path fp;
+		fp.loadPathFromData(HnodeIcons::freezeIcon, SIZE_OF_PATH(HnodeIcons::freezeIcon));
+		auto pSize = jmin(200, getWidth(), getHeight());
+		auto bl = b.withSizeKeepingCentre(pSize, pSize).toFloat();
+		PathFactory::scalePath(fp, bl);
+
+		g.setColour(Colours::white.withAlpha(0.1f));
+		g.strokePath(fp, PathStrokeType(4.0f));
+		g.fillPath(fp);
+		
+		auto tb = bl.removeFromBottom(24.0f).translated(0.0f, 40.0f);
+		g.setColour(Colours::white.withAlpha(0.5f));
+		g.drawText("Using the project DLL node", tb, Justification::centred);
+
+
+	}
+
 	if (isSelected())
 	{
 		UnblurryGraphics ug(g, *this, true);
@@ -584,7 +619,11 @@ void NodeComponent::paintOverChildren(Graphics& g)
 void NodeComponent::resized()
 {
 	auto b = getLocalBounds();
+
 	header.setBounds(b.removeFromTop(24));
+
+	if (embeddedNetworkBar != nullptr)
+		embeddedNetworkBar->setBounds(b.removeFromTop(24));
 }
 
 
@@ -622,7 +661,19 @@ void NodeComponent::fillContextMenu(PopupMenu& m)
 	m.addItem((int)MenuActions::ExportAsSnippet, "Export as snippet");
 	m.addItem((int)MenuActions::ExportAsTemplate, "Export as template");
 	m.addItem((int)MenuActions::EditProperties, "Edit Properties");
-	
+
+#if 0
+	if (auto hc = node.get()->getAsRestorableNode())
+	{
+		m.addItem((int)MenuActions::UnfreezeNode, "Unfreeze hardcoded node");
+	}
+	else if (node->getValueTree().hasProperty(PropertyIds::FreezedId) ||
+		node->getValueTree().hasProperty(PropertyIds::FreezedPath))
+	{
+		m.addItem((int)MenuActions::FreezeNode, "Replace with hardcoded version");
+	}
+#endif
+
 	m.addSectionHeader("Wrap into container");
 	m.addItem((int)MenuActions::WrapIntoChain, "Chain");
 	m.addItem((int)MenuActions::WrapIntoSplit, "Split");
@@ -687,9 +738,17 @@ void NodeComponent::handlePopupMenuResult(int result)
 		auto r = findParentComponentOfClass<BackendRootWindow>();
 		r->setModalComponent(new multipage::library::ScriptnodeTemplateExporter(r, node.get()));
 	}
+	if (result == (int)MenuActions::UnfreezeNode)
+	{
+		DspNetworkGraph::Actions::unfreezeNode(node.get());
+	}
 	if( result == (int)MenuActions::ExplodeLocalCables)
 	{
 		routing::local_cable::Helpers::explode(node->getValueTree(), node->getUndoManager());
+	}
+	if (result == (int)MenuActions::FreezeNode)
+	{
+		DspNetworkGraph::Actions::freezeNode(node.get());
 	}
 	if (result == (int)MenuActions::WrapIntoDspNetwork)
 	{
@@ -703,7 +762,7 @@ void NodeComponent::handlePopupMenuResult(int result)
 
 		if (wType == 2)
 		{
-			auto name = snex::cppgen::Helpers::getValidCppVariableName(node->getName());
+			auto id = node->getId();
 
 			struct ConnectionState
 			{
@@ -765,23 +824,23 @@ void NodeComponent::handlePopupMenuResult(int result)
 				c.removeOldConnection(node.get());
 			}
 
-			if (name == node->getPath().getIdentifier().toString())
+			if (id == node->getPath().getIdentifier().toString())
 			{
-				name = PresetHandler::getCustomName(name, "Enter a customized name for the node");
+				id = PresetHandler::getCustomName(id, "Enter a customized name for the node");
 			}
 
-			String newId = name + "_";
+			String newId = id + "_";
 
 			node->setValueTreeProperty(PropertyIds::ID, newId);
 
-			PopupHelpers::wrapIntoChain(node.get(), MenuActions::WrapIntoChain, name);
+			PopupHelpers::wrapIntoChain(node.get(), MenuActions::WrapIntoChain, id);
 
 			auto pn = node->getParentNode();
 			pn->getValueTree().setProperty(PropertyIds::ShowParameters, true, node->getUndoManager());
 
 			if (auto modNode = dynamic_cast<ModulationSourceNode*>(node.get()))
 			{
-				String pmodId = name + "_pm";
+				String pmodId = id + "_pm";
 				var pmodvar = node->getRootNetwork()->create("routing.public_mod", pmodId);
 
 				auto pmod = dynamic_cast<NodeBase*>(pmodvar.getObject());
@@ -1000,9 +1059,9 @@ juce::Path NodeComponentFactory::createPath(const String& id) const
 	LOAD_EPATH_IF_URL("fold", HiBinaryData::ProcessorEditorHeaderIcons::foldedIcon);
 	LOAD_EPATH_IF_URL("close", HiBinaryData::ProcessorEditorHeaderIcons::closeIcon);
 	LOAD_EPATH_IF_URL("delete", SampleMapIcons::deleteSamples);
-	LOAD_EPATH_IF_URL("move", ColumnIcons::moveIcon);
+	LOAD_PATH_IF_URL("move", ColumnIcons::moveIcon);
 	LOAD_EPATH_IF_URL("soft_bypass", HiBinaryData::ProcessorEditorHeaderIcons::bypassShape);
-	LOAD_EPATH_IF_URL("goto", ColumnIcons::targetIcon);
+	LOAD_PATH_IF_URL("goto", ColumnIcons::targetIcon);
 	LOAD_EPATH_IF_URL("parameter", HiBinaryData::SpecialSymbols::macros);
 	LOAD_EPATH_IF_URL("split", ScriptnodeIcons::splitIcon);
 	LOAD_EPATH_IF_URL("freeze", HnodeIcons::freezeIcon);
@@ -1018,10 +1077,10 @@ juce::Path NodeComponentFactory::createPath(const String& id) const
 	LOAD_EPATH_IF_URL("newnode", HiBinaryData::ProcessorEditorHeaderIcons::addIcon);
 	LOAD_EPATH_IF_URL("oldnode", EditorIcons::swapIcon);
 	LOAD_EPATH_IF_URL("clone", SampleMapIcons::copySamples);
-	LOAD_EPATH_IF_URL("local", ColumnIcons::localIcon);
-	LOAD_EPATH_IF_URL("drag", ColumnIcons::targetIcon);
-	LOAD_EPATH_IF_URL("next", ColumnIcons::nextIcon);
-	LOAD_EPATH_IF_URL("workspace", ColumnIcons::openWorkspaceIcon);
+	LOAD_PATH_IF_URL("local", ColumnIcons::localIcon);
+	LOAD_PATH_IF_URL("drag", ColumnIcons::targetIcon);
+	LOAD_PATH_IF_URL("next", ColumnIcons::nextIcon);
+	LOAD_PATH_IF_URL("workspace", ColumnIcons::openWorkspaceIcon);
 
 	if (url.startsWith("fix"))
 		p.loadPathFromData(ScriptnodeIcons::fixIcon, ScriptnodeIcons::fixIcon_Size);
@@ -1030,6 +1089,81 @@ juce::Path NodeComponentFactory::createPath(const String& id) const
 		p.loadPathFromData(ScriptnodeIcons::frameIcon, ScriptnodeIcons::frameIcon_Size);
 	
 	return p;
+}
+
+
+
+juce::Path NodeComponent::EmbeddedNetworkBar::Factory::createPath(const String& url) const
+{
+	Path p;
+	LOAD_EPATH_IF_URL("freeze", HnodeIcons::freezeIcon);
+	LOAD_PATH_IF_URL("goto", ColumnIcons::openWorkspaceIcon);
+	LOAD_EPATH_IF_URL("warning", EditorIcons::warningIcon);
+	return p;
+}
+
+NodeComponent::EmbeddedNetworkBar::EmbeddedNetworkBar(NodeBase* n) :
+	parentNode(n),
+	embeddedNetwork(n->getEmbeddedNetwork()),
+	warningButton("warning", this, f),
+	freezeButton("freeze", this, f),
+	gotoButton("goto", this, f)
+{
+	jassert(embeddedNetwork != nullptr);
+
+	addAndMakeVisible(warningButton);
+
+	warningButton.setVisible(!n->getEmbeddedNetwork()->hashMatches() & embeddedNetwork->canBeFrozen());
+
+	addAndMakeVisible(gotoButton);
+	addAndMakeVisible(freezeButton);
+
+	if (!embeddedNetwork->canBeFrozen())
+	{
+		freezeButton.setEnabled(false);
+		freezeButton.setAlpha(0.1f);
+	}
+	else
+	{
+		freezeUpdater.setCallback(parentNode->getValueTree(), { PropertyIds::Frozen }, valuetree::AsyncMode::Asynchronously,
+			BIND_MEMBER_FUNCTION_2(EmbeddedNetworkBar::updateFreezeState));
+	}
+	
+	freezeButton.setToggleModeWithColourChange(true);
+	freezeButton.setToggleStateAndUpdateIcon(parentNode->getValueTree()[PropertyIds::Frozen]);
+
+	setSize(100, 24);
+}
+
+void NodeComponent::EmbeddedNetworkBar::buttonClicked(Button* b)
+{
+	if (b == &warningButton)
+	{
+
+	}
+	if (b == &freezeButton)
+	{
+		parentNode->setValueTreeProperty(PropertyIds::Frozen, b->getToggleState());
+	}
+	if (b == &gotoButton)
+	{
+		findParentComponentOfClass<ZoomableViewport>()->setNewContent(new DspNetworkGraph(embeddedNetwork), getParentComponent());
+	}
+}
+
+void NodeComponent::EmbeddedNetworkBar::resized()
+{
+	auto b = getLocalBounds();
+	freezeButton.setBounds(b.removeFromRight(b.getHeight()).reduced(2));
+	if (warningButton.isVisible())
+		warningButton.setBounds(b.removeFromRight(b.getHeight()).reduced(2));
+
+	gotoButton.setBounds(b.removeFromLeft(b.getHeight()).reduced(4));
+}
+
+void NodeComponent::EmbeddedNetworkBar::updateFreezeState(const Identifier& id, const var& newValue)
+{
+	freezeButton.setToggleStateAndUpdateIcon((bool)newValue);
 }
 
 int NodeComponent::PopupHelpers::isWrappable(NodeBase* n)
@@ -1076,9 +1210,7 @@ void NodeComponent::PopupHelpers::wrapIntoNetwork(NodeBase* node, bool makeCompi
 	for (int i = 0; i < rootTree.getNumProperties(); i++)
 		nData.setProperty(rootTree.getPropertyName(i), rootTree.getProperty(rootTree.getPropertyName(i)), nullptr);
 
-	auto name = snex::cppgen::Helpers::getValidCppVariableName(node->getName());
-
-	nData.setProperty(PropertyIds::ID, name, nullptr);
+	nData.setProperty(PropertyIds::ID, node->getId(), nullptr);
 	nData.addChild(node->getValueTree().createCopy(), -1, nullptr);
 
 	auto ndir = BackendDllManager::getSubFolder(node->getScriptProcessor()->getMainController_(), BackendDllManager::FolderSubType::Networks);
@@ -1164,8 +1296,15 @@ void NodeComponent::PopupHelpers::wrapIntoChain(NodeBase* node, MenuActions resu
 			auto parent = selection.getFirst()->getValueTree().getParent();
 			auto nIndex = parent.indexOf(selection.getFirst()->getValueTree());
 
+            
+            
 			for (auto n : selection)
+			{
                 n->setParent(newContainer, -1);
+                
+				//n->getValueTree().getParent().removeChild(n->getValueTree(), um);
+				//containerTree.getChildWithName(PropertyIds::Nodes).addChild(n->getValueTree(), -1, um);
+			}
 
 			parent.addChild(containerTree, nIndex, um);
 		}
@@ -1173,6 +1312,100 @@ void NodeComponent::PopupHelpers::wrapIntoChain(NodeBase* node, MenuActions resu
 #endif
 }
 
+simple_visualiser::simple_visualiser(NodeBase*, PooledUIUpdater* u) :
+	ScriptnodeExtraComponent<NodeBase>(nullptr, u)
+{
+	setSize(100, 60);
+}
 
+scriptnode::NodeBase* simple_visualiser::getNode()
+{
+	auto nc = findParentComponentOfClass<NodeComponent>();
+	auto n = nc->node.get();
+	return n;
+}
+
+double simple_visualiser::getParameter(int index)
+{
+	if (auto n = getNode())
+	{
+		jassert(isPositiveAndBelow(index, n->getNumParameters()));
+		return n->getParameterFromIndex(index)->getValue();
+	}
+
+	return 0.0;
+}
+
+InvertableParameterRange simple_visualiser::getParameterRange(int index)
+{
+    if (auto n = getNode())
+    {
+        jassert(isPositiveAndBelow(index, n->getNumParameters()));
+        return RangeHelpers::getDoubleRange(n->getParameterFromIndex(index)->data);
+    }
+
+    return {};
+}
+
+juce::Colour simple_visualiser::getNodeColour()
+{
+	auto c = findParentComponentOfClass<NodeComponent>()->header.colour;
+
+	if (c == Colours::transparentBlack)
+		return Colour(0xFFAAAAAA);
+
+	return c;
+}
+
+void simple_visualiser::timerCallback()
+{
+	original.clear();
+	p.clear();
+	gridPath.clear();
+	rebuildPath(p);
+
+	auto b = getLocalBounds().toFloat().reduced(4.0f);
+
+	if (!p.getBounds().isEmpty())
+		p.scaleToFit(b.getX(), b.getY(), b.getWidth(), b.getHeight(), false);
+
+	if (!original.getBounds().isEmpty())
+	{
+		original.scaleToFit(b.getX(), b.getY(), b.getWidth(), b.getHeight(), false);
+
+		auto cp = original;
+
+		float l[2] = { 2.0f, 2.0f };
+		PathStrokeType(1.5f).createDashedStroke(original, cp, l, 2);
+	}
+
+	if (!gridPath.getBounds().isEmpty())
+	{
+		gridPath.scaleToFit(b.getX(), b.getY(), b.getWidth(), b.getHeight(), false);
+	}
+
+	repaint();
+}
+
+void simple_visualiser::paint(Graphics& g)
+{
+	if (drawBackground)
+		ScriptnodeComboBoxLookAndFeel::drawScriptnodeDarkBackground(g, getLocalBounds().toFloat(), false);
+
+	if (!gridPath.isEmpty())
+	{
+		UnblurryGraphics ug(g, *this);
+
+		g.setColour(Colours::black.withAlpha(0.5f));
+		g.strokePath(gridPath, PathStrokeType(ug.getPixelSize()));
+	}
+
+	g.setColour(getNodeColour());
+
+	if (!original.isEmpty())
+		g.fillPath(original);
+
+	g.strokePath(p, PathStrokeType(thickness));
+}
 
 }

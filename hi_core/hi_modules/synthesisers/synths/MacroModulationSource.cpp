@@ -32,34 +32,10 @@
 
 namespace hise { using namespace juce;
 
-hise::ProcessorMetadata MacroModulationSource::createMetadata()
-{
-	using Mod = ProcessorMetadata::ModulationMetadata;
-
-	auto md = ModulatorSynth::createBaseMetadata()
-		.withStandardMetadata<MacroModulationSource>()
-		.withDescription("A container that hosts modulator chains whose output drives the macro control system.")
-		.withDisabledFX()
-		.withDisabledChain(ModulatorSynth::BasicChains::GainChain)
-		.withDisabledChain(ModulatorSynth::BasicChains::PitchChain);
-
-	for (int i = 0; i < HISE_NUM_MACROS; i++)
-	{
-		md = std::move(md).withModulation(Mod(ModulatorSynth::numInternalChains + i)
-			.withId("Macro " + String(i + 1))
-			.withDescription("Modulation source for macro control " + String(i + 1))
-			.withMode(scriptnode::modulation::ParameterMode::ScaleOnly));
-	}
-
-	return md;
-}
-
 MacroModulationSource::MacroModulationSource(MainController *mc, const String &id, int numVoices) :
 ModulatorSynth(mc, id, numVoices)
 {
-	auto numMacros = HISE_GET_PREPROCESSOR(mc, HISE_NUM_MACROS);
-
-	for (int i = 0; i < numMacros; i++)
+	for (int i = 0; i < HISE_NUM_MACROS; i++)
 	{
 		String s("Macro " + String(i + 1));
 		modChains += { this, s};
@@ -70,7 +46,7 @@ ModulatorSynth(mc, id, numVoices)
 
 	auto offset = 2;
 
-	for (int i = 0; i < numMacros; i++)
+	for (int i = 0; i < HISE_NUM_MACROS; i++)
 	{
 		macroChains.set(i, modChains[i + offset].getChain());
 		modChains[i + offset].setExpandToAudioRate(true);
@@ -80,14 +56,14 @@ ModulatorSynth(mc, id, numVoices)
 	for (auto mChain : macroChains)
 	{
 		auto c = Colour(SIGNAL_COLOUR).withSaturation(JUCE_LIVE_CONSTANT_OFF(0.4f));
+
 		mChain->setColour(c.withMultipliedBrightness(JUCE_LIVE_CONSTANT_OFF(0.9f)));
+		
 		mChain->getHandler()->addListener(this);
 	}
 		
 
-	for (int i = 0; i < numVoices; i++) 
-		addVoice(new MacroModulationSourceVoice(this));
-
+	for (int i = 0; i < numVoices; i++) addVoice(new MacroModulationSourceVoice(this));
 	addSound(new MacroModulationSourceSound());
 
 	disableChain(GainModulation, true);
@@ -120,9 +96,7 @@ void MacroModulationSource::preVoiceRendering(int startSample, int numThisTime)
 	// skip plugin parameter update calls
 	ScopedValueSetter<bool> setter(getMainController()->getPluginParameterUpdateState(), false);
 
-	auto numMacros = HISE_GET_PREPROCESSOR(getMainController(), HISE_NUM_MACROS);
-
-	for (int i = 0; i < numMacros; i++)
+	for (int i = 0; i < HISE_NUM_MACROS; i++)
 	{
 		auto& mb = modChains[i+2];
 

@@ -84,8 +84,8 @@ ProcessorEditorChainBar::ProcessorEditorChainBar (ProcessorEditor *p):
 			return;
 		}
 		
-		TextButton *t = new TextButton(ProcessorHelpers::getDisplayName(childProcessor));
-
+		TextButton *t = new TextButton(childProcessor->getId());
+		t->setButtonText(childProcessor->getId());
 		t->setConnectedEdges (Button::ConnectedOnLeft | Button::ConnectedOnRight);
 		t->addListener (this);
 		t->setColour (TextButton::buttonColourId, Colour (0x884b4b4b));
@@ -94,18 +94,6 @@ ProcessorEditorChainBar::ProcessorEditorChainBar (ProcessorEditor *p):
 		t->setColour (TextButton::textColourOffId, Colour (0x99ffffff));
 		t->setColour(ChainBarButtonLookAndFeel::ColourIds::IconColour, Colour(0xaa000000));
 		t->setColour(ChainBarButtonLookAndFeel::ColourIds::IconColourOff, Colour(0x99ffffff));
-
-		if(auto modChain = dynamic_cast<Modulation*>(childProcessor))
-		{
-			auto mode = modChain->getMode();
-
-			if(mode == Modulation::Mode::OffsetMode)
-				t->getProperties().set("ModulationMode", "offset");
-			else if (mode == Modulation::Mode::CombinedMode)
-				t->getProperties().set("ModulationMode", "combined");
-			else
-				t->getProperties().set("ModulationMode", "gain");
-		}
 
 		t->setLookAndFeel(laf);
 
@@ -176,16 +164,12 @@ int ProcessorEditorChainBar::getActualHeight()
 #endif
 }
 
-String ProcessorEditorChainBar::getShortName(String identifier) const
+String ProcessorEditorChainBar::getShortName(const String identifier) const
 {
 	if(identifier == "GainModulation") return "Gain";
 	else if (identifier == "PitchModulation") return "Pitch";
 	else if (identifier == "Midi Processor") return "MIDI";
-
-	if(identifier.endsWith("Mod"))
-		identifier = identifier.replace("Mod", "").trim();
-
-	return identifier;
+	else return identifier;
 }
 
 
@@ -252,8 +236,7 @@ void ProcessorEditorChainBar::checkActiveChilds(int chainToCheck)
 
 	b->setColour(TextButton::ColourIds::buttonColourId, hasActiveChains ? Colour (0x55cccccc) : Colour (0x4c4b4b4b));
 
-	auto cp = getProcessor()->getChildProcessor(chainToCheck);
-	const String name = getShortName(ProcessorHelpers::getDisplayName(cp));
+	const String name = getShortName((getProcessor())->getChildProcessor(chainToCheck)->getId());
 
 	b->setButtonText(name);
 

@@ -95,16 +95,6 @@ END_JUCE_MODULE_DECLARATION
 #define HISE_INCLUDE_PITCH_DETECTION 1
 #endif
 
-/** Config: HISE_INCLUDE_XSIMD
-
-Includes the XSIMD header library in the hi_tools header. Use this only if you use the XSIMD library
-in your code, otherwise this helps bring down the compile / link time of HISE / projects.
-
-*/
-#ifndef HISE_INCLUDE_XSIMD
-#define HISE_INCLUDE_XSIMD 0
-#endif
-
 
 /** Config: HISE_INCLUDE_RT_NEURAL
  
@@ -112,10 +102,6 @@ in your code, otherwise this helps bring down the compile / link time of HISE / 
 */
 #ifndef HISE_INCLUDE_RT_NEURAL
 #define HISE_INCLUDE_RT_NEURAL 1
-#endif
-
-#ifndef HISE_NEURAL_NETWORK_WARMUP_TIME
-#define HISE_NEURAL_NETWORK_WARMUP_TIME 0
 #endif
 
 /** Config: HISE_USE_EXTENDED_TEMPO_VALUES
@@ -198,9 +184,6 @@ will break compatibility with older projects / presets because the tempo indexes
 #endif
 #endif
 
-#ifndef HISE_INCLUDE_PROFILING_TOOLKIT
-#define HISE_INCLUDE_PROFILING_TOOLKIT 0
-#endif
 
 #ifndef HISE_USE_ONLINE_DOC_UPDATER
 #define HISE_USE_ONLINE_DOC_UPDATER 0
@@ -222,7 +205,6 @@ will break compatibility with older projects / presets because the tempo indexes
 #include "hi_tools/UpdateMerger.h"
 
 #include "hi_tools/MiscToolClasses.h"
-#include "hi_tools/SiTraNoConverter.h"
 
 #include "hi_tools/PathFactory.h"
 #include "hi_tools/HI_LookAndFeels.h"
@@ -243,13 +225,9 @@ will break compatibility with older projects / presets because the tempo indexes
 #include "hi_tools/runtime_target.h"
 
 #if USE_IPP
-#if _IPP_SEQUENTIAL_STATIC || _IPP_SEQUENTIAL_DYNAMIC || _IPP_PARALLEL_STATIC || _IPP_PARALLEL_DYNAMIC
+
+#include "ipp.h"
 #include "hi_tools/IppFFT.h"
-#elif JUCE_LINUX
-#include "hi_tools/IppFFT.h"
-#else
-#error "USE_IPP flag mismatch. Make sure that you use the OneAPI projucer setting / the Hise UseIpp setting instead of manually setting this flag."
-#endif
 #endif
 
 #if !HISE_NO_GUI_TOOLS
@@ -268,53 +246,26 @@ will break compatibility with older projects / presets because the tempo indexes
 #include "hi_markdown/MarkdownDatabaseCrawler.h"
 #include "hi_markdown/MarkdownRenderer.h"
 
-#include "hi_standalone_components/ChocWebView.h"
-
-
-#include "hi_dev/JavascriptTokeniser.h"
-#include "hi_dev/CodeEditorApiBase.h"
-
-#include "hi_dev/TextDiff.h"
-
-#if HISE_INCLUDE_PROFILING_TOOLKIT
-#include "hi_dev/DebugSession.h"
-#include "hi_dev/DebugProfileTools.h"
-#endif
-
-
-#include "hi_dev/ZoomableViewport.h"
-
-#if HISE_INCLUDE_PROFILING_TOOLKIT
-#include "hi_dev/DebugSessionViewItem.h"
-#include "hi_dev/DebugSessionManager.h"
-#include "hi_dev/DebugSessionComponents.h"
-#include "hi_dev/DebugSessionViewer.h"
-#include "hi_dev/DebugSessionMultiViewer.h"
-
-#else
-#include "hi_dev/DummyDebugSession.h"
-#endif
-#if USE_BACKEND
-#include "hi_dev/FaustTokeniser.h"
-#endif
-#include "hi_dev/ScriptWatchTable.h"
-
 
 
 #include "mcl_editor/mcl_editor.h"
-#include "hi_dev/AdvancedCodeEditor.h"
 
+
+
+#include "hi_tools/JavascriptTokeniser.h"
+
+
+
+#include "hi_standalone_components/ChocWebView.h"
+#include "hi_standalone_components/CodeEditorApiBase.h"
+#include "hi_standalone_components/AdvancedCodeEditor.h"
+#include "hi_standalone_components/ScriptWatchTable.h"
 #include "hi_standalone_components/ComponentWithPreferredSize.h"
-
+#include "hi_standalone_components/ZoomableViewport.h"
 #if USE_BACKEND
 #include "hi_standalone_components/PerfettoWebViewer.h"
 #endif
-
-#else // HISE_NO_GUI_TOOLS
-
-#include "hi_dev/CodeEditorApiBase.h"
-#include "hi_dev/DummyDebugSession.h"
-
+#else
 using ComponentWithMiddleMouseDrag = juce::Component;
 #define CHECK_MIDDLE_MOUSE_DOWN(e) ignoreUnused(e);
 #define CHECK_MIDDLE_MOUSE_UP(e) ignoreUnused(e);
@@ -325,11 +276,10 @@ using ComponentWithMiddleMouseDrag = juce::Component;
 
 
 #if HISE_INCLUDE_RLOTTIE
-#include "hi_dev/RLottieDevComponent.h"
+#include "hi_standalone_components/RLottieDevComponent.h"
 #endif
 
 
-#include "hi_tools/RectangleDynamicObject.h"
 
 #include "hi_standalone_components/RingBuffer.h"
 #include "hi_standalone_components/Plotter.h"
@@ -347,9 +297,6 @@ using ComponentWithMiddleMouseDrag = juce::Component;
 #include "hi_standalone_components/eq_plot/FilterGraph.h"
 
 
-#if !HISE_INCLUDE_XSIMD
-#include "hi_neural/RTNeural/modules/xsimd/xsimd.hpp"
-#endif
 
 #if HISE_INCLUDE_RT_NEURAL
 #include "hi_neural/hi_neural.h"

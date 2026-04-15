@@ -232,7 +232,7 @@ public:
 		SimpleMarkdownDisplay& parent;
 	};
 
-	SimpleMarkdownDisplay(const String& name=String());
+	SimpleMarkdownDisplay();
 
 	void setText(const String& text);
 
@@ -243,17 +243,7 @@ public:
 		resizeToFit = shouldResizeToFit;
 	}
 
-	void paint(Graphics& g) override
-	{
-		if(!backgroundColour.isTransparent())
-			g.fillAll(backgroundColour);
-	}
-
-	Colour backgroundColour;
-
 	bool resizeToFit = false;
-
-	int margin = 0;
 
 	MarkdownRenderer r;
 	float totalHeight = 0.0;
@@ -261,8 +251,6 @@ public:
 	InternalComp canvas;
     
     ScrollbarFader sf;
-
-	JUCE_DECLARE_WEAK_REFERENCEABLE(MarkdownRenderer);
 };
 
 class MarkdownPreview : public Component,
@@ -476,7 +464,7 @@ public:
 		{
 			struct ItemComponent : public Component
 			{
-				ItemComponent(MarkdownDataBase::Item::Ptr i, const MarkdownLayout::StyleData& l);
+				ItemComponent(MarkdownDataBase::Item i, const MarkdownLayout::StyleData& l);
 
 				void mouseEnter(const MouseEvent&) override;
 				void mouseExit(const MouseEvent&) override;
@@ -494,7 +482,7 @@ public:
 				const MarkdownLayout::StyleData& style;
 				MarkdownRenderer p;
 				int height = 0;
-				MarkdownDataBase::Item::Ptr item;
+				MarkdownDataBase::Item item;
 				bool isFuzzyMatch = false;
 
 				JUCE_DECLARE_WEAK_REFERENCEABLE(ItemComponent);
@@ -578,7 +566,7 @@ public:
 		struct Item : public juce::TreeViewItem,
 			public juce::KeyListener
 		{
-			Item(MarkdownDataBase::Item::Ptr item_, MarkdownPreview& previewParent_);
+			Item(MarkdownDataBase::Item item_, MarkdownPreview& previewParent_);
 			~Item() override;
 
 			bool keyPressed(const KeyPress& key, Component*) override;
@@ -600,7 +588,7 @@ public:
 
 			void paintItem(Graphics& g, int width, int height) override;
 
-			MarkdownDataBase::Item::Ptr item;
+			MarkdownDataBase::Item item;
 			MarkdownPreview& previewParent;
 		};
 
@@ -682,7 +670,6 @@ public:
         OverlayRight,
         TopRight,
         Left,
-		PropertyHelpOffsetXY, // helpPosition = componentPosition.translated(prop["helpOffsetX"], prop["helpOffsetY"])
         numAttachmentTypes
     };
 
@@ -719,8 +706,6 @@ public:
     void setStyleData(const MarkdownLayout::StyleData& newStyleData);
 
     static Path getPath();
-
-	Component* getAttachedComponent() const { return ownerComponent.getComponent(); }
 
 private:
 

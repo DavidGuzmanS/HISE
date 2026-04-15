@@ -372,9 +372,9 @@ template <typename DataType> struct Data
 		static void load(Processor* p, const DataType& newValue)
 		{
 			if (inverted)
-				p->setBypassed(!static_cast<bool>(newValue), sendNotificationAsync);
+				p->setBypassed(!static_cast<bool>(newValue), sendNotification);
 			else
-				p->setBypassed(static_cast<bool>(newValue), sendNotificationAsync);
+				p->setBypassed(static_cast<bool>(newValue), sendNotification);
 		}
 	};
 
@@ -390,7 +390,7 @@ template <typename DataType> struct Data
 		{
 			float value = static_cast<float>(newValue);
 			FloatSanitizers::sanitizeFloatNumber(value);
-			p->setAttribute(attributeIndex, value, sendNotificationAsync);
+			p->setAttribute(attributeIndex, value, sendNotification);
 		}
 	};
 
@@ -408,7 +408,7 @@ template <typename DataType> struct Data
 		{
 			static_assert(std::is_same<DataType, bool>(), "only allowed with bool data type");
 			float value = newValue ? 0.0f : 1.0f;
-			p->setAttribute(attributeIndex, value, sendNotificationAsync);
+			p->setAttribute(attributeIndex, value, sendNotification);
 		}
 	};
 
@@ -616,11 +616,8 @@ public:
 
 			if (saveFunction)
 			{
-				if (auto p = getProcessor())
-				{
-					ValueType initialValue = saveFunction(getProcessor());
-					updateUI(initialValue);
-				}
+				ValueType initialValue = saveFunction(getProcessor());
+				updateUI(initialValue);
 			}
 		}
 
@@ -655,32 +652,7 @@ public:
 
 		void otherChange(Processor* p) override;
 		
-		void registerParameterIndex(int idx)
-		{
-			attributeListener = new InternalAttributeListener(*this, idx);
-		}
-
 	private:
-
-		struct InternalAttributeListener : public Processor::AttributeListener
-		{
-			InternalAttributeListener(Base& parent_, int index):
-			  AttributeListener(parent_.processor->getMainController()->getRootDispatcher()),
-			  parent(parent_)
-			{
-				auto pi = static_cast<uint16>(index);
-				addToProcessor(parent.processor, &pi, 1, dispatch::sendNotificationAsync);
-			}
-
-			void onAttributeUpdate(Processor* p, uint16 index) override
-			{
-				parent.otherChange(p);
-			}
-
-			Base& parent;
-		};
-
-		ScopedPointer<InternalAttributeListener> attributeListener;
 
 		UndoManager* undoManager = nullptr;
 
@@ -692,6 +664,7 @@ public:
         typename Data<ValueType>::SaveFunction saveFunction;
 
 		Component::SafePointer<ComponentType> component;
+		WeakReference<Processor> processor;
 		
 		JUCE_DECLARE_NON_COPYABLE(Base);
 	};

@@ -73,9 +73,6 @@ If true, then the patch browser will display global modulator connections.
 
 #include "backend/currentGit.h"
 
-#include "backend/ai_tools/RestServer.h"
-#include "backend/ReplServer.h"
-
 #include "backend/BackendProcessor.h"
 #include "backend/BackendComponents.h"
 #include "backend/BackendToolbar.h"
@@ -85,8 +82,7 @@ If true, then the patch browser will display global modulator connections.
 #include "backend/BackendRootWindow.h"
 #include "backend/CompileExporter.h"
 
-#include "backend/HiseAssetInstaller.h"
-#include "backend/HiseAssetManager.h"
+
 
 
 

@@ -60,6 +60,7 @@ PitchWheelEditorBody::PitchWheelEditorBody (ProcessorEditor *p)
 
     addAndMakeVisible (smoothingSlider = new HiSlider ("Smoothing"));
     smoothingSlider->setTooltip (TRANS("Smoothing Value"));
+    smoothingSlider->setRange (0, 2000, 0);
     smoothingSlider->setSliderStyle (Slider::RotaryHorizontalVerticalDrag);
     smoothingSlider->setTextBoxStyle (Slider::TextBoxRight, false, 60, 20);
     smoothingSlider->addListener (this);
@@ -71,8 +72,8 @@ PitchWheelEditorBody::PitchWheelEditorBody (ProcessorEditor *p)
 
     ProcessorHelpers::connectTableEditor(*midiTable, getProcessor());
 
-	auto md = getProcessor()->getMetadata();
-	md.setup(*smoothingSlider, getProcessor(), PitchwheelModulator::SmoothTime);
+	smoothingSlider->setup(getProcessor(), PitchwheelModulator::SmoothTime, "Smoothing");
+	smoothingSlider->setMode(HiSlider::Mode::Time, 0, 1000.0, 100.0);
 
 
 

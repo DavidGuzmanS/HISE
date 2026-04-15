@@ -591,11 +591,6 @@ void MarkdownParser::parseJavascriptBlock()
 		type = MarkdownCodeComponentBase::SyntaxType::EditableFloatingTile;
 		numToSkip = 13;
 	}
-	else if (code.startsWith("css"))
-	{
-		type = MarkdownCodeComponentBase::SyntaxType::CSS;
-		numToSkip = 3;
-	}
 	else if (code.startsWith("xml"))
 	{
 		type = MarkdownCodeComponentBase::SyntaxType::XML;

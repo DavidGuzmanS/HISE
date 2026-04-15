@@ -38,7 +38,7 @@ LfoEditorBody::LfoEditorBody (ProcessorEditor *p)
     frequencySlider.reset (new HiSlider ("Frequency"));
     addAndMakeVisible (frequencySlider.get());
     frequencySlider->setTooltip (TRANS("Adjust the LFO Frequency"));
-    
+    frequencySlider->setRange (0.5, 40, 0.01);
     frequencySlider->setSliderStyle (Slider::RotaryHorizontalVerticalDrag);
     frequencySlider->setTextBoxStyle (Slider::TextBoxRight, true, 80, 20);
     frequencySlider->setColour (Slider::thumbColourId, Colour (0x80666666));
@@ -48,6 +48,7 @@ LfoEditorBody::LfoEditorBody (ProcessorEditor *p)
     fadeInSlider.reset (new HiSlider ("Fadein"));
     addAndMakeVisible (fadeInSlider.get());
     fadeInSlider->setTooltip (TRANS("The Fade in time after each key press"));
+    fadeInSlider->setRange (0, 5000, 1);
     fadeInSlider->setSliderStyle (Slider::RotaryHorizontalVerticalDrag);
     fadeInSlider->setTextBoxStyle (Slider::TextBoxRight, true, 80, 20);
     fadeInSlider->setColour (Slider::thumbColourId, Colour (0x80666666));
@@ -71,6 +72,13 @@ LfoEditorBody::LfoEditorBody (ProcessorEditor *p)
     waveFormSelector->setJustificationType (Justification::centredLeft);
     waveFormSelector->setTextWhenNothingSelected (TRANS("Select Waveform"));
     waveFormSelector->setTextWhenNoChoicesAvailable (TRANS("(no choices)"));
+    waveFormSelector->addItem (TRANS("Sine"), 1);
+    waveFormSelector->addItem (TRANS("Triangle"), 2);
+    waveFormSelector->addItem (TRANS("Saw"), 3);
+    waveFormSelector->addItem (TRANS("Square"), 4);
+    waveFormSelector->addItem (TRANS("Random"), 5);
+    waveFormSelector->addItem (TRANS("Custom"), 6);
+	waveFormSelector->addItem(TRANS("Steps"), 7);
     waveFormSelector->addListener (this);
 
     waveFormSelector->setBounds (59, 68, 128, 28);
@@ -106,6 +114,7 @@ LfoEditorBody::LfoEditorBody (ProcessorEditor *p)
     smoothTimeSlider.reset (new HiSlider ("Smooth Time"));
     addAndMakeVisible (smoothTimeSlider.get());
     smoothTimeSlider->setTooltip (TRANS("The smoothing factor for the oscillator"));
+    smoothTimeSlider->setRange (0, 5000, 1);
     smoothTimeSlider->setSliderStyle (Slider::RotaryHorizontalVerticalDrag);
     smoothTimeSlider->setTextBoxStyle (Slider::TextBoxRight, true, 80, 20);
     smoothTimeSlider->setColour (Slider::thumbColourId, Colour (0x80666666));
@@ -121,6 +130,7 @@ LfoEditorBody::LfoEditorBody (ProcessorEditor *p)
     phaseSlider.reset (new HiSlider ("Phase"));
     addAndMakeVisible (phaseSlider.get());
     phaseSlider->setTooltip (TRANS("The phase offset"));
+    phaseSlider->setRange (0, 5000, 1);
     phaseSlider->setSliderStyle (Slider::RotaryHorizontalVerticalDrag);
     phaseSlider->setTextBoxStyle (Slider::TextBoxRight, true, 80, 20);
     phaseSlider->setColour (Slider::thumbColourId, Colour (0x80666666));
@@ -130,29 +140,46 @@ LfoEditorBody::LfoEditorBody (ProcessorEditor *p)
 
     //[UserPreSize]
 
-	auto md = getProcessor()->getMetadata();
 
-	md.setup(*waveFormSelector, getProcessor(), LfoModulator::WaveFormType);
-	md.setup(*frequencySlider, getProcessor(), LfoModulator::Frequency);
-	md.setup(*fadeInSlider, getProcessor(), LfoModulator::FadeIn);
-	md.setup(*smoothTimeSlider, getProcessor(), LfoModulator::SmoothingTime);
-	md.setup(*phaseSlider, getProcessor(), LfoModulator::PhaseOffset);
-	md.setup(*retriggerButton, getProcessor(), LfoModulator::Legato);
-	md.setup(*tempoSyncButton, getProcessor(), LfoModulator::TempoSync);
-	md.setup(*clockSyncButton, getProcessor(), LfoModulator::SyncToMasterClock);
-	md.setup(*loopButton, getProcessor(), LfoModulator::LoopEnabled);
+
+	waveFormSelector->setup(getProcessor(), LfoModulator::WaveFormType, "Waveform");
+
+	tableUsed = getProcessor()->getAttribute(LfoModulator::WaveFormType) == LfoModulator::Custom;
+
+	frequencySlider->setup(getProcessor(), LfoModulator::Frequency, "Frequency");
+	frequencySlider->setMode(HiSlider::Frequency, 0.1, 40.0, 10.0);
+
+	frequencySlider->setIsUsingModulatedRing(true);
+
+	smoothTimeSlider->setup(getProcessor(), LfoModulator::SmoothingTime, "Smoothing");
+	smoothTimeSlider->setMode(HiSlider::Time, 0.0, 1000.0, 100.0);
+
+	fadeInSlider->setup(getProcessor(), LfoModulator::FadeIn, "Fadein Time");
+	fadeInSlider->setMode(HiSlider::Time, 0.0, 3000.0, 500.0);
+
+	retriggerButton->setup(getProcessor(), LfoModulator::Legato, "Legato Mode");
+
+	tempoSyncButton->setup(getProcessor(), LfoModulator::TempoSync, "Tempo Sync");
 
 	tempoSyncButton->setNotificationType(sendNotification);
+
+	clockSyncButton->setup(getProcessor(), LfoModulator::SyncToMasterClock, "Clock Sync");
 
     ProcessorHelpers::connectTableEditor(*waveformTable, getProcessor());
 
     label->setFont (GLOBAL_BOLD_FONT().withHeight(26.0f));
+
+	loopButton->setup(getProcessor(), LfoModulator::Parameters::LoopEnabled, "Loop On");
 
 	addAndMakeVisible(stepPanel = new SliderPack());
 	stepPanel->setSliderPackData(dynamic_cast<ExternalDataHolder*>(getProcessor())->getSliderPack(0));
 
 	stepPanel->setVisible(false);
 	stepPanel->setStepSize(0.01);
+
+    phaseSlider->setMode(HiSlider::NormalizedPercentage);
+	phaseSlider->setup(getProcessor(), LfoModulator::Parameters::PhaseOffset, "Phase Offset");
+	
 
     tableUsed = getProcessor()->getAttribute(LfoModulator::WaveFormType) == LfoModulator::Custom;
     stepsUsed = getProcessor()->getAttribute(LfoModulator::WaveFormType) == LfoModulator::Steps;
@@ -195,28 +222,6 @@ LfoEditorBody::~LfoEditorBody()
 
     //[Destructor]. You can add your own custom destruction code here..
     //[/Destructor]
-}
-
-void LfoEditorBody::updateGui()
-{
-	auto type = (int)getProcessor()->getAttribute(LfoModulator::WaveFormType);
-
-	loopButton->setEnabled(type == LfoModulator::Waveform::Custom || LfoModulator::Waveform::Steps);
-	loopButton->updateValue();
-
-	auto md = getProcessor()->getMetadata();
-	md.updateTempoSync(*frequencySlider);
-
-	const bool newTableUsed = getProcessor()->getAttribute(LfoModulator::WaveFormType) == LfoModulator::Custom;
-	const bool newStepsUsed = getProcessor()->getAttribute(LfoModulator::WaveFormType) == LfoModulator::Steps;
-
-	if (newTableUsed != tableUsed || newStepsUsed != stepsUsed)
-	{
-		tableUsed = newTableUsed;
-		stepsUsed = newStepsUsed;
-		refreshBodySize();
-		resized();
-	}
 }
 
 //==============================================================================

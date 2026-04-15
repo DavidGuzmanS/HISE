@@ -132,9 +132,7 @@ AudioProcessorEditor(fp)
     }
     
 #if USE_RAW_FRONTEND
-	originalSizeX = getContentComponent()->getWidth();
-	originalSizeY = getContentComponent()->getHeight();
-	setSize(originalSizeX, originalSizeY);
+	setSize(getContentComponent()->getWidth(), getContentComponent()->getHeight());
 #else
 	auto jsp = JavascriptMidiProcessor::getFirstInterfaceScriptProcessor(fp);
     
@@ -155,7 +153,6 @@ AudioProcessorEditor(fp)
 	
 	startTimer(4125);
 
-#if !USE_RAW_FRONTEND
 	WeakReference<ScriptingApi::Content> content = jsp->getScriptingContent();
 
 	scaleFactor = (float)fp->getGlobalScaleFactor();
@@ -166,7 +163,6 @@ AudioProcessorEditor(fp)
 		fp.originalSizeY = h;
 		fp.setGlobalScaleFactor(fp.scaleFactor, true);
 	});
-#endif
 	
 	const int availableHeight = Desktop::getInstance().getDisplays().getMainDisplay().userArea.getHeight();
 	const float displayScaleFactor = (float)Desktop::getInstance().getDisplays().getMainDisplay().scale;
@@ -228,36 +224,6 @@ Component* FrontendProcessorEditor::getContentComponent()
 #else
 	return rootTile;
 #endif
-}
-
-void FrontendProcessorEditor::setControlHighlight(ParameterControlHighlightInfo p)
-{
-	callRecursive<Component>(this, [this, p](Component* c)
-	{
-		if(getControlParameterIndex(*c) == p.parameterIndex)
-		{
-			auto colour = p.isHighlighted ? p.suggestedColour : Colours::transparentBlack;
-
-			auto cv = (int64)colour.getARGB();
-			c->getProperties().set("AAXPluginParameterColour", var(cv));
-			c->repaint();
-			return true;
-		}
-
-		return false;
-	});
-}
-
-int FrontendProcessorEditor::getControlParameterIndex(Component& c)
-{
-	const auto& prop = c.getProperties();
-
-	if(prop.contains("AAXPluginParameterIndex"))
-	{
-		return jlimit(0, getAudioProcessor()->getNumParameters(), (int)prop["AAXPluginParameterIndex"]);
-	}
-
-	return -1;
 }
 
 void FrontendProcessorEditor::newHisePresetLoaded()

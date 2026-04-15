@@ -38,8 +38,6 @@ namespace scriptnode
 using namespace juce;
 using namespace hise;
 
-
-
 struct MacroPropertyEditor : public Component,
 							 public TextEditor::Listener,
 							 public ButtonListener
@@ -47,6 +45,8 @@ struct MacroPropertyEditor : public Component,
 	struct ConnectionEditor : public Component,
 							  public ButtonListener
 	{
+		
+
 		ConnectionEditor(NodeBase* b, ValueTree connectionData, bool showSourceInTitle) :
 			node(b),
 			deleteButton("delete", this, f),
@@ -55,6 +55,9 @@ struct MacroPropertyEditor : public Component,
 			data(connectionData),
 			showSource(showSourceInTitle)
 		{
+			
+				
+
 			deleteButton.setTooltip("Delete connection");
 			gotoButton.setTooltip("Show target");
 			localButton.setTooltip("Replace connection with local cable node");
@@ -165,6 +168,8 @@ struct MacroPropertyEditor : public Component,
 		valuetree::PropertyListener expressionEnabler;
 	};
 
+	
+
 	struct Content: public Component
 	{
 		Content(MacroPropertyEditor& parent_) :
@@ -231,7 +236,7 @@ struct MacroPropertyEditor : public Component,
 	};
 
 	MacroPropertyEditor(NodeBase* b, ValueTree data, Identifier childDataId = PropertyIds::Connections) :
-    parameterProperties(b, false, data, { PropertyIds::IsVertical, }),
+    parameterProperties(b, false, data, {}),
 		node(b),
 		connectionContent(*this),
 		containerMode(dynamic_cast<NodeContainer*>(b) != nullptr || childDataId == PropertyIds::ModulationTargets),
@@ -480,23 +485,17 @@ public:
 	struct MacroToolbar : public ComponentWithMiddleMouseDrag,
 						  public ButtonListener
 	{
-		MacroToolbar(const NodeBase* n) :
+		MacroToolbar() :
 			dragButton("drag", this, f),
-			addButton("add", this, f),
-			tabButton("tabs", this, f)
+			addButton("add", this, f)
 		{
 			addAndMakeVisible(dragButton);
-			addChildComponent(tabButton);
 
 			dragButton.setTooltip("Edit parameters");
 			addButton.setTooltip("Create a new parameter");
-			tabButton.setTooltip("Group parameters into pages & tabs");
 
 			addAndMakeVisible(addButton);
 			dragButton.setToggleModeWithColourChange(true);
-
-			tabButton.setVisible((int)n->getValueTree()[PropertyIds::CurrentPageIndex] == -1);
-
 			setSize(32, 40);
 		};
 
@@ -507,7 +506,6 @@ public:
 
 			addButton.setBounds(bRow.removeFromTop(bRow.getWidth()).reduced(5));
 			dragButton.setBounds(bRow.removeFromTop(bRow.getWidth()).reduced(5));
-			tabButton.setBounds(bRow.removeFromTop(bRow.getWidth()).reduced(5));
 		}
 
 		bool fixed = false;
@@ -520,7 +518,30 @@ public:
 			dragButton.setVisible(!fixed);
 		}
 
-		void buttonClicked(Button* b) override;
+		void buttonClicked(Button* b) override
+		{
+			auto pc = findParentComponentOfClass<ParameterComponent>();
+
+			if (b == &addButton)
+			{
+				auto name = PresetHandler::getCustomName("Parameter", "Enter the parameter name");
+
+				while (name.isNotEmpty() && pc->parent.node->getParameterFromName(name) != nullptr)
+				{
+					PresetHandler::showMessageWindow("Already there", "The parameter " + name + " already exists. You need to be more creative.");
+
+					name = PresetHandler::getCustomName("Parameter", "Enter a new parameter name");
+				}
+
+				if(name.isNotEmpty())
+					pc->parent.node->getParameter(name);
+			}
+			if (b == &dragButton)
+			{
+				for (auto s : pc->sliders)
+					dynamic_cast<MacroParameterSlider*>(s)->setEditEnabled(b->getToggleState());
+			}
+		}
 
 		struct Factory : public PathFactory
 		{
@@ -531,7 +552,6 @@ public:
 
 				LOAD_EPATH_IF_URL("add", HiBinaryData::ProcessorEditorHeaderIcons::addIcon);
 				LOAD_EPATH_IF_URL("drag", EditorIcons::penShape);
-				LOAD_EPATH_IF_URL("tabs", ScriptnodeIcons::tabIcon);
 
 				return p;
 			}
@@ -543,7 +563,6 @@ public:
 		Factory f;
 		HiseShapeButton dragButton;
 		HiseShapeButton addButton;
-		HiseShapeButton tabButton;
 	};
 	
 	struct ParameterComponent : public ComponentWithMiddleMouseDrag,
@@ -563,23 +582,9 @@ public:
 			if(auto mt = dynamic_cast<ContainerComponent::MacroToolbar*>(leftTabComponent.get()))
 				mt->setFixedParameter(isFixedParameterComponent());
 			
-            tree = PageInfo::createPageTree(parameterTree);
-
-			auto h = UIValues::ParameterHeight + UIValues::MacroDragHeight;
-
-			auto forceNonLayout = (int)parent.dataReference[PropertyIds::CurrentPageIndex] == -1;
-
-			if(tree->hasMoreThanOnePage() && !forceNonLayout)
-				h += UIValues::TabHeight;
-
-			if(tree->hasGroupTags() && !forceNonLayout)
-				h += UIValues::GroupHeight;
-
-			setSize(500, h);
+			setSize(500, UIValues::ParameterHeight + UIValues::MacroDragHeight);
 			rebuildParameters();
 		}
-
-		std::unique_ptr<PageInfo::Tree> tree;
 
 		~ParameterComponent()
 		{
@@ -629,127 +634,37 @@ public:
 		}
 		void valueTreePropertyChanged(ValueTree&, const Identifier& id) override 
         {
-            if(id == PropertyIds::ID || id == PropertyIds::Page || id == PropertyIds::SubGroup)
+            if(id == PropertyIds::ID)
             {
                 rebuildParameters();
             }
         }
 		void valueTreeParentChanged(ValueTree&) override {}
 		
-		struct ContainerPageTabComponent: public PageTabComponent
-		{
-			ContainerPageTabComponent(ParameterComponent* parent_):
-			  PageTabComponent(parent_->parent.node->getUndoManager()),
-			  parent(parent_),
-			  v(parent->parent.node->getValueTree())
-			{}
-
-			ValueTree getNodeTree() override { return v; }
-
-			int getPageHeight(TabComponent* t) const override { return UIValues::MacroDragHeight + UIValues::GroupHeight; }
-
-			void setTabLayout(TabComponent* t, bool drawGroups) override
-			{
-				auto b = t->getLocalBounds();
-
-				if (drawGroups)
-					b.removeFromTop(UIValues::GroupHeight);
-
-				for (auto& g : t->groups)
-				{
-					for(auto& s: g.groupComponents)
-						s->setBounds(b.removeFromLeft(UIValues::ParameterWidth));
-				}
-			}
-
-			void onExpandTabs() override;
-
-			Component::SafePointer<ParameterComponent> parent;
-			ValueTree v;
-		};
-
-		ScopedPointer<PageTabComponent> tabs;
-		Array<PageTabComponent::Group> groups;
-
-		void addToSinglePageGroup(Component* c, int parameterIndex)
-		{
-			if(tree->hasPageLayout())
-			{
-				auto gn = tree->getGroupIdForParameter(parameterIndex);
-
-				for (auto& g : groups)
-				{
-					if (g.name == gn)
-					{
-						g.groupComponents.add(c);
-						return;
-					}
-				}
-
-				groups.add({ gn });
-				groups.getReference(groups.size() - 1).groupComponents.add(c);
-			}
-		}
-
-		bool skipRebuild = false;
-
 		void rebuildParameters()
 		{
-			if (skipRebuild)
-				return;
-
 			sliders.clear();
-			groups.clear();
 
-			auto forceNonLayout = (int)parent.node->getValueTree()[PropertyIds::CurrentPageIndex] == -1;
-
-			if(tree->hasMoreThanOnePage() && !forceNonLayout)
+			for (int i = 0; i < parent.node->getNumParameters(); i++)
 			{
-				tabs = new ContainerPageTabComponent(this);
+				Component* newSlider;
 
-				addAndMakeVisible(tabs);
-				tabs->buildParameters(*tree, BIND_MEMBER_FUNCTION_1(ParameterComponent::createSlider)); 
-			}
-			else
-			{
-				tabs = nullptr;
+				if (isFixedParameterComponent())
+					newSlider = new ParameterSlider(parent.node.get(), i);
+				else
+					newSlider = new MacroParameterSlider(parent.node.get(), i);
 
-				for (int i = 0; i < parent.node->getNumParameters(); i++)
-				{
-					auto newSlider = createSlider(i);
-					addAndMakeVisible(newSlider);
-					
-					if(!forceNonLayout)
-						addToSinglePageGroup(newSlider, i);
-				}
+				addAndMakeVisible(newSlider);
+				sliders.add(newSlider);
 			}
 
 			resized();
-		}
-
-		Component* createSlider(int parameterIndex)
-		{
-			Component* newSlider;
-
-			if (isFixedParameterComponent())
-				newSlider = new ParameterSlider(parent.node.get(), parameterIndex);
-			else
-				newSlider = new MacroParameterSlider(parent.node.get(), parameterIndex);
-
-			sliders.add(newSlider);
-
-			return newSlider;
 		}
 
 		void resized() override;
 
 		void paint(Graphics& g) override
 		{
-			for(auto& gr: groups)
-			{
-				gr.drawGroup(g, *this, true);
-			}
-
 			auto b = getLocalBounds().toFloat();
 			
 			b.removeFromTop(10.0f);
@@ -758,7 +673,7 @@ public:
 
 			g.fillRoundedRectangle(b, 10.0f);
 
-			if(sliders.isEmpty() && tabs == nullptr)
+			if(sliders.isEmpty())
 			{
 				auto f = GLOBAL_BOLD_FONT();
 				String t = "No parameters";
@@ -821,19 +736,6 @@ public:
 	virtual int getInsertPosition(Point<int> x) const = 0;
 	void removeDraggedNode(NodeComponent* draggedNode);
 	void insertDraggedNode(NodeComponent* newNode, bool copyNode);
-
-	int getHeaderHeight() const
-	{
-		if (dataReference[PropertyIds::ShowParameters])
-		{
-			if (parameters != nullptr)
-				return parameters->getHeight();
-			else
-				return UIValues::ParameterHeight + UIValues::MacroDragHeight;
-		}
-
-		return 0;
-	}
 
 	void helpChanged(float newWidth, float newHeight) override;
 

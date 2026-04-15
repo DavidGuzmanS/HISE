@@ -150,10 +150,10 @@ public:
 		return { data, (size_t)numChannels, (size_t)numSamples };
 	}
 
-	float** getRawChannelPointers() const
-	{
-		return data;
-	}
+    float** getRawChannelPointers()
+    {
+        return data;
+    }
     
 protected:
 

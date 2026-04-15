@@ -62,7 +62,7 @@ struct StringBuilder
     StringBuilder& operator==(StringBuilder&& other)
     {
         position = other.position;
-        data.swapWith(other.data);
+	    std::swap(other.data, data);
         return *this;
     }
 

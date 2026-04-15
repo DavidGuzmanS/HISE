@@ -50,21 +50,19 @@ class MacroModulator: public TimeVariantModulator,
 {
 public:
 
-	SET_PROCESSOR_NAME("MacroModulator", "Macro Control Modulator", "")
+	SET_PROCESSOR_NAME("MacroModulator", "Macro Control Modulator", "A Modulator that enhances the macro control system.")
 
 	/** The special Parameters for the Modulator. */
 	enum SpecialParameters
 	{
-		MacroIndex = 0, 
-		SmoothTime, 
-		UseTable, 
+		MacroIndex = 0, ///< the macro index of the target macro control
+		SmoothTime, ///< the smoothing time
+		UseTable, ///< use a look up table for the value calculation
 		MacroValue,
 		numSpecialParameters
 	};
 
 	MacroModulator(MainController *mc, const String &id, Modulation::Mode m);;
-
-	static ProcessorMetadata createMetadata();
 
 	void restoreFromValueTree(const ValueTree &v) override;;
 

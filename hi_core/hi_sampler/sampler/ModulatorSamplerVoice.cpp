@@ -44,10 +44,6 @@ void ModulatorSamplerVoice::startVoiceInternal(int midiNoteNumber, float velocit
 
 	voiceUptime = wrappedVoice.voiceUptime;
 	uptimeDelta = wrappedVoice.uptimeDelta;
-
-	voiceUptime -= getOwnerSynth()->getPredelayForVoice(this);
-	wrappedVoice.voiceUptime = voiceUptime;
-
 	isActive = true;
 
 	jassert(uptimeDelta > 0.0);
@@ -99,8 +95,6 @@ void ModulatorSamplerVoice::startNote(int midiNoteNumber,
     
 	velocityXFadeValue = currentlyPlayingSamplerSound->getGainValueForVelocityXFade((int)(velocity * 127.0f));
 	
-	firstInVoice = true;
-
 	if (playFromPurger != nullptr && 
 		currentlyPlayingSamplerSound->hasUnpurgedButUnloadedSounds())
 	{
@@ -111,11 +105,8 @@ void ModulatorSamplerVoice::startNote(int midiNoteNumber,
 	{
 		startVoiceInternal(midiNoteNumber, velocity);
 	}
-
-#if HISE_SAMPLER_ALLOW_RELEASE_START
-	if(allowReleaseStart == ReleaseStartState::DisabledOnce)
-		allowReleaseStart = ReleaseStartState::Enabled;
-#endif
+	
+	
 	
 	if (auto fEnve = currentlyPlayingSamplerSound->getEnvelope(Modulation::Mode::PanMode))
 	{
@@ -189,14 +180,15 @@ void ModulatorSamplerVoice::calculateBlock(int startSample, int numSamples)
 
 	voiceBuffer.clear();
 
+	
+
 	wrappedVoice.renderNextBlock(voiceBuffer, startSample, numSamples);
 
 	CHECK_AND_LOG_BUFFER_DATA(getOwnerSynth(), DebugLogger::Location::SampleRendering, voiceBuffer.getReadPointer(0, startSample), true, samplesInBlock);
 	CHECK_AND_LOG_BUFFER_DATA(getOwnerSynth(), DebugLogger::Location::SampleRendering, voiceBuffer.getReadPointer(1, startSample), false, samplesInBlock);
 
-	if(wrappedVoice.isWaitingForTimestretchSeek() || wrappedVoice.voiceUptime < 0.0)
+	if(wrappedVoice.isWaitingForTimestretchSeek())
 	{
-		voiceUptime = wrappedVoice.voiceUptime;
 		return;
 	}
 
@@ -243,22 +235,12 @@ void ModulatorSamplerVoice::calculateBlock(int startSample, int numSamples)
 
 		jassert(getConstantCrossfadeModulationValue() == 1.0f);
 	}
-
-	if(auto groupGainValues = getGroupModulationValues(startSample, numSamples))
-	{
-		FloatVectorOperations::multiply(voiceBuffer.getWritePointer(0, startIndex), groupGainValues + startIndex, samplesInBlock);
-		FloatVectorOperations::multiply(voiceBuffer.getWritePointer(1, startIndex), groupGainValues + startIndex, samplesInBlock);
-
-		jassert(getConstantGroupModulationValue() == 1.0f);
-	}
-
+	
 	float totalGain = getOwnerSynth()->getConstantGainModValue() * envGain;
 	
 	float thisCrossfadeGain = getConstantCrossfadeModulationValue();
-	float thisGroupModGain = getConstantGroupModulationValue();
 
 	totalGain *= thisCrossfadeGain;
-	totalGain *= thisGroupModGain;
 
 	totalGain *= currentlyPlayingSamplerSound->getPropertyVolume();
 	totalGain *= currentlyPlayingSamplerSound->getNormalizedPeak();
@@ -405,23 +387,9 @@ const float * ModulatorSamplerVoice::getCrossfadeModulationValues(int startSampl
 	if (!sampler->isUsingCrossfadeGroups())
 		return nullptr;
 
-	auto bm = currentlyPlayingSamplerSound->getBitmask();
-	return sampler->calculateCrossfadeModulationValuesForVoice(voiceIndex, startSample, numSamples, bm - 1);
+	return sampler->calculateCrossfadeModulationValuesForVoice(voiceIndex, startSample, numSamples, currentlyPlayingSamplerSound->getRRGroup() - 1);
 }
 
-float ModulatorSamplerVoice::getConstantGroupModulationValue() const noexcept
-{
-	auto m = currentlyPlayingSamplerSound->getBitmask();
-	return sampler->getConstantGroupModulationValue(voiceIndex, m);
-}
-
-const float * ModulatorSamplerVoice::getGroupModulationValues(int startSample, int numSamples)
-{
-	auto m = currentlyPlayingSamplerSound->getBitmask();
-	auto fv = firstInVoice;
-	firstInVoice = false;
-	return sampler->calculateGroupModulationValuesForVoice(getCurrentHiseEvent(), voiceIndex, startSample, numSamples, m, fv);
-}
 
 
 void ModulatorSamplerVoice::resetVoice()
@@ -431,7 +399,6 @@ void ModulatorSamplerVoice::resetVoice()
 		sampler->resetNoteDisplay(this->getCurrentlyPlayingNote() + getTransposeAmount());
 	}
 	
-	firstInVoice = true;
 	wrappedVoice.resetVoice();
 
 	ModulatorSynthVoice::resetVoice();
@@ -520,10 +487,7 @@ void MultiMicModulatorSamplerVoice::startNote(int midiNoteNumber, float velocity
 
 	midiNoteNumber += transposeAmount;
 
-#if HISE_SAMPLER_ALLOW_RELEASE_START
-	if(allowReleaseStart == ReleaseStartState::DisabledOnce)
-		allowReleaseStart = ReleaseStartState::Enabled;
-#endif
+	
 
 	currentlyPlayingSamplerSound = static_cast<ModulatorSamplerSound*>(s);
 

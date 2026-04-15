@@ -83,10 +83,6 @@ private:
 	ScopedPointer<TemporaryFile> tempFile;
 	ScopedPointer<OutputStream> tempOutputStream;
 
-#if HISE_JUCE8
-	ScopedPointer<OutputStream> ownedStream;
-#endif
-
 	bool tempWasFlushed = true;
 	bool usesTempFile = false;
 

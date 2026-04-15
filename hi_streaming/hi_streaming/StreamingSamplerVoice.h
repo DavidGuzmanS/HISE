@@ -363,28 +363,11 @@ public:
 	}
 
 #if HISE_SAMPLER_ALLOW_RELEASE_START
-	bool jumpToRelease()
+
+	void jumpToRelease()
 	{
-		auto s = getLoadedSound();
-		auto startOffset = s->getReleaseStart() - s->getSampleStart();
-		auto loopStart = s->getLoopStart() - s->getSampleStart();
-
-		// do not seek to the release trigger if the sample playback went past it
-		auto shouldSkip = roundToInt(voiceUptime) < startOffset;
-
-		// if the loop is enabled, always seek to the end
-		if(s->isLoopEnabled())
-			shouldSkip |= roundToInt(voiceUptime) > loopStart;
-		
-		if(shouldSkip)
-		{
-			jumpToReleaseOnNextRender = true;
-		}
-
-		return jumpToReleaseOnNextRender;
+		jumpToReleaseOnNextRender = true;
 	}
-
-#endif
 
 	bool isWaitingForTimestretchSeek() const
 	{
@@ -408,11 +391,12 @@ private:
 
 	bool stretcherNeedsInitialisation = false;
 
-#if HISE_SAMPLER_ALLOW_RELEASE_START
 	int releaseFadeDuration = 0;
 	double releaseFadeCounter = 0.0;
 	bool jumpToReleaseOnNextRender = false;
 	float releaseGain = 1.0f;
+#else
+private:
 #endif
 
 	double timestretchTonality = 0.0;

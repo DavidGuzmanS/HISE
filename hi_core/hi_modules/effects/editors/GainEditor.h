@@ -36,7 +36,7 @@ namespace hise { using namespace juce;
 */
 class GainEditor  : public ProcessorEditorBody,
                     public Timer,
-                    public Slider::Listener
+                    public SliderListener
 {
 public:
     //==============================================================================

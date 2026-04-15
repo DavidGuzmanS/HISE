@@ -992,7 +992,7 @@ struct TestComplexDataManager : public TestDataComponentBase,
 
 
 struct ParameterList : public WorkbenchComponent,
-					   public Slider::Listener,
+					   public SliderListener,
 					   public WorkbenchData::TestData::TestListener
 {
 	ParameterList(WorkbenchData* data) :

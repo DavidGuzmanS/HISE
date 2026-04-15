@@ -273,29 +273,37 @@ void StyleSheet::copyPropertiesFrom(Ptr other, bool overwriteExisting, const Str
 		return false;
 	});
 	
-	
+
+#if 0
+	for(const auto& p: other->properties)
+	{
+		for(const auto& v: p.values)
+		{
+			bool found = false;
+
+			for(auto& tp: properties)
+			{
+				if(tp.name == p.name)
+				{
+					tp.values[v.first] = v.second;
+					found = true;
+					break;
+				}
+			}
+
+			if(!found)
+			{
+				properties.push_back(p);
+			}
+		}
+	}
+#endif
 }
 
 void StyleSheet::copyPropertiesFromParent(Ptr parent)
 {
 	if(parent != nullptr)
 		copyPropertiesFrom(parent, true, keywords->getInheritedProperties());
-}
-
-void StyleSheet::copyVarProperties(Ptr other)
-{
-	if(other->varProperties != nullptr)
-	{
-		if(varProperties == nullptr)
-		{
-			varProperties = other->varProperties->clone();
-		}
-		else
-		{
-			for(const auto& nv: other->varProperties->getProperties())
-				varProperties->setProperty(nv.name, nv.value);
-		}
-	}
 }
 
 NonUniformBorderData StyleSheet::getNonUniformBorder(Rectangle<float> totalArea, PseudoState stateFlag) const
@@ -386,67 +394,37 @@ StyleSheet::Collection::Collection(List l):
 	// TODO: sort so that it takes the best match first
 }
 
-StyleSheet::Collection::operator bool() const
-{
-	return useIsolatedCollections ? !childCollections.isEmpty() : !list.isEmpty();
-}
-
 void StyleSheet::Collection::setAnimator(Animator* a)
 {
 	jassert(a != nullptr);
 	animator = a;
 
-	forEach(nullptr, [a](Ptr p)
+	forEach([a](Ptr p)
 	{
 		p->animator = a;
 	});
 }
 
-StyleSheet::Ptr StyleSheet::Collection::getFirst() const
-{ return list.getFirst(); }
-
 StyleSheet::Ptr StyleSheet::Collection::operator[](const Selector& s) const
 {
 	StyleSheet::Ptr all;
 
-	if(useIsolatedCollections)
+	for(auto& l: list)
 	{
-		for(auto& c: childCollections)
+		if(l->matchesSelectorList({s}))
 		{
-			for(auto l: c.second)
-			{
-				if(l->matchesSelectorList({s}))
-				{
-					if(l->isAll())
-						all = l;
-					else
-						return l;
-				}
-			}
+			if(l->isAll())
+				all = l;
+			else
+				return l;
 		}
 	}
-	else
-	{
-		for(auto& l: list)
-		{
-			if(l->matchesSelectorList({s}))
-			{
-				if(l->isAll())
-					all = l;
-				else
-					return l;
-			}
-		}
-	}
-
-	
 
 	return all;
 }
 
 String StyleSheet::Collection::getDebugLogForComponent(Component* c) const
 {
-#if HISE_INCLUDE_CSS_DEBUG_TOOLS
 	for(auto& cm: cachedMaps)
 	{
 		if(cm.first.getComponent() == c)
@@ -461,33 +439,17 @@ String StyleSheet::Collection::getDebugLogForComponent(Component* c) const
 				s << cm.debugLog;
 				return s;
 			}
+
 			return cm.debugLog;
 		}
+			
 	}
-#endif
             
 	return {};
 }
 
-StyleSheet::Ptr StyleSheet::Collection::getForElementSelector(Component* c) const
-{
-	c = simple_css::FlexboxComponent::Helpers::getComponentForStyleSheet(c);
-
-	for(auto ss: list)
-	{
-		auto es = FlexboxComponent::Helpers::getElementSelector(*c);
-
-		if(ss->matchesSelectorList({ es}))
-			return ss;
-	}
-
-	return nullptr;
-}
-
 StyleSheet::Ptr StyleSheet::Collection::getForComponent(Component* c)
 {
-	c = simple_css::FlexboxComponent::Helpers::getComponentForStyleSheet(c);
-
 	for(const auto& existing: cachedMaps)
 	{
 		if(existing.first.getComponent() == c)
@@ -495,20 +457,8 @@ StyleSheet::Ptr StyleSheet::Collection::getForComponent(Component* c)
 	}
 
 	using Match = std::pair<ComplexSelector::Score, StyleSheet::Ptr>;
-
-
-#if HISE_INCLUDE_CSS_DEBUG_TOOLS
+	
     List debugList;
-
-	auto addToDebugList = [&](Ptr p)
-	{
-		if(p != nullptr)
-			debugList.addIfNotAlreadyThere(p);
-	};
-#else
-	auto addToDebugList = [&](Ptr p){};
-#endif
-
     
 	Array<Match> matches;
 
@@ -563,15 +513,12 @@ StyleSheet::Ptr StyleSheet::Collection::getForComponent(Component* c)
 		}
 	};
 
-	NamedValueSet propertiesToUse;
-
 	if(useIsolatedCollections)
 	{
 		for(auto& cc: childCollections)
 		{
 			if(sameOrParent(cc.first.getComponent(), c))
 			{
-				propertiesToUse = cc.childProperties;
 				addFromList(cc.second);
 				break;
 			}
@@ -579,8 +526,6 @@ StyleSheet::Ptr StyleSheet::Collection::getForComponent(Component* c)
 	}
 	else
 	{
-		propertiesToUse = rootProperties;
-
 		addFromList(list);
 
 		for(auto& cc: childCollections)
@@ -621,9 +566,8 @@ StyleSheet::Ptr StyleSheet::Collection::getForComponent(Component* c)
 
 	matches.sort(sorter, true);
 
-	auto elementSelector = FlexboxComponent::Helpers::getElementSelector(*c);
-
-	
+	auto ptrValue = reinterpret_cast<uint64>(c);
+	Selector elementSelector(SelectorType::Element, String::toHexString(ptrValue));
 
 	StyleSheet::Ptr ptr;
 
@@ -631,17 +575,10 @@ StyleSheet::Ptr StyleSheet::Collection::getForComponent(Component* c)
 	{
 		String code;
 
-		if(!elementStyle.contains("{"))
-		{
-			code << elementSelector.toString();
-			code << "{ " << elementStyle;
-			if(!code.endsWithChar(';')) code << ";";
-			code << " }";
-		}
-		else
-		{
-			code << elementStyle;
-		}
+		code << elementSelector.toString();
+		code << "{ " << elementStyle;
+		if(!code.endsWithChar(';')) code << ";";
+		code << " }";
 
 		Parser p(code);
 		auto ok = p.parse();
@@ -652,19 +589,23 @@ StyleSheet::Ptr StyleSheet::Collection::getForComponent(Component* c)
 	else
 		ptr = new StyleSheet(elementSelector);
     
-	for(const auto& nv: propertiesToUse)
-		ptr->setPropertyVariable(nv.name, nv.value.toString());
-
 	ptr->copyPropertiesFromParent(all);
+    
+    if(all != nullptr)
+        debugList.addIfNotAlreadyThere(all);
+    
 	ptr->copyPropertiesFromParent(parentStyle);
 
-	addToDebugList(all);
-	addToDebugList(parentStyle);
+    if(parentStyle != nullptr)
+        debugList.addIfNotAlreadyThere(parentStyle);
 
 	for(const auto& m: matches)
 	{
         auto other = m.second;
-		addToDebugList(other);
+        
+        if(other != nullptr)
+            debugList.addIfNotAlreadyThere(other);
+        
 		ptr->copyPropertiesFrom(other);
 	}
 
@@ -684,17 +625,15 @@ StyleSheet::Ptr StyleSheet::Collection::getForComponent(Component* c)
 		otherList.setAnimator(animator);
 
 		auto is = otherList.getWithAllStates(nullptr, elementSelector);
-
-		addToDebugList(is);
+        
+        if(is != nullptr)
+            debugList.addIfNotAlreadyThere(is);
         
 		ptr->copyPropertiesFrom(is, true);
 	}
 
-	String styleSheetLog;
-
-#if	HISE_INCLUDE_CSS_DEBUG_TOOLS
     String inherited;
-    
+    String styleSheetLog;
 	
     for(int i = debugList.size() - 1; i >= 0; i--)
     {
@@ -720,7 +659,7 @@ StyleSheet::Ptr StyleSheet::Collection::getForComponent(Component* c)
 
 	if(createStackTrace)
 		styleSheetLog << "/* CSS for component hierarchy: */\n";
-
+    
 
     
     StringArray hierarchy;
@@ -753,11 +692,8 @@ StyleSheet::Ptr StyleSheet::Collection::getForComponent(Component* c)
     
 	    for(int i = hierarchy.size() - 1; i >= 0; i--)
 	    {
-			if(hierarchy[i].trim() != "div")
-			{
-				styleSheetLog << pre << hierarchy[i];
-				pre << " ";
-			}
+	        styleSheetLog << pre << hierarchy[i];
+	        pre << " ";
 	    }
 	    
 	    styleSheetLog << "\n\n/** Component stylesheet: */\n";
@@ -770,19 +706,85 @@ StyleSheet::Ptr StyleSheet::Collection::getForComponent(Component* c)
 	        styleSheetLog = styleSheetLog.replace(elementSelectors[i], hierarchy[i]);
 	    }
 	}
-#endif
 
-	ptr->setPropertyVariable("name", c->getName());
 	ptr->setCustomFonts(customFonts);
 
 	cachedMaps.add({ c, ptr, styleSheetLog });
 
 	jassert(animator != nullptr);
 	ptr->animator = animator;
+	
+	return ptr;
 
-	ptr->updateNonLayoutPropertyFlag();
+#if 0
+	Array<Selector> selectors;
+
+	if(auto fc = dynamic_cast<FlexboxComponent*>(c))
+	{
+		// overwrite the default behaviour and only return the
+		// selector that was defined
+		selectors.add(fc->getSelector());
+		selectors.addArray(FlexboxComponent::Helpers::getClassSelectorFromComponentClass(c));
+	}
+	else
+	{
+		if(auto ts = FlexboxComponent::Helpers::getTypeSelectorFromComponentClass(c))
+			selectors.add(ts);
+
+		auto classList = FlexboxComponent::Helpers::getClassSelectorFromComponentClass(c);
+
+		selectors.addArray(classList);
+
+		if(auto is = FlexboxComponent::Helpers::getIdSelectorFromComponentClass(c))
+			selectors.add(is);
+	}
+
+	auto elementStyle = c->getProperties()["style"].toString();
+
+	StyleSheet::Ptr ptr;
+
+	if(elementStyle.isNotEmpty())
+	{
+		String code;
+
+		auto ptrValue = reinterpret_cast<uint64>(c);
+		Selector elementSelector(SelectorType::Element, String::toHexString(ptrValue));
+					
+		code << elementSelector.toString();
+		code << "{ " << elementStyle;
+		if(!code.endsWithChar(';')) code << ";";
+		code << " }";
+
+		Parser p(code);
+		auto ok = p.parse();
+		if(ok.wasOk())
+			ptr = p.getCSSValues().getOrCreateCascadedStyleSheet({elementSelector});
+
+		addElementStyle(ptr);
+
+		if(auto body = (*this)[ElementType::Body])
+		{
+			ptr->copyPropertiesFrom(body, false);
+		}
+	}
+
+	auto cssPtr = getOrCreateCascadedStyleSheet(selectors);
+
+	if(ptr != nullptr)
+	{
+		if(cssPtr != nullptr)
+			ptr->copyPropertiesFrom(cssPtr);
+	}
+	else
+	{
+		ptr = cssPtr;
+	}
+
+	if(auto root = CSSRootComponent::find(*c))
+		setAnimator(&root->animator);
 
 	return ptr;
+#endif
 }
 
 String StyleSheet::Collection::toString() const
@@ -803,8 +805,6 @@ String StyleSheet::Collection::toString() const
 
 StyleSheet::Ptr StyleSheet::Collection::getWithAllStates(Component* c, const Selector& s)
 {
-	c = simple_css::FlexboxComponent::Helpers::getComponentForStyleSheet(c);
-
 	for(const auto& existing: cachedMapForAllStates)
 	{
 		if(existing.first.second.exactMatch(s) && existing.first.first == c)
@@ -887,35 +887,9 @@ StyleSheet::Ptr StyleSheet::Collection::getWithAllStates(Component* c, const Sel
 }
 
 
-void StyleSheet::Collection::setPropertyVariable(Component* c, const Identifier& id, const var& newValue)
+void StyleSheet::Collection::setPropertyVariable(const Identifier& id, const var& newValue)
 {
-	jassert(id.toString() != "class");
-
-	if(useIsolatedCollections)
-	{
-		jassert(c != nullptr);
-
-		if(c != nullptr)
-		{
-			c = simple_css::FlexboxComponent::Helpers::getComponentForStyleSheet(c);
-		}
-
-		for(auto& cc: childCollections)
-		{
-			if(cc.first == c)
-			{
-				cc.childProperties.set(id, newValue);
-			}
-		}
-
-	}
-	else
-	{
-		jassert(c == nullptr);
-		rootProperties.set(id, newValue);		
-	}
-
-	forEach(c, [id, newValue](Ptr p)
+	forEach([id, newValue](Ptr p)
 	{
 		p->setPropertyVariable(id, newValue);
 	});
@@ -997,8 +971,6 @@ bool StyleSheet::Collection::clearCache(Component* c)
 	}
 	else
 	{
-		c = simple_css::FlexboxComponent::Helpers::getComponentForStyleSheet(c);
-
 		for(int i = 0; i < cachedMaps.size(); i++)
 		{
 			if(cachedMaps[i].first.getComponent() == c)
@@ -1013,93 +985,42 @@ bool StyleSheet::Collection::clearCache(Component* c)
 	}
 }
 
-void StyleSheet::Collection::addIsolatedCollection(Component* c, const String& fileName, const Collection& other)
-{
-	setUseIsolatedCollections(true);
-	addCollectionForComponent(c, other, fileName);
-}
-
 void StyleSheet::Collection::updateIsolatedCollection(const String& fileName, const Collection& other)
 {
 	// refresh the popup menu...
 	cachedMapForAllStates.clear();
 
-	
-	for (auto& c : childCollections)
+	for(int i = 0; i < isolatedStyleSheetFileNames.size(); i++)
 	{
-		if (c.filename == fileName)
-		{
-			auto prev = getForComponent(c.first);
-			c.second = other.list;
-
-			clearCache(c.first);
-
-			auto ss = getForComponent(c.first);
-
-			if (prev != nullptr && ss != nullptr)
-				ss->copyVarProperties(prev);
-		}
+		if(isolatedStyleSheetFileNames[i].first.getComponent() == nullptr)
+			isolatedStyleSheetFileNames.remove(i--);
 	}
-}
 
-void StyleSheet::Collection::copyStyleSheetsFrom(Component* c, const Collection& other)
-{
-	// the other collection must not use isolated collections!
-	jassert(!other.useIsolatedCollections);
-
-	for(auto l: other.list)
+	for(const auto& f: isolatedStyleSheetFileNames)
 	{
-		if(useIsolatedCollections)
+		if(f.second == fileName)
 		{
-			if(childCollections.isEmpty() && c != nullptr)
-			{
-				childCollections.add({ c, other.list });
-				return;
-			}
-
 			for(auto& c: childCollections)
 			{
-				bool found = false;
-
-				for(int i = 0; i < c.second.size(); i++)
+				if(c.first == f.first)
 				{
-					auto ss = c.second[i];
+					auto prev = getForComponent(c.first);
 
-					if(ss->matchesComplexSelectorList(l->complexSelectors))
-					{
-						c.second.set(i, l);
-						found = true;
-					}
-				}
+					c.second = other.list;
 
-				if(!found)
-					c.second.add(l);
-			}
-		}
-		else
-		{
-			bool found = false;
+					clearCache(c.first);
 
-			for(int i = 0; i < list.size(); i++)
-			{
-				auto ss = list[i];
+					auto ss = getForComponent(c.first);
 
-				if(ss->matchesComplexSelectorList(l->complexSelectors))
-				{
-					list.set(i, l);
-					found = true;
+					if(prev != nullptr && ss != nullptr)
+						ss->copyVarProperties(prev);
 				}
 			}
-
-			if(!found)
-				list.add(l);
 		}
 	}
-
-	clearCache(nullptr);
 }
 
-void StyleSheet::Collection::addCollectionForComponent(Component* c, const Collection& other, const String& fileName)
+void StyleSheet::Collection::addCollectionForComponent(Component* c, const Collection& other)
 {
 	for(int i = 0; i < childCollections.size(); i++)
 	{
@@ -1116,87 +1037,11 @@ void StyleSheet::Collection::addCollectionForComponent(Component* c, const Colle
 		}
 	}
 
-	ChildCollection nc;
-	nc.first = c;
-	nc.filename = fileName;
-	nc.second = other.list;
-
-	childCollections.add(nc);
-}
-
-void StyleSheet::Collection::updateStyleSheetInCache(Component* component, const Ptr& ss)
-{
-	for(auto& cd: cachedMaps)
-	{
-		if(cd.first == component)
-		{
-			cd.second = ss;
-			break;
-		}
-	}
-
-	for(auto cd: cachedMapForAllStates)
-	{
-		if(cd.first.first == component)
-		{
-			cd.second = ss;
-		}
-	}
-
-	simple_css::FlexboxComponent* rootFb = component->findParentComponentOfClass<FlexboxComponent>();
-
-	if(rootFb != nullptr)
-	{
-		while(auto p = rootFb->findParentComponentOfClass<FlexboxComponent>())
-		{
-			rootFb = p;
-		}
-	}
-	
-	if(rootFb != nullptr)
-		rootFb->setCSS(*this);
-
-	component->repaint();
+	childCollections.add({ c, other.list });
 }
 
 Result StyleSheet::Collection::performAtRules(DataProvider* d)
 {
-    if(useIsolatedCollections)
-    {
-        for(auto& c: childCollections)
-        {
-            for(auto l: c.second)
-            {
-                auto ar = l->getAtRuleName();
-
-                auto url = l->getURLFromProperty({ "src", {} });
-                
-                if(ar == "font-face")
-                {
-                    auto fontName = l->getPropertyValueString({"font-family", {}});
-                    auto fToUse = d->loadFont(fontName, url);
-
-                    customFonts.addIfNotAlreadyThere({ fontName, fToUse });
-                }
-            }
-        }
-        
-        if(!customFonts.isEmpty())
-        {
-            for(auto& c: childCollections)
-            {
-                for(auto ss: c.second)
-                {
-                    ss->setCustomFonts(customFonts);
-                }
-            }
-        }
-        
-        return Result::ok();
-    }
-    
-    
-    
 	for(int i = 0; i < list.size(); i++)
 	{
 		auto l = list[i];
@@ -1264,34 +1109,20 @@ bool StyleSheet::Collection::sameOrParent(Component* possibleParent, Component* 
 	return false;
 }
 
-void StyleSheet::Collection::forEach(Component* c, const std::function<void(Ptr)>& f)
+void StyleSheet::Collection::forEach(const std::function<void(Ptr)>& f)
 {
-	if(c == nullptr)
-	{
-		for (auto l : list)
-			f(l);
-	}
-
-	for(auto& cc: childCollections)
-	{
-		if(cc.first.getComponent() == c || c == nullptr)
-		{
-			for(auto l: cc.second)
-				f(l);
-		}
-	}
-	
+	for(auto l: list)
+		f(l);
 
 	for(const auto& e: cachedMaps)
 	{
-		if(e.first != nullptr && (c == nullptr || sameOrParent(c, e.first)))
+		if(e.first != nullptr)
 			f(e.second);
 	}
 
 	for(const auto& e: cachedMapForAllStates)
 	{
-		if(c == nullptr || sameOrParent(c, e.first.first))
-			f(e.second);
+		f(e.second);
 	}
 }
 
@@ -1480,15 +1311,9 @@ Rectangle<float> StyleSheet::getBounds(Rectangle<float> sourceArea, PseudoState 
 	case PseudoElementType::After:
 		a = a.removeFromRight(w);
 		break;
-    case PseudoElementType::After2:
-        a = a.removeFromRight(w);
-        break;
 	case PseudoElementType::Before:
 		a = a.removeFromLeft(w);
 		break;
-    case PseudoElementType::Before2:
-        a = a.removeFromLeft(w);
-        break;
 	case PseudoElementType::All:
 	default:
 		break;
@@ -1582,8 +1407,7 @@ Rectangle<float> StyleSheet::getPseudoArea(Rectangle<float> sourceArea, int curr
 	if(!found)
 		return {};
 
-	jassert(area == PseudoElementType::Before || area == PseudoElementType::After ||
-            area == PseudoElementType::Before2 || area == PseudoElementType::After2);
+	jassert(area == PseudoElementType::Before || area == PseudoElementType::After );
 
 	PseudoState ps(currentState);
 	ps.element = area;
@@ -1615,27 +1439,6 @@ Rectangle<float> StyleSheet::truncateBeforeAndAfter(Rectangle<float> sourceArea,
 			jassertfalse;
 		}
 	}
-    
-    auto wb2 = getPseudoArea(sourceArea, currentState, PseudoElementType::Before2);
-    auto truncateBefore2 = !wb2.isEmpty();
-
-    if(truncateBefore2)
-    {
-        auto t = getPositionType(PseudoState(currentState).withElement(PseudoElementType::Before2));
-        truncateBefore2 &= (t != PositionType::absolute);
-    }
-    
-    if(truncateBefore2)
-    {
-        if(wb2.getX() == sourceArea.getX())
-            sourceArea.removeFromLeft(wb2.getWidth());
-        else if (wb2.getRight() == sourceArea.getRight())
-            sourceArea.removeFromRight(wb2.getWidth());
-        else
-        {
-            jassertfalse;
-        }
-    }
 
 
 	auto wa = getPseudoArea(sourceArea, currentState, PseudoElementType::After);
@@ -1658,27 +1461,6 @@ Rectangle<float> StyleSheet::truncateBeforeAndAfter(Rectangle<float> sourceArea,
 			jassertfalse;
 		}
 	}
-    
-    auto wa2 = getPseudoArea(sourceArea, currentState, PseudoElementType::After2);
-    auto truncateAfter2 = !wa2.isEmpty();
-
-    if(truncateAfter2)
-    {
-        auto t = getPositionType(PseudoState(currentState).withElement(PseudoElementType::After2));
-        truncateAfter2 &= (t != PositionType::absolute);
-    }
-
-    if(truncateAfter2)
-    {
-        if(wa2.getX() == sourceArea.getX())
-            sourceArea.removeFromLeft(wa2.getWidth());
-        else if (wa2.getRight() == sourceArea.getRight())
-            sourceArea.removeFromRight(wa2.getWidth());
-        else
-        {
-            jassertfalse;
-        }
-    }
 
 	return sourceArea;
 }
@@ -1878,9 +1660,6 @@ String StyleSheet::getText(const String& t, PseudoState currentState) const
 		textToUse = getPropertyValueString({"content", currentState});
 	}
 
-	if(textToUse.isEmpty())
-		return {};
-
 	if(auto v = getPropertyValue({ "text-transform", currentState}))
 	{
 		auto tv = v.getValue(varProperties);
@@ -2075,7 +1854,7 @@ AffineTransform StyleSheet::getTransform(Rectangle<float> totalArea, PseudoState
 	return {};
 }
 
-ColourInfo StyleSheet::getColourOrGradient(Rectangle<float> area, PropertyKey key,
+std::pair<Colour, ColourGradient> StyleSheet::getColourOrGradient(Rectangle<float> area, PropertyKey key,
                                                                   Colour defaultColour) const
 {
 	key.appendSuffixIfNot("color");
@@ -2087,24 +1866,9 @@ ColourInfo StyleSheet::getColourOrGradient(Rectangle<float> area, PropertyKey ke
 
 	auto getValueFromString = [&](const String& v)
 	{
-		auto hash = v.hashCode();
-
-		auto hashed = hashedColours.find(hash);
-
-		auto isVar = v.indexOf("var(--");
-
-		if(isVar == -1)
-		{
-			if(hashed != hashedColours.end())
-				return hashed->second;
-		}
-
-		ColourInfo rv;
-
-		
-
 		if(v.startsWith("color-mix"))
 		{
+			
 			auto args = v.fromFirstOccurrenceOf("(", false, false).upToLastOccurrenceOf(")", false, false);
 			auto tokens = StringArray::fromTokens(args, ",", "()");
 			tokens.trim();
@@ -2116,34 +1880,31 @@ ColourInfo StyleSheet::getColourOrGradient(Rectangle<float> area, PropertyKey ke
 			auto c1Colour = c1.upToFirstOccurrenceOf(" ", false, false);
 			ExpressionParser::Context<> context;
 			auto c1Mix = ExpressionParser::evaluate(c1.fromFirstOccurrenceOf(" ", false, false), context);
+
 			auto c2Colour = c2.upToFirstOccurrenceOf(" ", false, false);
+			
 
 			auto colour1 = ColourParser(c1Colour).getColour();
 			auto colour2 = ColourParser(c2Colour).getColour();
 
-			rv.first = colour1.interpolatedWith(colour2, 1.0 - c1Mix);
+			return std::pair(colour1.interpolatedWith(colour2, 1.0 - c1Mix), ColourGradient());
 		}
-		else if(v.startsWith("linear-gradient"))
+		if(v.startsWith("linear-gradient"))
 		{
 			ColourGradient grad;
 			ColourGradientParser p(area, v.fromFirstOccurrenceOf("(", false, false).upToLastOccurrenceOf(")", false, false));
-			rv.first = defaultColour;
-			rv.second = p.getGradient();
+			return std::pair(defaultColour, p.getGradient());
 		}
 		else if (v.startsWith("rgb"))
 		{
-			rv.first = ColourParser(v).getColour();
-			
+			auto c = ColourParser(v).getColour();
+			return std::pair(c, ColourGradient());
 		}
 		else
 		{
-			rv.first = Colour((uint32)v.getHexValue64());
+			auto c = Colour((uint32)v.getHexValue64());
+			return std::pair(c, ColourGradient());
 		}
-
-		if(isVar == -1)
-			hashedColours[hash] = rv;
-
-		return rv;
 	};
 
     if(auto tv = getTransitionValue({ "background-size", key.state }))
@@ -2178,7 +1939,7 @@ ColourInfo StyleSheet::getColourOrGradient(Rectangle<float> area, PropertyKey ke
     
 	if(auto tv = getTransitionValue(key))
 	{
-		using Type = ColourInfo;
+		using Type = std::pair<Colour, ColourGradient>;
 
 		TransitionCalculator<Type> im(this, animator, key.name, tv);
 
@@ -2362,49 +2123,12 @@ std::pair<bool, PseudoState> StyleSheet::matchesRawList(const Selector::RawList&
 	return { true, blockSelectors[0].second };
 }
 
-Array<std::pair<PseudoState, String>> StyleSheet::toStringForDefinedStates() const
-{
-	int idx = 0;
-
-	Array<std::pair<PseudoState, String>> sortedProperties;
-
-	for(const auto& ep: properties)
-	{
-		if(ep.empty())
-		{
-			idx++;
-			continue;
-		}
-
-		std::map<int, String> stateProperties;
-
-		for(const auto& p: ep)
-		{
-			for(const auto& v: p.values)
-			{
-				auto pv = v.second.toString().replace("%TR%", p.name);
-				stateProperties[v.first] << "\n  " << p.name << ": " << pv << ";";
-			}
-		}
-
-		for(const auto& sv: stateProperties)
-		{
-			auto state = PseudoState(sv.first).withElement((PseudoElementType)idx);
-			sortedProperties.add({ state, sv.second });
-		}
-
-		idx++;
-	}
-
-	return sortedProperties;
-}
-
 String StyleSheet::toString() const
 {
 	String listContent;
 
     String sel;
-
+    
 	for(auto s: complexSelectors)
 	{
 		sel << s->toString();
@@ -2412,8 +2136,9 @@ String StyleSheet::toString() const
 		if(s != complexSelectors.getLast().get())
 			sel << ", ";
 	}
-
-	listContent << sel;
+		
+    listContent << sel;
+	
 	int idx = 0;
 
 	for(const auto& ep: properties)
@@ -2423,7 +2148,7 @@ String StyleSheet::toString() const
 			idx++;
 			continue;
 		}
-
+			
 		if(idx != 0)
 			listContent << sel << "::" << PseudoState::getPseudoElementName(idx);
 
@@ -2436,6 +2161,9 @@ String StyleSheet::toString() const
 
 		listContent << "}\n";
 	}
+		
+
+	
 
 	return listContent;
 }
@@ -2529,11 +2257,6 @@ void StyleSheet::setPropertyVariable(const Identifier& id, const String& newValu
 	varProperties->setProperty(id, newValue);
 }
 
-bool StyleSheet::hasNonLayoutProperties(PseudoElementType type) const
-{
-	return nonLayoutPropertiesDefined[(int)type];
-}
-
 bool StyleSheet::isAll() const
 {
 	for(auto cs: complexSelectors)
@@ -2545,30 +2268,6 @@ bool StyleSheet::isAll() const
 	}
 
 	return false;
-}
-
-void StyleSheet::setCustomFonts(const Array<std::pair<String, Font>>& cf)
-{
-	customFonts = cf;
-}
-
-void StyleSheet::updateNonLayoutPropertyFlag()
-{
-	for(int i = 0; i < (int)PseudoElementType::All; i++)
-	{
-		nonLayoutPropertiesDefined[i] = false;
-
-		for(const auto& p: properties[i])
-		{
-			auto isNonLayout = simple_css::Parser::isNonLayoutProperty(p.name);
-
-			if(isNonLayout)
-			{
-				nonLayoutPropertiesDefined[i] = true;
-				break;
-			}
-		}
-	}
 }
 
 PositionType StyleSheet::getPositionType(PseudoState state) const
@@ -2621,19 +2320,6 @@ FlexItem StyleSheet::getFlexItem(Component* c, Rectangle<float> fullArea) const
 	item.minHeight = getPixelValue(b, { "min-height", {}}, -1.0f);
 	item.maxHeight = getPixelValue(b, { "max-height", {}}, -1.0f);
 
-	if(item.height == -1 || item.width == -1)
-	{
-		auto db = FlexboxComponent::Helpers::getDefaultBounds(*c);
-
-		if(item.height == -1.0f && db.getHeight() > 0)
-			item.height = db.getHeight();
-
-		if(item.width == -1.0f && db.getWidth() > 0)
-			item.width = db.getWidth();
-	}
-
-	c = FlexboxComponent::Helpers::getComponentForStyleSheet(c);
-
 	if(auto bt = dynamic_cast<Button*>(c))
 	{
 		auto tb = getLocalBoundsFromText(bt->getButtonText());
@@ -2652,9 +2338,9 @@ FlexItem StyleSheet::getFlexItem(Component* c, Rectangle<float> fullArea) const
 			item.height = h;
 		}
 	}
-	if(auto st = dynamic_cast<ComponentWithAutoTextSize*>(c))
+	if(auto st = dynamic_cast<FlexboxComponent::SimpleTextDisplay*>(c))
 	{
-		auto b = getLocalBoundsFromText(st->getTextToAutofit());
+		auto b = getLocalBoundsFromText(st->currentText);
 
 		if(item.height == -1.0f)
 			item.height = b.getHeight();
@@ -2720,47 +2406,31 @@ String StyleSheet::getURLFromProperty(const PropertyKey& key) const
 	return {};
 }
 
-Rectangle<float> StyleSheet::getLocalBoundsFromText(const String& text, PseudoState state) const
+Rectangle<float> StyleSheet::getLocalBoundsFromText(const String& text) const
 {
-	auto f = getFont(state, {});
-	auto textWidth = f.getStringWidthFloat(getText(text, state));
+	auto f = getFont({}, {});
+	auto textWidth = f.getStringWidthFloat(getText(text, {}));
 	auto textHeight = f.getHeight();
 
 	Rectangle<float> area(0.0f, 0.0f, textWidth, textHeight);
 
-	area = getBounds(area, state);
-	area = expandArea(area, { "padding", state});
-	area = expandArea(area, { "margin", state});
+	area = getBounds(area, {});
+	area = expandArea(area, { "padding", {}});
+	area = expandArea(area, { "margin", {}});
 
-	if(state.matchesElement(PseudoElementType::None))
+	auto ba = getPseudoArea(area, 0, PseudoElementType::Before);
+
+	if(!ba.isEmpty())
 	{
-		auto ba = getPseudoArea(area, 0, PseudoElementType::Before);
-
-		if(!ba.isEmpty())
-		{
-			auto pos = getPositionType(PseudoState().withElement(PseudoElementType::Before));
-			auto dontExtend = pos == PositionType::absolute || pos == PositionType::fixed;
-			if(dontExtend)
-				ba = {};
-		}
-
-		if(!ba.isEmpty())
-			area = area.withLeft(area.getX() - ba.getWidth());
-		
-	    auto ba2 = getPseudoArea(area, 0, PseudoElementType::Before2);
-
-	    if(!ba2.isEmpty())
-	    {
-	        auto pos = getPositionType(PseudoState().withElement(PseudoElementType::Before2));
-	        auto dontExtend = pos == PositionType::absolute || pos == PositionType::fixed;
-	        if(dontExtend)
-	            ba2 = {};
-	    }
-
-	    if(!ba2.isEmpty())
-	        area = area.withLeft(area.getX() - ba2.getWidth());
+		auto pos = getPositionType(PseudoState().withElement(PseudoElementType::Before));
+		auto dontExtend = pos == PositionType::absolute || pos == PositionType::fixed;
+		if(dontExtend)
+			ba = {};
 	}
-    
+
+	if(!ba.isEmpty())
+		area = area.withLeft(area.getX() - ba.getWidth());
+	
 	return area.withZeroOrigin();
 }
 }

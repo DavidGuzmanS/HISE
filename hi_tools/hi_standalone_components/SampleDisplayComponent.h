@@ -254,7 +254,6 @@ private:
 *	You can create subclasses of this component and populate it with some SampleArea objects (you can nest them if desired)
 */
 class AudioDisplayComponent: public ComponentWithMiddleMouseDrag,
-							 public ProfiledComponent,
                              public SettableTooltipClient
 {
 public:
@@ -436,7 +435,6 @@ public:
 
 	void resized() override;
 
-	paintAndProfileChildren(g);
 	virtual void paintOverChildren(Graphics &g) override;
 
 	HiseAudioThumbnail* getThumbnail();
@@ -671,7 +669,7 @@ struct MultiChannelAudioBuffer : public ComplexDataUIBase
 
 	void loadFromEmbeddedData(SampleReference::Ptr r);
 
-	void loadBuffer(const AudioSampleBuffer& b, double sr, Range<int> loopRange={});
+	void loadBuffer(const AudioSampleBuffer& b, double sr);
 
 	void setLoopRange(Range<int> newLoopRange, NotificationType n);
 
@@ -808,8 +806,6 @@ class MultiChannelAudioBufferDisplay: public AudioDisplayComponent,
 									  public AudioDisplayComponent::Listener
 {
 public:
-
-	using ComplexDataType = hise::MultiChannelAudioBuffer;
 
 	enum AreaTypes
 	{

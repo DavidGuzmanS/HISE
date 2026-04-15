@@ -242,10 +242,6 @@ ColourParser::ColourParser(const String& value)
 
 		c = Colour((uint32)colourValue.getHexValue64());
 	}
-	else if(value.startsWith("0x"))
-	{
-		c = Colour((uint32)value.getHexValue64());
-	}
 	else if(value.startsWith("rgb") || value.startsWith("hsl"))
 	{
 		auto content = value.fromFirstOccurrenceOf("(", false, false).upToFirstOccurrenceOf(")", false, false);
@@ -1342,7 +1338,7 @@ bool Parser::matchIf(TokenType t)
 		{
 			currentToken = "";
 
-			while(CharacterFunctions::isLetterOrDigit(*ptr) || *ptr == '-' || *ptr == '_')
+			while(CharacterFunctions::isLetterOrDigit(*ptr) || *ptr == '-')
 				currentToken << *ptr++;
 
 			return currentToken.isNotEmpty();
@@ -1446,10 +1442,6 @@ PseudoState Parser::parsePseudoClass()
 				element = PseudoElementType::Before;
 			if(currentToken == "after")
 				element = PseudoElementType::After;
-            if(currentToken == "before2")
-                element = PseudoElementType::Before2;
-            if(currentToken == "after2")
-                element = PseudoElementType::After2;
 		}
 		else
 		{
@@ -1476,8 +1468,6 @@ PseudoState Parser::parsePseudoClass()
 				state |= (int)PseudoClassType::Root;
 			if(currentToken == "checked")
 				state |= (int)PseudoClassType::Checked;
-			if(currentToken == "empty")
-				state |= (int)PseudoClassType::Empty;
 		}
 
 		skip();
@@ -1573,9 +1563,8 @@ Parser::RawClass Parser::parseSelectors()
 
 		skip();
 	}
-
-	if(!currentList.empty())
-		newClass.selectors.push_back(currentList);
+	
+	newClass.selectors.push_back(currentList);
 
 	return newClass;
 }
@@ -1589,13 +1578,6 @@ Result Parser::parse()
 		while(ptr != end)
 		{
 			auto newClass = parseSelectors();
-
-			if(!newClass)
-			{
-				match(TokenType::EndOfFIle);
-				return Result::ok();
-			}
-				
 
 			if(!matchIf(TokenType::OpenBracket))
 			{
@@ -1804,14 +1786,11 @@ String Parser::getTokenSuffix(PropertyType p, const String& keyword, String& tok
 		{
 		case PropertyType::Font: return "";
 		case PropertyType::Border: return "-width";
-		case PropertyType::BorderRadius: return "";
 		case PropertyType::Transform: return "";
 		case PropertyType::Positioning: return "";
 		case PropertyType::Layout: return "";
         case PropertyType::Colour: return "";
-		case PropertyType::Variable: return "";
-		case PropertyType::Shadow: return "";
-		default: jassertfalse; return "";
+		case PropertyType::Variable: return "";		default: jassertfalse; return "";
 		}
 	}
 	if(styles.contains(token))
@@ -2119,11 +2098,7 @@ StyleSheet::Collection Parser::getCSSValues() const
 					t.duration = processValue(tokens[1], ValueType::Time).getDoubleValue();
 
 					if(tokens.size() > 2)
-					{
-						t.fName = tokens[2];
 						t.f = parseTimingFunction(tokens[2]);
-					}
-						
 					
 					if(tokens.size() > 3)
 						t.delay = processValue(tokens[3], ValueType::Time).getDoubleValue();

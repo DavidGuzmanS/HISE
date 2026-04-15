@@ -305,13 +305,7 @@ void ConvolutionEffectBase::applyHighFrequencyDamping(AudioSampleBuffer& buffer,
 
 void ConvolutionEffectBase::calcCutoff()
 {
-#if HISE_UPDATE_CONVOLUTION_DAMPING_ASYNC
-	auto n = sendNotificationAsync;
-#else
-	auto n = sendNotificationSync;
-#endif
-
-	setImpulse(n);
+	setImpulse(sendNotificationAsync);
 }
 
 

@@ -215,7 +215,6 @@ struct MarkdownCodeComponentBase : public Component,
 		XML,
 		Snippet,
 		ScriptContent,
-		CSS,
 		numSyntaxTypes
 	};
 

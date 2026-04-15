@@ -35,13 +35,12 @@
 
 namespace hise { using namespace juce;
 
+/** A simple effect that does nothing. */
 class EmptyFX : public MasterEffectProcessor
 {
 public:
 
-	static ProcessorMetadata createMetadata();
-
-	SET_PROCESSOR_NAME("EmptyFX", "Empty", "");
+	SET_PROCESSOR_NAME("EmptyFX", "Empty", "A simple effect that does nothing.");
 
 	EmptyFX(MainController *mc, const String &uid) :
 		MasterEffectProcessor(mc, uid)
@@ -87,11 +86,10 @@ public:
 };
 
 
+/** A simple effect that does nothing. */
 class MidiMetronome : public MasterEffectProcessor
 {
 public:
-
-	static ProcessorMetadata createMetadata();
 
 	enum Parameters
 	{
@@ -101,11 +99,15 @@ public:
 		numParameters
 	};
 
-	SET_PROCESSOR_NAME("MidiMetronome", "MidiMetronome", "");
+	SET_PROCESSOR_NAME("MidiMetronome", "MidiMetronome", "A simple metronome that connects to a MIDI player.");
 
 	MidiMetronome(MainController *mc, const String &uid) :
 		MasterEffectProcessor(mc, uid)
 	{
+		parameterNames.add("Enabled");
+	    parameterNames.add("Volume");
+	    parameterNames.add("NoiseAmount");
+
 		updateParameterSlots();
 
 		finaliseModChains();
@@ -136,6 +138,17 @@ public:
 		default:	return 0.0f;
 		}
 	};
+
+	float getDefaultValue(int parameterIndex) const override
+	{
+		switch (parameterIndex)
+		{
+		case Parameters::Enabled:     return 0.0f;
+		case Parameters::Volume:      return -12.0f;
+		case Parameters::NoiseAmount: return 0.5f;
+		default:	return 0.0f;
+		}
+	}
 
 	void restoreFromValueTree(const ValueTree &v) override
 	{
@@ -302,9 +315,7 @@ class GainEffect: public MasterEffectProcessor
 {
 public:
 
-	static ProcessorMetadata createMetadata();
-
-	SET_PROCESSOR_NAME("SimpleGain", "Simple Gain", "")
+	SET_PROCESSOR_NAME("SimpleGain", "Simple Gain", "A utility effect that allows smooth gain changes, static delays and panning.")
 
 	enum InternalChains
 	{
@@ -340,8 +351,10 @@ public:
 
 	void setInternalAttribute(int parameterIndex, float newValue) override;;
 	float getAttribute(int parameterIndex) const override;;
-	
-	ModulationDisplayValue::QueryFunction::Ptr getModulationQueryFunction(int parameterIndex) const override;
+	float getDefaultValue(int ) const override
+	{
+		return 0.0f;
+	}
 
 	void restoreFromValueTree(const ValueTree &v) override;;
 	ValueTree exportAsValueTree() const override;

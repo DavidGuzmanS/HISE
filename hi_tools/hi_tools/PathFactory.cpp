@@ -45,8 +45,6 @@ namespace hise {
 
 		LOAD_EPATH_IF_URL("midi", ProcessorIcons::midiIcon);
 		LOAD_EPATH_IF_URL("gain", ProcessorIcons::gainIcon);
-		LOAD_EPATH_IF_URL("offset", HiBinaryData::ProcessorEditorHeaderIcons::bipolarIcon);
-		LOAD_EPATH_IF_URL("combined", HiBinaryData::ProcessorEditorHeaderIcons::bipolarIcon);
 		LOAD_EPATH_IF_URL("pitch", ProcessorIcons::pitchIcon);
 		LOAD_EPATH_IF_URL("fx", ProcessorIcons::fxIcon);
 		LOAD_EPATH_IF_URL("sample-start", ProcessorIcons::sampleStartIcon);
@@ -137,19 +135,18 @@ namespace hise {
 
 	}
 
-	bool PathFactory::scalePath(Path& p, Rectangle<float> f)
+	void PathFactory::scalePath(Path& p, Rectangle<float> f)
 	{
 		if(!isValid(p, f))
-			return false;
+			return;
 
 		p.scaleToFit(f.getX(), f.getY(), f.getWidth(), f.getHeight(), true);
-		return true;
 	}
 
-	bool PathFactory::scalePath(Path& p, Component* c, float padding)
+	void PathFactory::scalePath(Path& p, Component* c, float padding)
 	{
 		auto b = c->getBoundsInParent().toFloat().reduced(padding);
-		return scalePath(p, b);
+		scalePath(p, b);
 	}
 
 	bool PathFactory::isValid(const Path& p, Rectangle<float> area)

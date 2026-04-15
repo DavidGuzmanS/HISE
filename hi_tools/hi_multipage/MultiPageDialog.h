@@ -707,7 +707,6 @@ public:
     void showModalPopup(bool addButtons, PageInfo::Ptr p);
     Result checkCurrentPage();
     void setCurrentErrorPage(PageBase* b);
-    void clearIfCurrentErrorPage(PageBase* b);
     bool keyPressed(const KeyPress& k) override;
     var exportAsJSON() const;
     void scrollBarMoved (ScrollBar*, double) override { repaint(); }
@@ -822,7 +821,6 @@ private:
     ScopedPointer<PageBase> currentPage;
     Rectangle<int> top, bottom, center;
     std::function<void()> finishCallback;
-    bool pendingClose = false;
     
     WeakReference<PageBase> currentErrorElement;
     //ErrorComponent errorComponent;

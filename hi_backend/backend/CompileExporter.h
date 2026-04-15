@@ -169,8 +169,6 @@ public:
 		AAXSDKMissing,
 		ASIOSDKMissing,
 		HISEPathNotSpecified,
-		JUCESubModuleNotInitialised,
-		JUCEVersionMismatch,
 		HiseCodeMismatch,
 		numErrorCodes
 	};
@@ -210,7 +208,7 @@ public:
 	File hisePath;
 	
     bool useIpp;
-		    
+    
     bool legacyCpuSupport = false;
 
 	bool rawMode = false;
@@ -237,8 +235,6 @@ public:
 		return compressor.compress(v, target);
 	}
 
-	ChildProcessManager* manager = nullptr;
-
 	int getBuildOptionPart(const String& argument);
 
 	static void setExportingFromCommandLine()
@@ -246,60 +242,24 @@ public:
 		globalCommandLineExport = true;
 	};
 
-	static void setSkipAudioDriverInitialisation()
+	static void setExportUsingCI(bool shouldUseCIMode)
 	{
-		skipAudioDriverInitialisation = true;
+		useCIMode = shouldUseCIMode;
 	}
-
-	static void setExportUsingCI(bool shouldUseCIMode);
-
-	/** Call this before creating a BackendProcessor instance. */
-	static void setProjectFolderFromWorkingDirectory()
-	{
-		projectFolderIsWorkingDirectory = true;
-	}
-
-	static bool shouldSkipAudioDriverInitialisation() 
-	{ 
-		return skipAudioDriverInitialisation || isExportingFromCommandLine(); 
-	}
-
-	/** Returns the current working directory from the CLI call and verifies that this is a HISE project folder. Throws a Result::fail() when not valid. */
-	static File getCurrentWorkDirectory(bool throwOnInvalidFolder=true);
-
-	static bool isUsingWorkingDirectoryAsProjectFolder() { return projectFolderIsWorkingDirectory; }
 
 	static bool isUsingCIMode() { return useCIMode; }
 
 	static bool isExportingFromCommandLine() { return globalCommandLineExport; }
 
-    bool shouldBeSilent() const { return isExportingFromCommandLine() || silentMode || manager != nullptr; }
+    bool shouldBeSilent() const { return isExportingFromCommandLine() || silentMode; }
     
 	struct BatchFileCreator
 	{
-		static void createBatchFile(CompileExporter* exporter, BuildOption buildOption, TargetTypes types, ChildProcessManager* m=nullptr);
-		static File getBatchFile(CompileExporter* exporter, ChildProcessManager* m=nullptr);
+		static void createBatchFile(CompileExporter* exporter, BuildOption buildOption, TargetTypes types);
+		static File getBatchFile(CompileExporter* exporter);
 	};
 
-	void setSilent(bool shouldBeSilent) { silentMode = shouldBeSilent; }
-
-    std::function<void(String)> errorFunction;
-    
 protected:
-
-	void setProgress(double d)
-	{
-		if(manager != nullptr)
-			manager->setProgress(d);
-	}
-
-	void logMessage(const String& m)
-	{
-		if(isExportingFromCommandLine())
-			std::cout << m << "\n";
-		else if (manager != nullptr)
-			manager->logMessage(m);
-	}
 
     bool noLto = false;
     
@@ -308,9 +268,8 @@ protected:
 	String configurationName = "Release";
 
 	static bool globalCommandLineExport;
-	static bool skipAudioDriverInitialisation;
+	
 	static bool useCIMode;
-	static bool projectFolderIsWorkingDirectory;
 
 	static int forcedVSTVersion;
 
@@ -318,22 +277,18 @@ protected:
 	{
 		static String getFileNameForCompiledPlugin(const HiseSettings::Data& dataObject, ModulatorSynthChain* chain, BuildOption option);
 
-		static bool isUsingVisualStudio2026(const HiseSettings::Data& dataObject);
+		static bool isUsingVisualStudio2017(const HiseSettings::Data& dataObject);
 
 		static ErrorCodes saveProjucerFile(String templateProject, CompileExporter* exporter);
 	};
 
 	ErrorCodes exportInternal(TargetTypes type, BuildOption option);
 
-	ErrorCodes setupHisePath();
-
 	bool checkSanity(TargetTypes type, BuildOption option);
 
 	BuildOption showCompilePopup(TargetTypes type);
 
-	
-
-	ErrorCodes compileSolution(BuildOption buildOption, TargetTypes types, ChildProcessManager* childProcessManager=nullptr);
+	ErrorCodes compileSolution(BuildOption buildOption, TargetTypes types);
 
 	ErrorCodes createPluginDataHeaderFile(const String &solutionDirectory, const String &publicKey, bool iOSAUv3);
 
@@ -349,7 +304,6 @@ protected:
 		static void handleCompanyInfo(CompileExporter* exporter, String& templateProject);
 		static void handleVisualStudioVersion(const HiseSettings::Data& dataObject, String& templateProject);
 		static void handleAdditionalSourceCode(CompileExporter* exporter, String &templateProject, BuildOption option);
-		static void handleAdditionalStaticLibs(CompileExporter* exporter, String& templateProject, const String& previousLibPath);
 		static void handleCopyProtectionInfo(CompileExporter* exporter, String &templateProject, BuildOption option);
 		static String getTargetFamilyString(BuildOption option);
 		static String getPluginChannelAmount(ModulatorSynthChain* chain);

@@ -30,8 +30,6 @@
 *   ===========================================================================
 */
 
-#include <chrono>
-
 namespace hise {
 namespace dispatch {	
 namespace dummy {
@@ -41,7 +39,6 @@ using namespace juce;
 // get a rough estimate of how much overhead there is in calling buzy_sleep()
 std::chrono::nanoseconds calc_overhead() {
     using namespace std::chrono;
-	using namespace std::chrono_literals;
     constexpr size_t tests = 1001;
     constexpr auto timer = 200us;
 

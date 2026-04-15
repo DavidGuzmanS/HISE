@@ -37,7 +37,7 @@ namespace hise { using namespace juce;
                                                                     //[/Comments]
 */
 class DelayEditor  : public ProcessorEditorBody,
-                     public Slider::Listener,
+                     public SliderListener,
                      public ButtonListener
 {
 public:
@@ -49,10 +49,14 @@ public:
     //[UserMethods]     -- You can add your own custom methods in this section.
 	void updateGui()
 	{
-		auto md = getProcessor()->getMetadata();
+		const bool shouldBeSynced = tempoSyncButton->getToggleState();
 
-        md.updateTempoSync(*leftTimeSlider);
-        md.updateTempoSync(*rightTimeSlider);
+        
+        leftSyncTimeSlider->setVisible(shouldBeSynced);
+        rightSyncTimeSlider->setVisible(shouldBeSynced);
+
+        leftTimeSlider->setVisible(!shouldBeSynced);
+        rightTimeSlider->setVisible(!shouldBeSynced);
 	}
 
 	int getBodyHeight() const
@@ -79,6 +83,8 @@ private:
     //==============================================================================
     ScopedPointer<HiSlider> leftTimeSlider;
     ScopedPointer<HiSlider> rightTimeSlider;
+    ScopedPointer<HiSlider> leftSyncTimeSlider;
+    ScopedPointer<HiSlider> rightSyncTimeSlider;
     ScopedPointer<HiSlider> leftFeedbackSlider;
     ScopedPointer<HiSlider> rightFeedbackSlider;
     ScopedPointer<HiSlider> mixSlider;

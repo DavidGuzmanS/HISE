@@ -82,7 +82,7 @@ struct HiseJavascriptEngine::RootObject::TokenIterator
             t = VarTypeChecker::getTypeFromString(id);
             
             if(t == VarTypeChecker::Undefined)
-                location.throwError("Unknown type annotation '" + id.toString() + "'. Valid types: int, double, String, Array, Buffer.");
+                location.throwError("Unknown type " + id.toString());
 #endif
             
             return t;
@@ -268,15 +268,9 @@ private:
 //==============================================================================
 struct HiseJavascriptEngine::RootObject::ExpressionTreeBuilder : private TokenIterator
 {
-#if USE_BACKEND
-	using CS = ApiClass::DiagnosticResult::Classification;
-	using SV = ApiClass::DiagnosticResult::Severity;
-#endif
-
 	ExpressionTreeBuilder(const String code, const String externalFile, HiseJavascriptPreprocessor::Ptr preprocessor_) :
 		TokenIterator(code, externalFile),
-		preprocessor(preprocessor_),
-	    currentErrorLocation(nullptr)
+		preprocessor(preprocessor_)
 	{
 #if ENABLE_SCRIPTING_BREAKPOINTS
 		if (externalFile.isNotEmpty())
@@ -398,8 +392,6 @@ struct HiseJavascriptEngine::RootObject::ExpressionTreeBuilder : private TokenIt
 			}
 		}
 
-		b->closeLocation = location.location;
-
 		return b.release();
 	}
 
@@ -426,7 +418,7 @@ struct HiseJavascriptEngine::RootObject::ExpressionTreeBuilder : private TokenIt
 			{
 				if (e->getVariableName().isNull())
 				{
-					location.throwError("Cannot capture anonymous expressions. Only named variables can appear in capture lists.");
+					location.throwError("Can't capture anonymous expressions");
 				}
 			}
 
@@ -529,12 +521,6 @@ struct HiseJavascriptEngine::RootObject::ExpressionTreeBuilder : private TokenIt
 
 	Array<Breakpoint> breakpoints;
 
-#if USE_BACKEND
-	/** Returns the diagnostics collected during a diagnostic-mode parse. */
-	const Array<ApiDiagnostic>& getDiagnostics() const { return diagnostics; }
-	Array<ApiDiagnostic>& getDiagnostics() { return diagnostics; }
-#endif
-
 private:
 
 	HiseSpecialData *hiseSpecialData;
@@ -557,88 +543,7 @@ private:
 		return currentNamespace;
 	}
 
-#if USE_BACKEND
-	bool isDiagnosticMode() const
-	{
-		return hiseSpecialData != nullptr && hiseSpecialData->diagnosticMode;
-	}
-
-	Array<ApiDiagnostic> diagnostics;
-
-	void recordDiagnostic(const CodeLocation& loc, const String& message,
-	                       const StringArray& suggestions = {},
-	                       SV severity = SV::Error,
-	                       CS source=CS::ApiValidation)
-	{
-		ApiDiagnostic d;
-		loc.fillColumnAndLines(d.col, d.line);
-		d.fileName = loc.externalFile;
-		d.message = message;
-		d.suggestions = suggestions;
-		d.severity = severity;
-		d.classification = source;
-		diagnostics.add(d);
-	}
-
-	/** Skip tokens until a matching close paren is found (handles nesting). */
-	void skipToMatchingParen()
-	{
-		int depth = 1;
-
-		while (depth > 0 && currentType != TokenTypes::eof)
-		{
-			if (currentType == TokenTypes::openParen)
-				depth++;
-			else if (currentType == TokenTypes::closeParen)
-			{
-				depth--;
-				if (depth == 0)
-				{
-					skip(); // consume the closing paren
-					return;
-				}
-			}
-
-			skip();
-		}
-	}
-#endif
-
-	/** Wraps parseExpression() with a check for the 'undefined' literal token.
-	 *  If the current token is 'undefined' and we're in diagnostic mode, records
-	 *  an error (passing undefined causes a runtime error in HISE). Then falls
-	 *  through to parseExpression() normally since it's syntactically valid.
-	 *  @param callName  Optional function name to include in the diagnostic message.
-	 */
-	Expression* parseExpressionWithUndefinedCheck(const String& callName = {})
-	{
-#if USE_BACKEND
-		if (isDiagnosticMode() && currentType == TokenTypes::undefined)
-		{
-			String msg = "Passing 'undefined' as argument";
-			if (callName.isNotEmpty())
-				msg << " to " << callName << "()";
-			msg << " will cause a runtime error. Use \"\" or false for an inactive value.";
-			recordDiagnostic(location, msg, { "\"\"", "false" }, SV::Error, CS::Language);
-		}
-#endif
-		return parseExpression();
-	}
-
-	void throwError(const String& err) const
-	{
-		if(currentErrorLocation.getAddress() != nullptr)
-		{
-			auto copy = location;
-			copy.location = currentErrorLocation;
-			copy.throwError(err);
-		}
-		else
-		{
-			location.throwError(err);
-		}
-		
-	}
+	void throwError(const String& err) const  { location.throwError(err); }
 
 	template <typename OpType>
 	Expression* parseInPlaceOpExpression(ExpPtr& lhs)
@@ -745,12 +650,10 @@ private:
 		else if(typeId == ScopedBypasser::getStaticId())
 		{
 			match(TokenTypes::openParen);
-			ExpPtr b = parseExpression();
-            match(TokenTypes::comma);
-            ExpPtr send = parseExpression();
+			auto b = parseExpression();
 			match(TokenTypes::closeParen);
 
-			return new ScopedBypasser(location, condition, b.release(), send.release());
+			return new ScopedBypasser(location, condition, b);
 		}
 		else if(typeId == ScopedTracer::getStaticId())
 		{
@@ -770,41 +673,6 @@ private:
 
 			return new ScopedProfiler(location, condition, name);
 		}
-        else if(typeId == ScopedCall::getStaticId())
-        {
-            match(TokenTypes::openParen);
-            
-            ExpPtr f = parseExpression();
-
-            ScopedPointer<ScopedCall> c = new ScopedCall(location, condition, f.release());
-
-            OwnedArray<Expression> args;
-            
-            if(matchIf(TokenTypes::comma))
-            {
-                while(true)
-                {
-                    if(matchIf(TokenTypes::closeParen))
-                        break;
-                    if(matchIf(TokenTypes::eof))
-                        break;
-
-                    args.add(parseExpression());
-                    
-                    matchIf(TokenTypes::comma);
-                }
-            }
-            else
-                match(TokenTypes::closeParen);
-            
-            for(int i = 0; i < args.size(); i++)
-                c->argValues.add(var());
-            
-            c->args.swapWith(args);
-            
-            return c.release();
-        }
-        
 		else if(typeId == ScopedCounter::getStaticId())
 		{
 			match(TokenTypes::openParen);
@@ -857,16 +725,6 @@ private:
 
 			return new ScopedNoop(location, condition);
 		}
-		else if(typeId == ScopedSampling::getStaticId())
-		{
-			ScopedPointer<ScopedSampling> ss = new ScopedSampling(location, condition);
-			
-			match(TokenTypes::openParen);
-			ss->name = parseExpression();
-			match(TokenTypes::closeParen);
-
-			return ss.release();
-		}
 		else if(typeId == ScopedPrinter::getStaticId())
 		{
 			match(TokenTypes::openParen);
@@ -879,10 +737,7 @@ private:
 		else if(typeId == ScopedLocker::getStaticId())
 		{
 			match(TokenTypes::openParen);
-            
-            ExpPtr lt = parseExpression();
-            
-			auto l = (int)lt->getResult(Scope(nullptr, nullptr, nullptr));
+			auto l = (int)parseExpression()->getResult(Scope(nullptr, nullptr, nullptr));
 			match(TokenTypes::closeParen);
 
 			return new ScopedLocker(location, condition, (LockHelpers::Type)l);
@@ -912,27 +767,7 @@ private:
 			return n.release();
 		}
 
-		else if (typeId == ScopedSuppress::getStaticId())
-		{
-			match(TokenTypes::openParen);
-			auto levelStr = currentValue.toString();
-			match(TokenTypes::literal);
-			match(TokenTypes::closeParen);
-
-			using CS = ApiHelpers::CallScope;
-			CS level = CS::Unknown;
-
-			if (levelStr == "warn")
-				level = CS::Warning;
-			else if (levelStr == "strict")
-				level = CS::Init;  // nuclear: suppress everything (Init=1, covers Unsafe=2 and Warning=3)
-			else
-				location.throwError("Invalid suppress level: " + levelStr + ". Use \"warn\" or \"strict\".");
-
-			return new ScopedSuppress(location, condition, level);
-		}
-
-		location.throwError("Unknown scope statement type '" + typeId.toString() + "'.");
+		location.throwError("unknown scope statement type " + typeId.toString());
 		RETURN_IF_NO_THROW(nullptr);
 	}
 
@@ -978,11 +813,7 @@ private:
 		else
 			throwError("File " + refFileName + " not found");
 		
-		if (!allowMultipleIncludes
-#if USE_BACKEND
-			&& !isDiagnosticMode()  // Bypass duplicate-include guard during shadow parse
-#endif
-		)
+		if (!allowMultipleIncludes)
 		{
 			for (int i = 0; i < hiseSpecialData->includedFiles.size(); i++)
 			{
@@ -1045,7 +876,7 @@ private:
 	{
 		if (getCurrentNamespace() != hiseSpecialData)
 		{
-			location.throwError("Including files inside namespaces is not supported in HiseScript. Move the include() to the global scope.");
+			location.throwError("Including files inside namespaces is not supported");
 		}
 
 		match(TokenTypes::openParen);
@@ -1176,11 +1007,8 @@ private:
 		}
 #endif
 
-		// Context-aware: treat 'var' as 'local' inside inline functions and callbacks
-		if (currentInlineFunction != nullptr || !currentlyParsedCallback.isNull())
-		{
-			return parseLocalAssignment();
-		}
+		if (currentInlineFunction != nullptr)
+			location.throwError("Can't declare var statement in inline function");
 
 		ScopedPointer<VarStatement> s(new VarStatement(location));
 		s->name = parseIdentifier();
@@ -1205,24 +1033,12 @@ private:
 	{
 		matchIf(TokenTypes::var);
 
-		// Recovery site #5: const var inside function body
 		if(currentlyParsingInlineFunction || 
 		   currentFunctionObject != nullptr ||
 		   currentInlineFunction != nullptr ||
 		   outerInlineFunction != nullptr)
 		{
-			String msg = "const var cannot be declared inside function body. Use 'local' or 'reg' instead.";
-
-#if USE_BACKEND
-			if (isDiagnosticMode())
-			{
-				recordDiagnostic(location, msg, { "local", "reg" }, SV::Error, CS::Language);
-
-				// Downgrade to local declaration and continue parsing
-				return parseLocalAssignment();
-			}
-#endif
-			location.throwError(msg);
+			location.throwError("Can't declare const var statement inside function body");
 		}
 
 		ScopedPointer<ConstVarStatement> s(new ConstVarStatement(location));
@@ -1244,13 +1060,7 @@ private:
 		jassert(ns->constObjects.contains(s->name));
 
 		static const var uninitialised("uninitialised");
-
-		// In diagnostic mode, skip the sentinel overwrite to preserve live resolved API
-		// objects in constObjects for Tier 2 type resolution during shadow parse.
-#if USE_BACKEND
-		if (!isDiagnosticMode())
-#endif
-			ns->constObjects.set(s->name, uninitialised); // Will be initialied at runtime
+		ns->constObjects.set(s->name, uninitialised); // Will be initialied at runtime
 		s->ns = ns;
 
 		ns->comments.set(s->name, lastComment);
@@ -1268,14 +1078,6 @@ private:
             
 			Identifier name = preparser->currentValue.toString();
 
-#if USE_BACKEND
-			// During shadow parse, registers from the last F5 compile still exist.
-			// Re-adding would leave varRegister count unchanged while registerLocations
-			// grows, triggering a false "register variable already defined" mismatch.
-			if (isDiagnosticMode() && ns->varRegister.getRegisterIndex(name) != -1)
-				return nullptr;
-#endif
-
 			ns->varRegister.addRegister(name, var::undefined(), varType);
             ns->registerLocations.add(preparser->createDebugLocation());
 
@@ -1289,7 +1091,7 @@ private:
 				if (!ns->id.isNull())
 					s << ns->id.toString() << ".";
 
-				s << name << ": register variable already defined.";
+				s << name << ": error at definition";
 
 				preparser->location.throwError(s);
 			}
@@ -1300,34 +1102,12 @@ private:
 		{
 			ScopedPointer<RegisterVarStatement> s(new RegisterVarStatement(location));
 
-            auto varType = matchVarType();
+            matchVarType();
             
 			s->name = parseIdentifier();
 			hiseSpecialData->checkIfExistsInOtherStorage(HiseSpecialData::VariableStorageType::Register, s->name, location);
 			s->varRegister = &ns->varRegister;
 			s->initialiser = matchIf(TokenTypes::assign) ? parseExpression() : new Expression(location);
-
-#if USE_BACKEND
-			// Hint: suggest type annotation for untyped reg with literal initializer
-			if (isDiagnosticMode() && varType == VarTypeChecker::Undefined)
-			{
-				if (auto* lit = dynamic_cast<LiteralValue*>(s->initialiser.get()))
-				{
-					auto litType = VarTypeChecker::getType(lit->value);
-
-					if (litType == VarTypeChecker::Integer ||
-					    litType == VarTypeChecker::Double ||
-					    litType == VarTypeChecker::String)
-					{
-						auto typeName = VarTypeChecker::getTypeName(litType).toString();
-
-						recordDiagnostic(s->initialiser->location,
-							"Consider using 'reg:" + typeName + " " + s->name.toString() + "' for type safety",
-							{}, SV::Hint, CS::Language);
-					}
-				}
-			}
-#endif
 
 			if (matchIf(TokenTypes::comma))
 			{
@@ -1415,27 +1195,8 @@ private:
 			return s.release();
 		}
 
-		// Context-aware: allow 'local' at root scope, but emit warning and treat as 'var'
-		debugToConsole(dynamic_cast<Processor*>(hiseSpecialData->processor), 
-			"Warning: 'local' used outside of callback/inline function, treating as 'var'");
-
-		ScopedPointer<VarStatement> s(new VarStatement(location));
-		s->name = parseIdentifier();
-
-		hiseSpecialData->checkIfExistsInOtherStorage(HiseSpecialData::VariableStorageType::RootScope, s->name, location);
-
-		s->initialiser = matchIf(TokenTypes::assign) ? parseExpression() : new Expression(location);
-
-		if (matchIf(TokenTypes::comma))
-		{
-			ScopedPointer<BlockStatement> block(new BlockStatement(location));
-			block->statements.add(s.release());
-			block->statements.add(parseLocalAssignment()); // Continue with local parsing for consistency
-			return block.release();
-		}
-
-		match(TokenTypes::semicolon);
-		return s.release();
+		throwError("Cannot define local variables outside of inline functions or callbacks.");
+		RETURN_IF_NO_THROW(nullptr)
 	}
 
 	Statement* parseCallback()
@@ -1491,13 +1252,13 @@ private:
         };
         
         if(illegalIds.contains(namespaceId))
-            prevLoc.throwError("Illegal namespace ID '" + namespaceId.toString() + "'. This name is reserved for a built-in API class.");
+            prevLoc.throwError("Illegal namespace ID");
         
 		currentNamespace = hiseSpecialData->getNamespace(namespaceId);
 
 		if (currentNamespace == nullptr)
 		{
-            prevLoc.throwError("Namespace '" + namespaceId.toString() + "' was not found. It must be declared before it can be used.");
+            prevLoc.throwError("Error at parsing namespace");
 		}
 
 		ScopedPointer<BlockStatement> block = parseBlock();
@@ -1520,24 +1281,8 @@ private:
 
 		
 
-		// Recovery site #8: Anonymous function at statement level
 		if (name.isNull())
-		{
-			String msg = "Functions at statement level must have a name in HiseScript.";
-
-#if USE_BACKEND
-			if (isDiagnosticMode())
-			{
-				recordDiagnostic(location, msg, {}, ApiClass::DiagnosticResult::Severity::Error, CS::Language);
-
-				// Generate a synthetic name to allow parsing to continue
-				Identifier syntheticName("__anonymous_" + String(diagnostics.size()));
-				ExpPtr nm(new UnqualifiedName(location, syntheticName, true)), value(new LiteralValue(location, fn));
-				return new Assignment(location, nm, value);
-			}
-#endif
-			throwError(msg);
-		}
+			throwError("Functions defined at statement-level must have a name");
 
 		ExpPtr nm(new UnqualifiedName(location, name, true)), value(new LiteralValue(location, fn));
 		return new Assignment(location, nm, value);
@@ -1684,26 +1429,15 @@ private:
 
 			while (currentType != TokenTypes::closeParen)
 			{
-				f->addParameter(parseExpressionWithUndefinedCheck(obj->name.toString()));
+				f->addParameter(parseExpression());
 				if (currentType != TokenTypes::closeParen)
 					match(TokenTypes::comma);
 			}
 
-			// Recovery site #4: Inline function argument mismatch
 			if (f->numArgs != f->parameterExpressions.size())
 			{
-				String msg = "Inline function call " + obj->name + ": parameter amount mismatch: " + String(f->parameterExpressions.size()) + " (Expected: " + String(f->numArgs) + ")";
 
-#if USE_BACKEND
-				if (isDiagnosticMode())
-				{
-					
-					recordDiagnostic(location, msg);
-					match(TokenTypes::closeParen);
-					return new DiagnosticPlaceholder(location, msg);
-				}
-#endif
-				throwError(msg);
+				throwError("Inline function call " + obj->name + ": parameter amount mismatch: " + String(f->parameterExpressions.size()) + " (Expected: " + String(f->numArgs) + ")");
 			}
 
 			return matchCloseParen(f.release());
@@ -1757,31 +1491,7 @@ private:
 		}
 		else
 		{
-			// Recovery site #11: Nested inline function
-			if (getCurrentInlineFunction() != nullptr)
-			{
-				String msg = "Nested inline functions are not allowed in HiseScript. Define it at the outer scope.";
-
-#if USE_BACKEND
-				if (isDiagnosticMode())
-				{
-					recordDiagnostic(location, msg, {}, SV::Error, CS::Language);
-
-					// Skip the inner inline function: match 'function', name, params, then skip body block
-					match(TokenTypes::function);
-					matchVarType();
-					parseIdentifier(); // name
-					match(TokenTypes::openParen);
-					while (currentType != TokenTypes::closeParen) skip();
-					match(TokenTypes::closeParen);
-					skipBlock(); // skip the body { ... }
-					matchIf(TokenTypes::semicolon);
-
-					return new Statement(location);
-				}
-#endif
-				throwError(msg);
-			}
+			if (getCurrentInlineFunction() != nullptr) throwError("No nested inline functions allowed.");
 
 			match(TokenTypes::function);
 
@@ -1829,7 +1539,7 @@ private:
 			{
 				currentInlineFunction = nullptr;
 
-				location.throwError("Error at inline function parsing. Check the function signature and body for syntax errors.");
+				location.throwError("Error at inline function parsing");
 
 				return nullptr;
 			}
@@ -1946,7 +1656,10 @@ private:
 
 		const bool isVarInitialiser = matchIf(TokenTypes::var);
 		
-		// Note: 'var' inside inline functions is now allowed and treated as 'local'
+        if(currentInlineFunction && isVarInitialiser)
+        {
+            location.throwError("Can't use var initialiser inside inline function");
+        }
         
 		Expression *iter = parseExpression();
 
@@ -1988,21 +1701,6 @@ private:
                     
                     newExpression = assignment;
                     iter = lv;
-                }
-                else if(!currentlyParsedCallback.isNull())
-                {
-                    Callback* callback = hiseSpecialData->getCallback(currentlyParsedCallback);
-                    
-                    auto cls = new CallbackLocalStatement(location, callback);
-                    cls->name = id;
-                    
-                    hiseSpecialData->checkIfExistsInOtherStorage(HiseSpecialData::VariableStorageType::LocalScope, id, location);
-                    
-                    callback->localProperties.set(cls->name, var());
-                    cls->initialiser.swapWith(assignment->newValue);
-                    
-                    newExpression = assignment;
-                    iter = cls;
                 }
             }
 		}
@@ -2162,7 +1860,7 @@ private:
 
 		while (currentType != TokenTypes::closeParen)
 		{
-			s->arguments.add(parseExpressionWithUndefinedCheck());
+			s->arguments.add(parseExpression());
 			if (currentType != TokenTypes::closeParen)
 				match(TokenTypes::comma);
 		}
@@ -2170,28 +1868,8 @@ private:
 		return matchCloseParen(s.release());
 	}
 
-	struct ScopedErrorLocation
-	{
-		ScopedErrorLocation(ExpressionTreeBuilder& tb):
-		  parent(tb)
-		{
-			parent.currentErrorLocation = parent.location.location;
-		}
-
-		~ScopedErrorLocation()
-		{
-			parent.currentErrorLocation = {};
-		}
-
-		ExpressionTreeBuilder& parent;
-	};
-
-	String::CharPointerType currentErrorLocation;
-
 	Expression* parseApiExpression()
 	{
-		ScopedErrorLocation loc(*this);
-
 		const Identifier apiId = parseIdentifier();
 		const int apiIndex = hiseSpecialData->apiIds.indexOf(apiId);
 		ApiClass *apiClass = hiseSpecialData->apiClasses.getUnchecked(apiIndex).get();
@@ -2232,104 +1910,31 @@ private:
 
 		const String prettyName = apiClass->getObjectName() + "." + functionName.toString();
 
-		// Recovery site #1: Function / constant not found
-		if (functionIndex < 0)
-		{
-			String msg = "Function / constant not found: " + prettyName;
-
-			// Build candidate list and suggest correction (available in all builds)
-			StringArray candidates;
-			Array<Identifier> funcIds, constIds;
-			apiClass->getAllFunctionNames(funcIds);
-			apiClass->getAllConstants(constIds);
-			for (auto& id : funcIds) candidates.add(id.toString());
-			for (auto& id : constIds) candidates.add(id.toString());
-
-			auto suggestion = FuzzySearcher::suggestCorrection(functionName.toString(), candidates, 0.6);
-			StringArray suggestions;
-			if (suggestion.isNotEmpty())
-				suggestions.add(suggestion);
-
-#if USE_BACKEND
-			if (isDiagnosticMode())
-			{
-				recordDiagnostic(location, msg, suggestions);
-
-				// Skip argument list if present
-				if (currentType == TokenTypes::openParen)
-				{
-					match(TokenTypes::openParen);
-					skipToMatchingParen();
-				}
-
-				return new DiagnosticPlaceholder(location, msg, suggestions);
-			}
-#endif
-			throwError(msg);
-		}
+		if (functionIndex < 0) throwError("Function / constant not found: " + prettyName); // Handle also missing constants here
         
         auto pt = apiClass->getForcedParameterTypes(functionName);
         
 		ScopedPointer<ApiCall> s = new ApiCall(location, apiClass, numArgs, functionIndex, pt);
 
-#if ENABLE_SCRIPTING_BREAKPOINTS
-		s->functionName = functionName.toString();
-#endif
+		match(TokenTypes::openParen);
 
-		if(matchIf(TokenTypes::openParen))
+		int numActualArguments = 0;
+
+		while (currentType != TokenTypes::closeParen)
 		{
-			int numActualArguments = 0;
-
-			while (currentType != TokenTypes::closeParen)
+			if (numActualArguments < numArgs)
 			{
-				if (numActualArguments < numArgs)
-				{
-					s->argumentList[numActualArguments++] = parseExpressionWithUndefinedCheck(prettyName);
+				s->argumentList[numActualArguments++] = parseExpression();
 
-					if (currentType != TokenTypes::closeParen)
-						match(TokenTypes::comma);
-				}
-				else
-				{
-					// Recovery site #2: Too many arguments
-					String msg = "Too many arguments in API call " + prettyName + "(). Expected: " + String(numArgs);
-
-#if USE_BACKEND
-					if (isDiagnosticMode())
-					{
-						recordDiagnostic(location, msg);
-						skipToMatchingParen();
-						return new DiagnosticPlaceholder(location, msg);
-					}
-#endif
-					throwError(msg);
-				}
+				if (currentType != TokenTypes::closeParen)
+					match(TokenTypes::comma);
 			}
-
-			// Recovery site #3: Too few arguments
-			if (numArgs != numActualArguments)
-			{
-				String msg = "Call to " + prettyName + "(): argument number mismatch: " + String(numActualArguments) + " (Expected: " + String(numArgs) + ")";
-
-#if USE_BACKEND
-				if (isDiagnosticMode())
-				{
-					recordDiagnostic(location, msg);
-					match(TokenTypes::closeParen);
-					return new DiagnosticPlaceholder(location, msg);
-				}
-#endif
-				throwError(msg);
-			}
-
-			return matchCloseParen(s.release());
+			else throwError("Too many arguments in API call " + prettyName + "(). Expected: " + String(numArgs));
 		}
-		else
-		{
-			ApiCall::DynamicCall call(location, apiClass, numArgs, functionIndex);
-			
-			return new LiteralValue(location, var(call));
-		}
+
+		if (numArgs != numActualArguments) throwError("Call to " + prettyName + "(): argument number mismatch : " + String(numActualArguments) + " (Expected : " + String(numArgs) + ")");
+
+		return matchCloseParen(s.release());
 	}
 
 	Expression* parseConstExpression(JavascriptNamespace* ns=nullptr)
@@ -2367,7 +1972,7 @@ private:
 
 		while (currentType != TokenTypes::closeParen)
 		{
-			s->argumentList[numActualArguments++] = parseExpressionWithUndefinedCheck(prettyName);
+			s->argumentList[numActualArguments++] = parseExpression();
 
 			if (currentType != TokenTypes::closeParen)
 				match(TokenTypes::comma);
@@ -2476,36 +2081,11 @@ private:
 
 				if (captureIndex == -1)
 				{
-					// Recovery sites #9 and #10: outer inline function params/locals in nested body
 					if (inlineParameterIndex != -1)
-					{
-						String msg = "Cannot reference inline function parameter '" + id.toString() + "' in nested function body. Use a capture: function [" + id.toString() + "](params){}.";
-
-#if USE_BACKEND
-						if (isDiagnosticMode())
-						{
-							recordDiagnostic(location, msg, {}, SV::Error, CS::Language);
-							parseIdentifier();
-							return parseSuffixes(new DiagnosticPlaceholder(location, msg));
-						}
-#endif
-						location.throwError(msg);
-					}
+						location.throwError("Can't reference inline function parameters in nested function body");
 
 					if (localParameterIndex != -1)
-					{
-						String msg = "Cannot reference local variable '" + id.toString() + "' in nested function body. Use a capture: function [" + id.toString() + "](params){}.";
-
-#if USE_BACKEND
-						if (isDiagnosticMode())
-						{
-							recordDiagnostic(location, msg, {}, SV::Error, CS::Language);
-							parseIdentifier();
-							return parseSuffixes(new DiagnosticPlaceholder(location, msg));
-						}
-#endif
-						location.throwError(msg);
-					}
+						location.throwError("Can't reference local variables in nested function body");
 				}
 			}
 			else if (auto ob = dynamic_cast<InlineFunction::Object*>(currentInlineFunction))
@@ -2613,22 +2193,14 @@ private:
 						}
 					}
 
-					auto loc = location;
-
-					return parseSuffixes(new UnqualifiedName(loc, parseIdentifier(), false));
+					return parseSuffixes(new UnqualifiedName(location, parseIdentifier(), false));
 				}
 			}
 		}
 
 		auto prevLocation = location;
 
-		if (matchIf(TokenTypes::openParen))
-		{
-			if (matchIf(TokenTypes::closeParen))
-				return parseSuffixes(new ExpressionList(location));
-
-			return parseSuffixes(parseCloseParen(parseExpression()));
-		}
+		if (matchIf(TokenTypes::openParen))        return parseSuffixes(parseCloseParen(parseExpression()));
 		if (matchIf(TokenTypes::true_))            return parseSuffixes(new LiteralValue(prevLocation, (int)1));
 		if (matchIf(TokenTypes::false_))           return parseSuffixes(new LiteralValue(prevLocation, (int)0));
 		if (matchIf(TokenTypes::null_))            return parseSuffixes(new LiteralValue(prevLocation, var()));
@@ -2681,21 +2253,8 @@ private:
 			Identifier name;
 			var fn = parseFunctionDefinition(name);
 
-			// Recovery site #7: Named function in expression
 			if (name.isValid())
-			{
-				String msg = "HiseScript does not support named function expressions. The name will be ignored.";
-
-#if USE_BACKEND
-				if (isDiagnosticMode())
-				{
-					recordDiagnostic(location, msg, {}, ApiClass::DiagnosticResult::Severity::Error, CS::Language);
-					// Fall through — ignore the name, return the function as LiteralValue
-				}
-				else
-#endif
-				throwError(msg);
-			}
+				throwError("Inline functions definitions cannot have a name");
 
 			if (auto fo = dynamic_cast<FunctionObject*>(fn.getDynamicObject()))
 			{
@@ -2751,14 +2310,13 @@ private:
 		if (matchIf(TokenTypes::plusplus))    return parsePreIncDec<AdditionOp>();
 		if (matchIf(TokenTypes::minusminus))  return parsePreIncDec<SubtractionOp>();
 		if (matchIf(TokenTypes::typeof_))     return parseTypeof();
-		if (matchIf(TokenTypes::bitwiseNot))  { ExpPtr a(parseUnary()); return new BitwiseNotOp(location, a); }
 
 		return parseFactor();
 	}
 
 	Expression* parseNewOperator()
 	{
-		location.throwError("The 'new' operator is not supported in HiseScript.");
+		location.throwError("new is not supported anymore");
 		RETURN_IF_NO_THROW(nullptr);
 	}
 
@@ -2911,8 +2469,7 @@ void HiseJavascriptEngine::RootObject::ExpressionTreeBuilder::preprocessCode(con
 		{
 			if (cns != rootNamespace)
 			{
-				// Nested namespace — skip, the main parser will report the error
-				continue;
+				it.location.throwError("Nesting of namespaces is not allowed");
 			}
 
 			it.match(TokenTypes::namespace_);
@@ -2928,11 +2485,7 @@ void HiseJavascriptEngine::RootObject::ExpressionTreeBuilder::preprocessCode(con
 			}
 			else
 			{
-				// Duplicate namespace — merge into existing and warn
-				cns = hiseSpecialData->getNamespace(namespaceId);
-				debugToConsole(dynamic_cast<Processor*>(hiseSpecialData->processor),
-					"Warning: Duplicate namespace '" + namespaceId.toString() + "' — merging contents");
-				continue;
+				it.location.throwError("Duplicate namespace " + namespaceId.toString());
 			}
 		}
 
@@ -2989,21 +2542,6 @@ void HiseJavascriptEngine::RootObject::ExpressionTreeBuilder::preprocessCode(con
 
 		if (it.matchIf(TokenTypes::register_var))
 		{
-#if USE_BACKEND
-			if (hiseSpecialData->diagnosticMode)
-			{
-				try { parseRegisterVar(cns, &it); }
-				catch (Error& e)
-				{
-					recordDiagnostic(it.location, e.errorMessage, {}, SV::Error, CS::Syntax);
-				}
-				catch (String& s)
-				{
-					recordDiagnostic(it.location, s, {}, SV::Error, CS::Syntax);
-				}
-				continue;
-			}
-#endif
 			parseRegisterVar(cns, &it);
 			continue;
 		}
@@ -3016,11 +2554,12 @@ void HiseJavascriptEngine::RootObject::ExpressionTreeBuilder::preprocessCode(con
 
 			const Identifier newId(it.currentValue);
 
-			if (!cns->constObjects.contains(newId))
-			{
-				cns->constObjects.set(newId, undeclared);
-				cns->constLocations.add(it.createDebugLocation());
-			}
+			if ((rootNamespace == cns) && braceLevel != 0) it.location.throwError("const var declaration must be on global level");
+			if (newId.isNull())					  it.location.throwError("Expected identifier for const var declaration");
+			if (cns->constObjects.contains(newId))			  it.location.throwError("Duplicate const var declaration.");
+
+			cns->constObjects.set(newId, undeclared);
+			cns->constLocations.add(it.createDebugLocation());
 
 			continue;
 		}
@@ -3032,9 +2571,7 @@ void HiseJavascriptEngine::RootObject::ExpressionTreeBuilder::preprocessCode(con
 
 	if (rootNamespace != cns)
 	{
-		// Missing closing brace — reset so we don't leave stale state.
-		// The main parser will report the error with a proper location.
-		cns = rootNamespace;
+		it.location.throwError("Parsing error (open namespace)");
 	}
 
 	if (cns->constObjects.size() != cns->constLocations.size())
@@ -3196,8 +2733,6 @@ void HiseJavascriptEngine::RootObject::execute(const String& code, bool allowCon
 
 	{
 		TRACE_SCRIPTING("parse script");
-
-		PROFILE_ONLY(DebugSession::ProfileDataSource::ScopedProfiler sp(parseProfileSource, hiseSpecialData.processor));
 		sl = tb.parseStatementList();
 	}
 	
@@ -3207,10 +2742,6 @@ void HiseJavascriptEngine::RootObject::execute(const String& code, bool allowCon
 
 	{
 		TRACE_SCRIPTING("run onInit callback");
-
-		PROFILE_ONLY(DebugSession::ProfileDataSource::ScopedProfiler sp(onInitProfileSource, hiseSpecialData.processor));
-		PROFILE_ONLY(sl->currentProfileRoot = onInitProfileSource);
-
 		sl->perform(Scope(nullptr, this, this), nullptr);
 	}
 
@@ -3241,75 +2772,6 @@ void HiseJavascriptEngine::RootObject::execute(const String& code, bool allowCon
 
 		hiseSpecialData.processor->setOptimisationReport(s);
 	}
-
-#if USE_BACKEND
-	// Post-compilation: check MIDI callback bodies for callScope warnings
-	{
-		using SL = RealtimeSafetyInfo::StrictnessLevel;
-		auto strictness = dynamic_cast<JavascriptProcessor*>(hiseSpecialData.processor)
-		                  ->getStrictnessLevel();
-
-		if (strictness > SL::Unsafe)
-		{
-			static const Identifier audioCallbacks[] = {
-				Identifier("onNoteOn"),
-				Identifier("onNoteOff"),
-				Identifier("onController"),
-				Identifier("onTimer")
-			};
-
-			for (auto c : hiseSpecialData.callbackNEW)
-			{
-				auto* info = c->getRealtimeSafetyInfo();
-				if (info == nullptr || info->isEmpty())
-					continue;
-
-				auto cbName = c->getName();
-				bool isAudioThread = false;
-
-				for (auto& id : audioCallbacks)
-				{
-					if (cbName == id)
-					{
-						isAudioThread = true;
-						break;
-					}
-				}
-
-				if (!isAudioThread)
-					continue;
-
-				auto* proc = dynamic_cast<Processor*>(hiseSpecialData.processor);
-				auto report = info->toString(strictness, proc);
-				if (report.isNotEmpty())
-				{
-					debugToConsole(proc,
-					    "[" + cbName.toString() + "] " + report);
-				}
-
-				if (strictness == SL::Strict && info->hasUnsafe())
-				{
-					for (auto item : info->items)
-					{
-						if (item->scope != RealtimeSafetyInfo::CallScope::Unsafe &&
-						    item->scope != RealtimeSafetyInfo::CallScope::Init)
-							continue;
-
-						if (auto w = static_cast<RealtimeSafetyWarning*>(item))
-						{
-							if (!w->callStack.isEmpty())
-							{
-								w->callStack.getFirst().location.throwError(
-								    "Unsafe API call in audio-thread callback: " + item->apiCall);
-							}
-						}
-					}
-				}
-			}
-		}
-	}
-#endif
-
 }
 
 HiseJavascriptEngine::RootObject::FunctionObject::FunctionObject(const FunctionObject& other) : DynamicObject(), functionCode(other.functionCode)

@@ -12,7 +12,6 @@
 #include "config.h"
 #include "conv1d/conv1d.h"
 #include "conv1d/conv1d.tpp"
-#include "conv1d/strided_conv1d.h"
 #include "conv2d/conv2d.h"
 #include "conv2d/conv2d.tpp"
 #include "dense/dense.h"

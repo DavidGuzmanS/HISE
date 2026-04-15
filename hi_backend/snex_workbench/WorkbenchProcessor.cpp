@@ -100,22 +100,21 @@ struct IncludeSorter
 	};
 };
 
-DspNetworkCompileExporter::DspNetworkCompileExporter(Component* e, BackendProcessor* bp, bool skipCompilation_) :
+DspNetworkCompileExporter::DspNetworkCompileExporter(Component* e, BackendProcessor* bp) :
 	DialogWindowWithBackgroundThread("Compile DSP networks"),
 	ControlledObject(bp),
 	CompileExporter(bp->getMainSynthChain()),
-	editor(e),
-	skipCompilation(skipCompilation_) 
+	editor(e)
 {
 	addComboBox("build", { "Debug", "CI", "Release" }, "Build Configuration");
 
 #if !JUCE_DEBUG
     getComboBoxComponent("build")->setText("Release", dontSendNotification);
 #endif
-
-	if(!skipCompilation)
+    
+	if (getNetwork() == nullptr)
 	{
-		if (getNetwork() == nullptr)
+		if (PresetHandler::showYesNoWindow("No DSP Network detected", "You need an active DspNetwork for the compilation process.  \n> Press OK to create a Script FX with an empty embedded Network"))
 		{
 			raw::Builder builder(bp);
 			MainController::ScopedBadBabysitter sb(bp);
@@ -127,7 +126,7 @@ DspNetworkCompileExporter::DspNetworkCompileExporter(Component* e, BackendProces
 
 	if (auto n = getNetwork())
 		n->createAllNodesOnce();
-	
+
 	auto customProperties = bp->dllManager->getSubFolder(getMainController(), BackendDllManager::FolderSubType::ThirdParty).getChildFile("node_properties.json");
 
 	if (customProperties.existsAsFile())
@@ -155,18 +154,10 @@ DspNetworkCompileExporter::DspNetworkCompileExporter(Component* e, BackendProces
 	s << "Nodes to compile:\n";
 
 	for (auto f : bp->dllManager->getThirdPartyFiles(bp, false))
-	{
-		String t = f.getFileNameWithoutExtension();
-		cppFilesToCompile.add(t);
-		s << " - " << t << + " [external C++]\n";
-	}
+		s << " - " << f.getFileNameWithoutExtension() << " [external C++]\n";
 
 	for (auto f : bp->dllManager->getNetworkFiles(bp, false))
-	{
-		String t = f.getFileNameWithoutExtension();
-		nodesToCompile.add(t);
-		s << " - " << t << "\n";
-	}
+		s << " - " << f.getFileNameWithoutExtension() << "\n";
 
 	s = s.upToLastOccurrenceOf(", ", false, false);
 
@@ -183,17 +174,22 @@ void DspNetworkCompileExporter::writeDebugFileAndShowSolution()
     auto projectName = settings.getSetting(HiseSettings::Project::Name).toString();
     auto debugExecutable = File(hisePath).getChildFile("projects/standalone/Builds/");
     
+	
+
+	
+	
 	auto currentExecutable = File::getSpecialLocation(File::currentExecutableFile);
 
+
 #if JUCE_WINDOWS
-    auto isUsingVs2026 = HelperClasses::isUsingVisualStudio2026(settings);
-    auto vsString = isUsingVs2026 ? "VisualStudio2026" : "VisualStudio2022";
-    auto vsVersion = isUsingVs2026 ? "18.0" : "17.0";
+    auto isUsingVs2017 = HelperClasses::isUsingVisualStudio2017(settings);
+    auto vsString = isUsingVs2017 ? "VisualStudio2017" : "VisualStudio2022";
+    auto vsVersion = isUsingVs2017 ? "15.0" : "17.0";
 	auto folder = currentExecutable.getFullPathName().contains(" with Faust") ? "Debug with Faust" : "Minimal Build";
 
 	debugExecutable = debugExecutable.getChildFile(vsString).getChildFile("x64").getChildFile(folder).getChildFile("App").getChildFile("HISE Debug.exe");
 
-	// If this hits, then you have a mismatch between VS2022 and VS2026...
+	// If this hits, then you have a mismatch between VS2022 and VS2017...
 	jassertEqual(debugExecutable, currentExecutable);
 	
     solutionFolder = solutionFolder.getChildFile(vsString);
@@ -225,7 +221,7 @@ void DspNetworkCompileExporter::writeDebugFileAndShowSolution()
     
 	auto hasThirdPartyFiles = includedThirdPartyFiles.isEmpty();
 
-    if (hasThirdPartyFiles && managerToUse == nullptr && PresetHandler::showYesNoWindow("Quit HISE", "Do you want to quit HISE and show VS solution for debugging the DLL?  \n> Double click on the solution file, then run the VS debugger and it will open HISE with the ability to set VS breakpoints in your C++ nodes"))
+    if (hasThirdPartyFiles && PresetHandler::showYesNoWindow("Quit HISE", "Do you want to quit HISE and show VS solution for debugging the DLL?  \n> Double click on the solution file, then run the VS debugger and it will open HISE with the ability to set VS breakpoints in your C++ nodes"))
     {
         solutionFile.revealToUser();
         JUCEApplication::quit();
@@ -238,11 +234,13 @@ void DspNetworkCompileExporter::writeDebugFileAndShowSolution()
     solutionFolder = solutionFolder.getChildFile("MacOSX");
     auto solutionFile = solutionFolder.getChildFile(projectName).withFileExtension("xcodeproj");
     
-    if (managerToUse == nullptr && PresetHandler::showYesNoWindow("Show XCode Project", "Do you want to show the Xcode Project file?  \n> Double click on the file to open XCode, then choose `Debug->Attach to Process->HISE Debug` in order to run your C++ node in the Xcode Debugger"))
+    if (PresetHandler::showYesNoWindow("Show XCode Project", "Do you want to show the Xcode Project file?  \n> Double click on the file to open XCode, then choose `Debug->Attach to Process->HISE Debug` in order to run your C++ node in the Xcode Debugger"))
     {
         solutionFile.revealToUser();
     }
 #endif
+    
+	
 }
 
 hise::DspNetworkCompileExporter::CppFileLocationType DspNetworkCompileExporter::getLocationType(const File& f) const
@@ -285,20 +283,9 @@ scriptnode::DspNetwork* DspNetworkCompileExporter::getNetwork()
 
 void DspNetworkCompileExporter::run()
 {
-	ok = setupHisePath();
-
-	if(ok != CompileExporter::ErrorCodes::OK)
-	{
-		errorMessage << "Can't find HISE path";
-		return;
-	}
-
 	auto n = getNetwork();
 
-	if(managerToUse != nullptr && !skipCompilation)
-		managerToUse->setProgress(0.25);
-
-	if (n == nullptr && !skipCompilation)
+	if (n == nullptr)
 	{
 		ok = (ErrorCodes)(int)DspNetworkErrorCodes::NoNetwork;
 		errorMessage << "You need at least one active network for the export process.  \n";
@@ -320,10 +307,12 @@ void DspNetworkCompileExporter::run()
 
 	
 
-	//showStatusMessage("Unload DLL");
-	//getDllManager()->unloadDll();
+	showStatusMessage("Unload DLL");
 
-	logMessage("Create files");
+	
+	getDllManager()->unloadDll();
+
+	showStatusMessage("Create files");
 
 	auto buildFolder = getFolder(BackendDllManager::FolderSubType::Binaries);
 
@@ -337,7 +326,7 @@ void DspNetworkCompileExporter::run()
 	for (auto s : unsortedList)
 		unsortedListU.removeAllInstancesOf(s);
 
-	logMessage("Sorting include dependencies");
+	showStatusMessage("Sorting include dependencies");
 
 	Array<File> list, ulist;
 
@@ -422,7 +411,7 @@ void DspNetworkCompileExporter::run()
 				return;
 			}
 				
-            logMessage("Creating C++ file for Network " + id);
+            showStatusMessage("Creating C++ file for Network " + id);
 
 			scriptnode::routing::LocalCableHelpers::replaceAllLocalCables(v);
 
@@ -482,19 +471,6 @@ void DspNetworkCompileExporter::run()
 	auto codeLibDirPath = codeLibDir.getFullPathName().toStdString();
 	DBG("codeLibDirPath: " + codeLibDirPath);
 
-	auto faustFileList = codeLibDir.findChildFiles(File::findFiles, false, "*.dsp");
-
-	for(auto f: faustFileList)
-	{
-		auto fp = f.getFileNameWithoutExtension();
-
-		if(faustClassIds.find(fp) == faustClassIds.end())
-		{
-			faustClassIds.insert(fp);
-		}
-	}
-		
-
 	// create all necessary files before thirdPartyFiles
 	for (const auto& classId : faustClassIds)
 	{
@@ -543,7 +519,7 @@ void DspNetworkCompileExporter::run()
 
 	if (!thirdPartyFiles.isEmpty())
 	{
-		logMessage("Copying third party files");
+		showStatusMessage("Copying third party files");
 
 		for (auto tpf : thirdPartyFiles)
 		{
@@ -553,7 +529,7 @@ void DspNetworkCompileExporter::run()
 
 	if (!externalSamples.isEmpty())
 	{
-        logMessage("Writing embedded audio data file");
+        showStatusMessage("Writing embedded audio data file");
         
 		auto eadFile = getSourceDirectory(true).getChildFile("embedded_audiodata.h");
 		eadFile.deleteFile();
@@ -644,6 +620,8 @@ void DspNetworkCompileExporter::run()
 		}
 	}
 	
+	hisePath = File(GET_HISE_SETTING(getMainController()->getMainSynthChain(), HiseSettings::Compiler::HisePath));
+
 	createProjucerFile();
 
 	for (auto l : getSourceDirectory(true).findChildFiles(File::findFiles, true, "*.h"))
@@ -690,30 +668,21 @@ void DspNetworkCompileExporter::run()
 	BuildOption o = CompileExporter::VSTLinux;
 #endif
 
-	logMessage("Compiling dll plugin");
+	showStatusMessage("Compiling dll plugin");
 
 	configurationName = getComboBoxComponent("build")->getText();
-
-	if(!skipCompilation)
-	{
-		if(managerToUse != nullptr)
-			managerToUse->setProgress(0.5);
-
+	
 #if JUCE_LINUX
-		ok = ErrorCodes::OK;
+	ok = ErrorCodes::OK;
 #else
-		ok = compileSolution(o, CompileExporter::TargetTypes::numTargetTypes, managerToUse);
+	ok = compileSolution(o, CompileExporter::TargetTypes::numTargetTypes);
 #endif
-
-		if(managerToUse != nullptr)
-			managerToUse->setProgress(1.0);
-	}
 }
 
 void DspNetworkCompileExporter::threadFinished()
 {
 #if JUCE_LINUX
-	ok = compileSolution(CompileExporter::VSTLinux, CompileExporter::TargetTypes::numTargetTypes, managerToUse);
+	ok = compileSolution(CompileExporter::VSTLinux, CompileExporter::TargetTypes::numTargetTypes);
 #endif
 
 	if (ok == ErrorCodes::OK)
@@ -730,20 +699,14 @@ void DspNetworkCompileExporter::threadFinished()
 
 		
 #if JUCE_LINUX
-		if(managerToUse == nullptr)
-			PresetHandler::showMessageWindow("Project creation OK", "Please run the makefile, then press OK to reload the dynamic library");
+		PresetHandler::showMessageWindow("Project creation OK", "Please run the makefile, then restart HISE when the compilation is finished");
 #else
-		if(managerToUse == nullptr)
-			PresetHandler::showMessageWindow("Compilation OK", "Press OK to reload the DLL and refresh all compiled effect instances.");
-		getDllManager()->loadDll(true);
+		PresetHandler::showMessageWindow("Compilation OK", "Please restart HISE in order to load the new binary");
 #endif
 		
 	}
-	else
-	{
-		if(managerToUse == nullptr)
-			PresetHandler::showMessageWindow("Compilation Error", errorMessage, PresetHandler::IconType::Error);
-	}
+	else 
+		PresetHandler::showMessageWindow("Compilation Error", errorMessage, PresetHandler::IconType::Error);
 }
 
 juce::File DspNetworkCompileExporter::getBuildFolder() const
@@ -907,15 +870,18 @@ void DspNetworkCompileExporter::createProjucerFile()
 	auto rlsName = rlsFile.getNonexistentSibling(false).getFileNameWithoutExtension().removeCharacters(" ");
 	auto ciName =  ciFile.getNonexistentSibling(false).getFileNameWithoutExtension().removeCharacters(" ");
 
-	const auto& data = dynamic_cast<GlobalSettingManager*>(chainToExport->getMainController())->getSettingsObject();
+    
+    
+#if JUCE_MAC
+    REPLACE_WILDCARD_WITH_STRING("%USE_IPP_MAC%", useIpp ? "USE_IPP=1" : String());
+    REPLACE_WILDCARD_WITH_STRING("%IPP_COMPILER_FLAGS%", useIpp ? "/opt/intel/ipp/lib/libippi.a  /opt/intel/ipp/lib/libipps.a /opt/intel/ipp/lib/libippvm.a /opt/intel/ipp/lib/libippcore.a" : String());
+    REPLACE_WILDCARD_WITH_STRING("%IPP_HEADER%", useIpp ? "/opt/intel/ipp/include" : String());
+    REPLACE_WILDCARD_WITH_STRING("%IPP_LIBRARY%", useIpp ? "/opt/intel/ipp/lib" : String());
+#endif
 
-#if JUCE_WINDOWS
-	if (!useIpp) 
-		useIpp = data.getSetting(HiseSettings::Compiler::UseIPP);
-
-	REPLACE_WILDCARD_WITH_STRING("%IPP_1A%", useIpp ? "Static_Library" : String());
-#else
-	REPLACE_WILDCARD_WITH_STRING("%IPP_1A%", "");
+#if JUCE_LINUX
+    REPLACE_WILDCARD_WITH_STRING("%USE_IPP_LINUX%", useIpp ? "USE_IPP=1" : "USE_IPP=0");
+    REPLACE_WILDCARD_WITH_STRING("%IPP_COMPILER_FLAGS%", useIpp ? "/opt/intel/ipp/lib/libippi.a  /opt/intel/ipp/lib/libipps.a /opt/intel/ipp/lib/libippvm.a /opt/intel/ipp/lib/libippcore.a" : String());
 #endif
 
 	REPLACE_WILDCARD_WITH_STRING("%DEBUG_DLL_NAME%", dbgName);
@@ -935,8 +901,6 @@ void DspNetworkCompileExporter::createProjucerFile()
 	REPLACE_WILDCARD_WITH_STRING("%HISE_INCLUDE_FAUST%", includeFaust ? "enabled" : "disabled");
 
     
-	ProjectTemplateHelpers::handleAdditionalStaticLibs(this, templateProject, "");
-
     String headerPath;
     
     if (includeFaust)
@@ -1099,7 +1063,7 @@ void DspNetworkCompileExporter::createMainCppFile(bool isDllMainFile)
 
 				if(illegalPoly)
 				{
-					def << "registerPolyNode<" << nid << "<1>, scriptnode::wrap::illegal_poly<" << nid << "<1>>>();";
+					def << "registerPolyNode<" << nid << "<1>, wrap::illegal_poly<" << nid << "<1>>>();";
 				}
 				else
 				{

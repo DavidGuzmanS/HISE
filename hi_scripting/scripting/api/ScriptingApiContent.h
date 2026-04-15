@@ -30,7 +30,8 @@
 *   ===========================================================================
 */
 
-#pragma once
+#ifndef SCRIPTINGAPICONTENT_H_INCLUDED
+#define SCRIPTINGAPICONTENT_H_INCLUDED
 
 namespace hise { using namespace juce;
 
@@ -49,11 +50,10 @@ public:
 	class ScopedDelayer
 	{
 	public:
-		ScopedDelayer(ValueTreeUpdateWatcher* watcher_, bool forceMessageThread_=false);;
+		ScopedDelayer(ValueTreeUpdateWatcher* watcher_);;
 		~ScopedDelayer();
 	private:
 		WeakReference<ValueTreeUpdateWatcher> watcher;
-		bool forceMessageThread = false;
 	};
 
 	class ScopedSuspender
@@ -261,8 +261,6 @@ public:
 			saveInPreset,
 			isPluginParameter,
 			pluginParameterName,
-			pluginParameterGroup,
-			deferControlCallback,
             isMetaParameter,
 			linkedTo,
 			automationId,
@@ -328,87 +326,19 @@ public:
 
 		const ScriptComponent* getParentScriptComponent() const;
 
-		Result testWithThis(WeakCallbackHolder& c, const Array<var>& argList)
-		{
-			juce::var::NativeFunctionArgs args(var(this), argList.begin(), argList.size());
-			return c.callSync(args);
-		}
-
-		Result testWithThis(const var& function, const Array<var>& argList)
-		{
-			if (HiseJavascriptEngine::isJavascriptFunction(function))
-			{
-				WeakCallbackHolder c(getScriptProcessor(), this, function, argList.size());
-				c.incRefCount();
-				c.setThisObject(this);
-
-				return testWithThis(c, argList);
-			}
-			else
-			{
-				return Result::fail("function is not defined");
-			}
-		}
-
-		virtual Result testCallback(const String& callbackId, const Array<var>& argList)
-		{
-			if (callbackId == "setControlCallback")
-			{
-				if (argList[0] != this)
-					return Result::fail("argList[0] must be equal to the obj parameter of the testCallback call");
-
-				if (argList.size() < 2)
-					return Result::fail("testing setControlCallback requires 2 arguments");
-
-				return testWithThis(customControlCallback, argList);
-			}
-			if (callbackId == "setKeyPressCallback")
-				return testWithThis(keyboardCallback, argList);
-
-			return Result::fail("unknown callback ID " + callbackId);
-		}
-
 		virtual void preRecompileCallback() 
 		{
 			controlSender.cancelMessage();
             localLookAndFeel = var();
-		}
+		};
 
-		PROFILE_ONLY(int getProfilePropertyTrackId(const Identifier& id) const { return (int)propertyTrackIds[id]; })
-
-		virtual ValueTree exportAsValueTree() const override;
-		bool isScriptPluginParameter()
-		{
-			bool ok = isAutomatable();
-			ok &= (bool)getScriptObjectProperty(ScriptingApi::Content::ScriptComponent::Properties::isPluginParameter);
-
-#if HISE_MACROS_ARE_PLUGIN_PARAMETERS
-			ok |= isAdditionalPluginParameter;
-#endif
-
-			return ok;
-		}
-
+		virtual ValueTree exportAsValueTree() const override;;
 		virtual void restoreFromValueTree(const ValueTree &v) override;;
 
 		String getDebugValue() const override { return getValue().toString(); };
 		String getDebugName() const override { return name.toString(); };
 		String getDebugDataType() const override { return getObjectName().toString(); }
 		virtual void doubleClickCallback(const MouseEvent &e, Component* componentToNotify) override;
-
-		virtual ProcessorMetadata::ParameterMetadata createParameterMetadata(int indexInContent) const
-		{
-			ProcessorMetadata::ParameterMetadata pd;
-
-			pd.parameterIndex = indexInContent;
-			pd.id = getName().toString();
-			pd.dataType = ProcessorMetadata::DataType::Dynamic;
-			pd.defaultValue = getScriptObjectProperty(defaultValue);
-			pd.description = getScriptObjectProperty(tooltip).toString();
-			pd.vtc = getValueToTextConverter();
-
-			return pd;
-		}
 
 		virtual ValueToTextConverter getValueToTextConverter() const
 		{
@@ -491,11 +421,6 @@ public:
 
 		virtual bool isShowing(bool checkParentComponentVisibility = true) const;
 
-		/** Returns true if the control callback is pending execution. 
-		    Used by REST API to wait for callbacks to complete before returning.
-		*/
-		bool isControlCallbackPending() const { return controlSender.isChangePending(); }
-
 		template <class ChildType> class ChildIterator
 		{
 		public:
@@ -560,6 +485,9 @@ public:
 		/** Returns the normalized value. */
 		virtual double getValueNormalized() const { return getValue(); };
 
+		/** sets the colour of the component (BG, IT1, IT2, TXT). */
+		void setColour(int colourId, int colourAs32bitHex);
+
         /** Returns the absolute x-position relative to the interface. */
         int getGlobalPositionX();
         
@@ -604,9 +532,6 @@ public:
 
 		/** Changes the depth hierarchy (z-axis) of sibling components (Back, Default, Front or AlwaysOnTop). */
 		void setZLevel(String zLevel);
-
-		/** Returns the current z-level. */
-		ZLevelListener::ZLevel getCurrentZLevel() const { return currentZLevel; }
 
 		/** Adds a callback to react on key presses (when this component is focused). */
 		void setKeyPressCallback(var keyboardFunction);
@@ -672,12 +597,6 @@ public:
 		void setChanged(bool isChanged = true) noexcept{ hasChanged = isChanged; }
 		bool isChanged() const noexcept{ return hasChanged; };
 
-		/** Override this if you want to change the `component` parameter of the popup menu callback. */
-		virtual var getPopupMenuTarget(const MouseEvent& e)
-		{
-			return var(this);
-		}
-
 		var value;
 		Identifier name;
 		Content *parent;
@@ -690,7 +609,6 @@ public:
 		Array<MouseListenerData> mouseListeners;
 
 		struct Wrapper;
-		struct Validators;
 
 		bool isConnectedToProcessor() const;;
 
@@ -700,7 +618,7 @@ public:
 
 		Processor* getConnectedProcessor() const { return connectedProcessor.get(); };
 
-		int getConnectedParameterIndex() const { return connectedParameterIndex; };
+		int getConnectedParameterIndex() { return connectedParameterIndex; };
 
         bool isConnectedToMacroControll() const noexcept
         {
@@ -714,7 +632,7 @@ public:
         
         int getMacroControlIndex() const { return connectedMacroIndex; }
         
-		ValueTree getPropertyValueTree() const { return propertyTree; }
+		ValueTree getPropertyValueTree() { return propertyTree; }
 
 		struct ScopedPropertyEnabler
 		{
@@ -780,25 +698,24 @@ public:
 			modulationData = newMod;
 		}
 
-		bool shouldDeferControlCallback() const { return defersControlCallback; }
-
 		MacroControlledObject::ModulationPopupData::Ptr getModulationData() const { return modulationData; }
 
 		int getStyleSheetPseudoState() const { return pseudoState; }
 
-		ProfileCollection::ID pSetValue, pChanged, pControlCallback, pSetAttribute, pSetProperty, pOnProperty;
-
-		int tSetAttribute;
-
-		ProfileCollection::PS::ScopedProfiler profile(ProfileCollection::ID id);
-		void openTrack(ProfileCollection::ID id);
-		void closeTrack(ProfileCollection::ID id);
-
-		bool isAdditionalPluginParameter = false;
-
 	protected:
 
-		String getCSSFromLocalLookAndFeel();
+		String getCSSFromLocalLookAndFeel()
+		{
+			if (auto l = dynamic_cast<ScriptingObjects::ScriptedLookAndFeel*>(localLookAndFeel.getObject()))
+			{
+				if(l->isUsingCSS())
+				{
+					return l->currentStyleSheet;
+				}
+			}
+
+			return {};
+		}
 
 		bool isCorrectlyInitialised(int p) const
 		{
@@ -816,12 +733,14 @@ public:
 
 		void setDefaultValue(int p, const var &defaultValue);
 		
-		virtual void addLinkedTarget(ScriptComponent* newTarget)
+		
+
+		void addLinkedTarget(ScriptComponent* newTarget)
 		{
 			linkedComponentTargets.addIfNotAlreadyThere(newTarget);
 		}
 
-		virtual void removeLinkedTarget(ScriptComponent* targetToRemove)
+		void removeLinkedTarget(ScriptComponent* targetToRemove)
 		{
 			linkedComponentTargets.removeAllInstancesOf(targetToRemove);
 		}
@@ -837,8 +756,6 @@ public:
 		bool removePropertyIfDefault = true;
 
 		CustomAutomationPtr currentAutomationData;
-
-		PROFILE_ONLY(NamedValueSet propertyTrackIds);
 
 #if USE_BACKEND
 		juce::SharedResourcePointer<hise::ScriptComponentPropertyTypeSelector> selectorTypes;
@@ -877,12 +794,8 @@ public:
 
 			void cancelMessage();
 
-			/** Returns true if a callback is pending (posted but not yet executed). */
-			bool isChangePending() const { return changePending; }
-
 		private:
 
-			int cachedParameterIndex = -1;
 			bool changePending = false;
 
             void handleAsyncUpdate();
@@ -943,8 +856,6 @@ public:
 
 		mutable hise::SimpleReadWriteLock valueLock;
 
-		bool defersControlCallback = false;
-
 		bool countJsonSetProperties = true;
 		Identifier searchedProperty;
 
@@ -953,8 +864,6 @@ public:
         WeakReference<ScriptComponent> linkedComponent;
 
 		Array<WeakReference<ScriptComponent>> linkedComponentTargets;
-
-		bool useRectangleClass = false;
 
 		var customControlCallback;
 
@@ -999,14 +908,13 @@ public:
 			scrollWheel,
 			enableMidiLearn,
 			sendValueOnDrag,
-			matrixTargetId,
 			numProperties,
 		};
 
         struct ModifierObject: public ConstScriptingObject
         {
             ModifierObject(ProcessorWithScriptingContent* sp):
-               ConstScriptingObject(sp, 13)
+               ConstScriptingObject(sp, 12)
             {
                 using Action = SliderWithShiftTextBox::ModifierObject::Action;
                 using Flags = ModifierKeys::Flags;
@@ -1015,7 +923,6 @@ public:
                 addConstant("FineTune", "FineTune");
                 addConstant("ResetToDefault", "ResetToDefault");
                 addConstant("ContextMenu", "ContextMenu");
-				addConstant("ScaleModulation", "ScaleModulation");
                 
                 static const String doubleClick("doubleClick");
                 static const String rightClick("rightClick");
@@ -1058,14 +965,6 @@ public:
 
 		void handleDefaultDeactivatedProperties() override;
 
-		ProcessorMetadata::ParameterMetadata createParameterMetadata(int indexInContent) const override
-		{
-			auto mn = getScriptObjectProperty(ScriptSlider::Properties::Mode).toString();
-			auto m = (HiSlider::Mode)HiSlider::getModeList().indexOf(mn);
-			auto rng = scriptnode::RangeHelpers::getDoubleRange(getPropertyValueTree(), scriptnode::RangeHelpers::IdSet::ScriptComponents);
-			return ScriptComponent::createParameterMetadata(indexInContent).withSliderMode(m, rng);
-		}
-
 		ValueToTextConverter getValueToTextConverter() const override
 		{
 			auto m = getScriptObjectProperty(ScriptSlider::Properties::Mode).toString();
@@ -1092,7 +991,7 @@ public:
 		void setValuePopupFunction(var newFunction);
 
 		/** Sets the value that is shown in the middle position. */
-		void setMidPoint(var valueForMidPoint);
+		void setMidPoint(double valueForMidPoint);
 
 		/** Sets the style Knob, Horizontal, Vertical. */
 		void setStyle(String style);;
@@ -1102,9 +1001,6 @@ public:
 
 		/** Sets the upper range end to the given value. */
 		void setMaxValue(double max) noexcept;
-
-		/** Connects this slider to the modulation slot. */
-		void connectToModulatedParameter(String moduleId, var parameterId);
 
         /** Creates a object with constants for setModifiers(). */
         var createModifiers();
@@ -1121,13 +1017,7 @@ public:
 		/** Checks if the given value is within the range. */
 		bool contains(double value);
 
-		
-
 		// ========================================================================================================
-
-		SimpleRingBuffer::Ptr getMatrixPlotter(int sourceIndex);
-
-		MatrixIds::Helpers::IntensityTextConverter::ConstructData createIntensityConverter(int sourceIndex);
 
 		struct Wrapper;
 
@@ -1138,39 +1028,10 @@ public:
         var modObject;
 
         
-        void addLinkedTarget(ScriptComponent* newTarget) override
-        {
-            ScriptComponent::addLinkedTarget(newTarget);
-            
-            if(auto s = dynamic_cast<ScriptSlider*>(newTarget))
-            {
-				
-            }
-        }
-
-        void removeLinkedTarget(ScriptComponent* targetToRemove) override
-        {
-            ScriptComponent::removeLinkedTarget(targetToRemove);
-        }
-        
 	private:
 
-		struct MatrixConnectionBase: public ControlledObject
-		{
-			MatrixConnectionBase(ScriptSlider& parent_, const ValueTree& matrixData, const String& targetId);;
-
-			virtual SimpleRingBuffer::Ptr getDisplayBuffer(int index) = 0;
-			virtual MatrixIds::Helpers::IntensityTextConverter::ConstructData createIntensityConverter(int sourceIndex) = 0;
-
-			WeakReference<ScriptSlider> parent;
-			WeakReference<GlobalModulatorContainer> gc;
-			ValueTree matrixData;
-			String targetId;
-		};
-
-        struct MatrixCableConnection; struct MultiMatrixModulatorConnection;
-		ScopedPointer<MatrixConnectionBase> matrixConnection;
-
+        
+        
 		double minimum, maximum;
 		PooledImage image;
 
@@ -1210,11 +1071,6 @@ public:
 		StringArray getOptionsFor(const Identifier &id) override;
 
 		void handleDefaultDeactivatedProperties() override;
-
-		ProcessorMetadata::ParameterMetadata createParameterMetadata(int indexInContent) const override
-		{
-			return ScriptComponent::createParameterMetadata(indexInContent).asToggle();
-		}
 
 		ValueToTextConverter getValueToTextConverter() const override
 		{
@@ -1295,13 +1151,6 @@ public:
 			setValue((int)getScriptObjectProperty(defaultValue));
 		}
 
-		ProcessorMetadata::ParameterMetadata createParameterMetadata(int indexInContent) const override
-		{
-			auto sa = StringArray::fromLines(getScriptObjectProperty(Properties::Items).toString());
-			sa.removeEmptyStrings();
-			return ScriptComponent::createParameterMetadata(indexInContent).withValueList(sa);
-		}
-
 		ValueToTextConverter getValueToTextConverter() const override
 		{
 			auto sa = StringArray::fromLines(getScriptObjectProperty(Properties::Items).toString());
@@ -1359,11 +1208,6 @@ public:
 		StringArray getOptionsFor(const Identifier &id) override;
 		Justification getJustification();
 
-		ProcessorMetadata::ParameterMetadata createParameterMetadata(int indexInContent) const override
-		{
-			return ScriptComponent::createParameterMetadata(indexInContent).asDisabled();
-		}
-
 		void restoreFromValueTree(const ValueTree &v) override;
 
 		ValueTree exportAsValueTree() const override;
@@ -1418,11 +1262,6 @@ public:
 		virtual int getIndexPropertyId() const = 0;
 
 		StringArray getOptionsFor(const Identifier &id) override;
-
-		ProcessorMetadata::ParameterMetadata createParameterMetadata(int indexInContent) const override
-		{
-			return ScriptComponent::createParameterMetadata(indexInContent).asDisabled();
-		}
 
 		void setScriptObjectPropertyWithChangeMessage(const Identifier &id, var newValue, NotificationType notifyEditor = sendNotification) override;
 
@@ -1496,15 +1335,6 @@ public:
 
 		void connectToOtherTable(String processorId, int index);
 
-		/** Resets the table with the given index to a 0..1 line. */
-		void reset();
-		
-		/** Adds a new table point (x and y are normalized coordinates). */
-		void addTablePoint(float x, float y);
-		
-		/** Sets the point with the given index to the values. */
-		void setTablePoint(int pointIndex, float x, float y, float curve);
-
 		/** Returns the table value from 0.0 to 1.0 according to the input value from 0.0 to 1.0. */
 		float getTableValue(float inputValue);
 
@@ -1517,11 +1347,6 @@ public:
 
 		/** Registers this table (and returns a reference to the data) with the given index so you can use it from the outside. */
 		var registerAtParent(int index);
-
-		/** Customizes the dragging behaviour of the script table. */
-		void setMouseHandlingProperties(var propertyObject);
-
-		LambdaBroadcaster<var> dragProperties;
 
 		// ========================================================================================================
 
@@ -1741,11 +1566,6 @@ public:
 		const Image getImage() const;
 		void handleDefaultDeactivatedProperties() override;
 
-		ProcessorMetadata::ParameterMetadata createParameterMetadata(int indexInContent) const override
-		{
-			return ScriptComponent::createParameterMetadata(indexInContent).asDisabled();
-		}
-
 		void setScriptProcessor(ProcessorWithScriptingContent *sb);
 
 		// ======================================================================================================== API Method
@@ -1844,8 +1664,6 @@ public:
 			NumDebugWatchIndexes
 		};
 
-		ProfileCollection::ID pRepaint, pPaintRoutine;
-
 		ScriptPanel(ProcessorWithScriptingContent *base, Content *parentContent, Identifier panelName, int x, int y, int width, int height);;
 		
 		ScriptPanel(ScriptPanel* parent);
@@ -1861,8 +1679,6 @@ public:
 
 		StringArray getOptionsFor(const Identifier &id) override;
 		StringArray getItemList() const;
-
-		ProcessorMetadata::ParameterMetadata createParameterMetadata(int indexInContent) const override;
 
 		ScriptCreatedComponentWrapper *createComponentWrapper(ScriptContentComponent *content, int index) override;
 
@@ -1978,8 +1794,6 @@ public:
 
 		// ========================================================================================================
 
-		void changed() override;
-
 #if HISE_INCLUDE_RLOTTIE
 		bool isAnimationActive() const;
 		RLottieAnimation::Ptr getAnimation();
@@ -2045,8 +1859,6 @@ public:
 
 		dispatch::AccumulatedFlowManager flowManager;
 
-		Result testCallback(const String& callbackId, const Array<var>& args) override;
-
 	private:
 
 #if HISE_INCLUDE_RLOTTIE
@@ -2054,14 +1866,6 @@ public:
 		ScopedPointer<RLottieAnimation> animation;
 		var animationData;
 #endif
-
-		struct PluginParameterInfo
-		{
-			void update(ScriptPanel* sp);
-
-			int pluginParameterIndex = -1;
-			Processor* p = nullptr;
-		} pluginParameterInfo;
 
 		Array<WeakReference<AnimationListener>> animationListeners;
 
@@ -2155,20 +1959,6 @@ public:
 			setValue((int)getScriptObjectProperty(defaultValue));
 		}
 
-		ProcessorMetadata::ParameterMetadata createParameterMetadata(int indexInContent) const override
-		{
-			auto pd = ScriptComponent::createParameterMetadata(indexInContent);
-
-			if (getScriptObjectProperty(useList))
-			{
-				auto sa = StringArray::fromLines(getScriptObjectProperty(Properties::Items).toString());
-				sa.removeEmptyStrings();
-				return pd.withValueList(sa);
-			}
-
-			return pd.asDisabled();
-		}
-
 		ValueToTextConverter getValueToTextConverter() const override
 		{
 			auto sa = StringArray::fromLines(getScriptObjectProperty(Properties::Items).toString());
@@ -2243,16 +2033,9 @@ public:
 
 		void setScriptObjectPropertyWithChangeMessage(const Identifier &id, var newValue, NotificationType notifyEditor /* = sendNotification */) override;
 
-		ProcessorMetadata::ParameterMetadata createParameterMetadata(int indexInContent) const override
-		{
-			return ScriptComponent::createParameterMetadata(indexInContent).asDisabled();
-		}
-
 		void handleDefaultDeactivatedProperties() override;
 
 		hise::WebViewData::Ptr getData() const { return data; }
-
-		void preRecompileCallback() override;
 
 		// ========================================================================================================= API Methods
 
@@ -2265,25 +2048,7 @@ public:
 		/** Evaluates the code in the web view. You need to pass in an unique identifier so that it will initialise new web views correctly. */
 		void evaluate(const String& identifier, const String& jsCode);
 
-		/** Sets the HTML content to be used by the webview. */
-		void setHtmlContent(const String& htmlCode);
-
-		/** Enables Websocket communication between HISE and the webview. */
-		void setEnableWebSocket(int port);
-
-		/** Sends the data to the websocket. */
-		void sendToWebSocket(String id, var data);
-
-		/** Adds a buffer to be synchronised through the websocket. */
-		void addBufferToWebSocket(int bufferIndex, var buffer);
-
-		/** Registers a callable object to be notified for incoming messages from the websocket. */
-		void setWebSocketCallback(var callbackFunction);
-
-		/** Sends the buffer to the webview through the websocket connection. */
-		void updateBuffer(int bufferIndex);
-
-		/** Sets the file to be displayed by the WebView. */
+        /** Sets the file to be displayed by the WebView. */
         void setIndexFile(var indexFile);
         
 		/** Resets the entire webview. */
@@ -2309,8 +2074,6 @@ public:
 			const String& callbackId;
 			WeakCallbackHolder f;
 		};
-
-		WeakCallbackHolder webSocketCallback;
 
 		OwnedArray<HiseScriptCallback> callbacks;
 
@@ -2344,11 +2107,6 @@ public:
 		// ========================================================================================================
 
 		void setScriptObjectPropertyWithChangeMessage(const Identifier &id, var newValue, NotificationType notifyEditor /* = sendNotification */) override;
-
-		ProcessorMetadata::ParameterMetadata createParameterMetadata(int indexInContent) const override
-		{
-			return ScriptComponent::createParameterMetadata(indexInContent).asDisabled();
-		}
 
 		DynamicObject* createOrGetJSONData();
 
@@ -2386,213 +2144,6 @@ public:
 		var jsonData;
 
 		JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ScriptFloatingTile);
-
-		// ========================================================================================================
-	};
-
-	struct ScriptDynamicContainer : public ScriptComponent,
-									public Dispatchable
-	{
-		struct ChildReference: public ConstScriptingObject,
-							   public AssignableDotObject,
-							   public ObjectWithJSONConverter,
-							   public UserPresetStateManager	
-		{
-			ChildReference(ScriptDynamicContainer* base, dyncomp::Data::Ptr data_, const ValueTree& cd);
-			~ChildReference() override;
-
-			Identifier getObjectName() const override { RETURN_STATIC_IDENTIFIER("ContainerChild"); }
-			bool objectExists() const override { return isValid(); }
-
-			// ==================================================================== API Methods
-
-			/** Returns the index of the child component (or ID). */
-			int getChildComponentIndex(const var& childIdOrComponent) const;
-
-			/** Checks if the other object (either ID or child reference) points to the same component. */
-			bool isEqual(const var& other) const;
-
-			/** Sets the component property. */
-			void set(const String& id, const var& newValue);
-
-			/** Returns the given property (or the default value for the property). */
-			var get(const String& id) const;
-
-			/** Sets the component bounds from the given rectangle. */
-			void setBounds(var area);
-
-			/** Returns the component bounds at the origin with the given margin. */
-			var getLocalBounds(int margin) const;
-
-			/** Checks whether this reference points to a valid component within the component tree. */
-			bool isValid() const;
-
-			/** Returns a reference object to the component's parent. */
-			var getParent() const;
-
-			/** Recursively searches the child components and returns the first with the given ID. */
-			var getComponent(const String& childId);
-
-			/** Recursively searches all child components and returns all matches. */
-			var getAllComponents(const String& regex);
-
-			/** Adds a child component from the given JSON data. */
-			var addChildComponent(const var& childData);
-
-			/** Removes the component. */
-			void removeFromParent();
-
-			/** Removes all child components. */
-			void removeAllChildren();
-
-			/** Sets the value of this component without causing a control callback. */
-			void setValue(var newValue);
-
-			/** Undoably sets the value of this component without causing a control callback. */
-			void setValueWithUndo(var newValue);
-
-			/** causes the control callback to fire. */
-			void changed();
-
-			/** Returns the value of this component (or the defaultValue property if not initialised). */
-			var getValue() const;
-
-			/** Attaches a value callback to this child reference. */
-			void setControlCallback(var controlCallback);
-
-			/** Sends a repaint message to this component. */
-			void sendRepaintMessage(bool recursive);
-
-			/** Causes a value update from the processor connection. */
-			void updateValueFromProcessorConnection(bool recursive);
-
-			/** Sends a message to the component to lose the keyboard focus. */
-			void loseFocus(bool recursive);
-
-			/** Sends a message to the component to reset its value. */
-			void resetValueToDefault(bool recursive);
-
-			/** Registers a paint routine that draws the panel's content. */
-			void setPaintRoutine(var newPaintRoutine);
-
-			/** Returns the number of child components. */
-			int getNumChildComponents() const { return componentData.getNumChildren(); }
-
-			/** Attaches a callback that is executed whenever a child component is added / removed to this component. */
-			void setChildCallback(const var& newChildCallback);
-
-			/** Returns a Base64 encoded state of this component and all of its children. */
-			String toBase64(bool includeValue) const;
-
-			/** Restores this component and all its children with the given Base64 encoded state. */
-			void fromBase64(String b64);
-
-			/** Stores / restores the values & components from this component in the user preset. */
-			void addStateToUserPreset(bool shouldAdd);
-
-			// ================================================================= END OF API Methods
-
-			Identifier getUserPresetStateId() const override { return Identifier(componentData[dyncomp::dcid::id].toString()); }
-			void resetUserPresetState() override;
-			ValueTree exportAsValueTree() const override;
-			void restoreFromValueTree(const ValueTree& v) override;
-
-			void onChildChange(ValueTree v, bool wasAdded);
-			void onValue(const Identifier&, const var& newValue);
-			bool assign(const Identifier& id, const var& newValue) override;
-			var getDotProperty(const Identifier& id) const override;
-			void writeAsJSON (OutputStream& os, int indentLevel, bool allOnOneLine, int maximumDecimalPlaces) override;
-			void writeToStream(OutputStream& os) override;
-			bool matchesValueTree(const ValueTree& v) const;
-			void setInvalid(UndoManager* umToUse);
-
-		private:
-
-			bool isValidOrThrow() const;
-			static void onRefresh(ChildReference& obj, const ValueTree& v, dyncomp::Data::RefreshType rt, bool isRecursive);
-			void sendMessage(dyncomp::Data::RefreshType rt, bool recursive=false);
-
-			WeakReference<ScriptDynamicContainer> parentContainer;
-
-			UndoManager* um = nullptr;
-
-			mutable bool invalid = false;
-			var lastValue;
-
-			WeakCallbackHolder valueCallback;
-			WeakCallbackHolder paintRoutine;
-			ReferenceCountedObjectPtr<ScriptingObjects::GraphicsObject> graphics;
-			valuetree::PropertyListener valueListener;
-			ValueTree componentData;
-			dyncomp::Data::Ptr data;
-
-			WeakCallbackHolder childCallback;
-			valuetree::ChildListener childListener;
-
-			struct Wrapper;
-
-			JUCE_DECLARE_WEAK_REFERENCEABLE(ChildReference);
-			JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ChildReference);
-		};
-
-		enum Properties
-		{
-			numProperties
-		};
-
-		// ========================================================================================================
-
-		ScriptDynamicContainer(ProcessorWithScriptingContent *base, Content *parentContent, Identifier panelName, int x, int y, int width, int height);
-		~ScriptDynamicContainer() override;
-
-		void handleDefaultDeactivatedProperties() final;
-
-		// ========================================================================================================
-
-		static Identifier getStaticObjectName() { RETURN_STATIC_IDENTIFIER("ScriptDynamicContainer"); }
-		Identifier 	getObjectName() const override { return getStaticObjectName(); }
-		ScriptCreatedComponentWrapper *createComponentWrapper(ScriptContentComponent *content, int index) override;
-
-		ProcessorMetadata::ParameterMetadata createParameterMetadata(int indexInContent) const override
-		{
-			return ScriptComponent::createParameterMetadata(indexInContent).asDisabled();
-		}
-
-		// ============================================================================= API methods
-
-		/** Sets the content data for this container. */
-		var setData(const var& newData);
-
-		/** Sets a callback that will be executed whenever a value is changed. */
-		void setValueCallback(const var& valueFunction);
-
-		// =============================================================================
-
-		var getPopupMenuTarget(const MouseEvent& e) override
-		{
-			if(auto b = dyncomp::Base::findBaseParent(e.eventComponent))
-				return getOrCreateChildReference(b->getDataTree());
-
-			return var(this);
-		}
-
-		dyncomp::Data::Ptr getData() { return data; }
-
-		LambdaBroadcaster<dyncomp::Data::Ptr> dataBroadcaster;
-
-	private:
-
-		var getOrCreateChildReference(const ValueTree& v);
-
-		ReferenceCountedArray<ChildReference> childReferences;
-		WeakCallbackHolder valueCallback;
-		valuetree::AnyPropertyListener valueListener;
-		dyncomp::Data::Ptr data;
-
-		struct Wrapper;
-
-		JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ScriptDynamicContainer);
-		JUCE_DECLARE_WEAK_REFERENCEABLE(ScriptDynamicContainer);
 
 		// ========================================================================================================
 	};
@@ -2645,11 +2196,6 @@ public:
 		virtual Identifier 	getObjectName() const override { return getStaticObjectName(); }
 
 		ScriptCreatedComponentWrapper *createComponentWrapper(ScriptContentComponent *content, int index) override;
-
-		ProcessorMetadata::ParameterMetadata createParameterMetadata(int indexInContent) const override
-		{
-			return ScriptComponent::createParameterMetadata(indexInContent).asDisabled();
-		}
 
 		StringArray getOptionsFor(const Identifier &id) override;
 		
@@ -3073,12 +2619,6 @@ public:
 	/** Adds a multipage dialog component. */
 	ScriptMultipageDialog* addMultipageDialog(Identifier dialogId, int x, int y);
 
-	/** Adds a dynamic container component. */
-	ScriptDynamicContainer* addDynamicContainer(Identifier containerId, int x, int y);
-
-	/** Whether to update the component position at addXXX() calls with existing components. */
-	void setUpdateExistingPosition(bool shouldUpdateExistingComponents);
-
 	/** Returns the reference to the given component. */
 	var getComponent(var name);
 	
@@ -3088,17 +2628,14 @@ public:
 	/** Returns an array of all components that match the given regex. */
     var getAllComponents(String regex);
 
-	/** Checks if the component exists. */
-	bool componentExists(const Identifier &name);
-
 	/** Restore the Component from a JSON object. */
 	void setPropertiesFromJSON(const Identifier &name, const var &jsonData);
 
 	/** sets the data for the value popups. */
 	void setValuePopupData(var jsonData);
 
-	/** Creates a Path that can be drawn to a ScriptPanel. If data (base64 string or Array) is provided it will load it. */
-	var createPath(var data);
+	/** Creates a Path that can be drawn to a ScriptPanel. */
+	var createPath();
 
 	/** Creates an OpenGL framgent shader. */
 	var createShader(const String& fileName);
@@ -3108,6 +2645,9 @@ public:
     
 	/** Creates a MarkdownRenderer. */
 	var createMarkdownRenderer();
+
+	/** Sets the colour for the panel. */
+	void setColour(int red, int green, int blue) { colour = Colour((uint8)red, (uint8)green, (uint8)blue); };
 
 	/** Sets the height of the content. */
 	void setHeight(int newHeight) noexcept;
@@ -3124,9 +2664,6 @@ public:
     /** Opens a text input box with the given properties and executes the callback when finished. */
     void showModalTextInput(var properties, var callback);
     
-		/** Returns an array containing the width and height of the interface. */
-		var getInterfaceSize();
-		
     /** Sets this script as main interface with the given size. */
     void makeFrontInterface(int width, int height);
     
@@ -3245,7 +2782,6 @@ public:
 	ScriptComponent * getComponentWithName(const Identifier &componentName);
 	const ScriptComponent * getComponentWithName(const Identifier &componentName) const;
 	int getComponentIndex(const Identifier &componentName) const;
-	int getComponentIndex(ScriptComponent* sc) const;
 
 	StringArray getMacroNames();
 
@@ -3386,17 +2922,18 @@ public:
 		
 		SubType* newComponent = new SubType(getScriptProcessor(), this, id, x, y, 0, 0);
 
+
+
 		components.add(newComponent);
-		componentAdded();
+
+		asyncRebuildBroadcaster.notify();
+
+		updateParameterSlots();
 
 		return newComponent;
 	}
 
-	void componentAdded()
-	{
-		updateParameterSlots();
-		asyncRebuildBroadcaster.notify();
-	}
+	
 
 	bool interfaceCreationAllowed() const;
 
@@ -3439,117 +2976,7 @@ public:
 		return false;
 	}
 
-	ProfileCollection contentProfile;
-
-	class LafRegistry: public ReferenceCountedObject
-	{
-	public:
-	
-		using Ptr = ReferenceCountedObjectPtr<LafRegistry>;
-
-		LafRegistry() = default;
-
-		struct LafInfo: public ReferenceCountedObject 
-		{
-			using List = ReferenceCountedArray<LafInfo>;
-			using Ptr = ReferenceCountedObjectPtr<LafInfo>;
-
-			enum class RenderStyle 
-			{
-				Unassigned,    // not found / registered
-				Script,        // registerFunction() only
-				Css,           // External CSS file only
-				CssInline,     // setInlineStyleSheet() only
-				Mixed          // Script functions + CSS (inline or file)
-			};
-
-			LafInfo() = default;
-
-			bool isUsingScriptFunctions() const
-			{
-				return renderStyle == RenderStyle::Script || renderStyle == RenderStyle::Mixed;
-			}
-
-			operator bool() const { return renderStyle != RenderStyle::Unassigned; }
-
-		struct RegisteredComponent
-			{
-				bool operator==(const RegisteredComponent& other) const { return name == other.name; }
-
-				Identifier name;
-				Atomic<int> rendered = 0;
-				bool isShowing = true;  // Captured at registerLaf() time
-			};
-
-		Array<RegisteredComponent> assignedComponents;
-			String variableName;     // "LafNamespace.buttonLaf"
-			RenderStyle renderStyle = RenderStyle::Unassigned; // Script, Css, CssInline, Mixed
-			DebugableObjectBase::Location location;  // Raw location, encoded lazily by REST API
-			String cssLocation;      // CSS file full path - empty for inline/script style
-		};
-
-		// --- Called by REST API ---
-
-		// Returns true if any components have LAF assigned (any style)
-		bool hasRecipients() const;
-
-		// Returns true if any recipients use Script or Mixed style (need render wait)
-		bool hasScriptBasedRecipients() const;
-
-		// Returns true when all visible script-based recipients have rendered at least once
-		bool allRecipientsRendered() const;
-
-		// Info about an unrendered component
-		struct UnrenderedInfo
-		{
-			Identifier id;
-			bool isInvisible;
-		};
-
-		// Returns info about script-based components that haven't rendered yet
-		Array<UnrenderedInfo> getUnrenderedComponents() const;
-
-		// Returns LAF info for a component (any style), or nullopt if no LAF
-		LafInfo::Ptr getLafInfoForComponent(const Identifier& componentId) const;
-
-		// --- Called by HISE internals ---
-
-		// Called by debug info listener when LAF object is discovered
-		void registerLaf(DebugableObjectBase* laf, const String& variableName, const DebugableObjectBase::Location& location);
-
-		// Called by setLocalLookAndFeel()
-		void registerRecipient(DebugableObjectBase* laf, ScriptComponent* component);
-
-		// Called by callWithGraphics() on successful execution
-		bool markAsRendered(const Identifier& componentId);
-
-	private:
-
-		struct PendingComponent
-		{
-			WeakReference<ScriptComponent> component;
-			WeakReference<DebugableObjectBase> laf;
-		};
-
-		std::map<Identifier, PendingComponent> pendingRegisterComponents;
-
-		LafInfo::List list;
-
-		JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(LafRegistry);
-	};
-
-	LafRegistry::Ptr getLafRegistry() { return lafRegistry; }
-
-	void resetLafRegistry()
-	{
-#if USE_BACKEND
-		lafRegistry = new LafRegistry();
-#endif
-	}
-
 private:
-
-	LafRegistry::Ptr lafRegistry;
 
 	WeakCallbackHolder dragCallback;
 	WeakCallbackHolder suspendCallback;
@@ -3584,7 +3011,6 @@ private:
 	ReferenceCountedArray<ScriptPanel> popupPanels;
 
 	bool allowAsyncFunctions = false;
-	bool updateExistingPositions = true;
 
 	void sendRebuildMessage();
 
@@ -3605,22 +3031,19 @@ private:
 
 		if (auto sc = getComponentWithName(name))
 		{
-			if ((x != -1 && y != -1) && updateExistingPositions)
-			{
-				sc->handleScriptPropertyChange("x");
-				sc->handleScriptPropertyChange("y");
-				sc->setScriptObjectProperty(ScriptComponent::Properties::x, x);
-				sc->setScriptObjectProperty(ScriptComponent::Properties::y, y);
-			}
 
+			sc->handleScriptPropertyChange("x");
+			sc->handleScriptPropertyChange("y");
+			sc->setScriptObjectProperty(ScriptComponent::Properties::x, x);
+			sc->setScriptObjectProperty(ScriptComponent::Properties::y, y);
 			return dynamic_cast<Subtype*>(sc);
 		}
 
 		ValueTree newChild("Component");
 		newChild.setProperty("type", Subtype::getStaticObjectName().toString(), nullptr);
 		newChild.setProperty("id", name.toString(), nullptr);
-		newChild.setProperty("x", jmax(0, x), nullptr);
-		newChild.setProperty("y", jmax(0, y), nullptr);
+		newChild.setProperty("x", x, nullptr);
+		newChild.setProperty("y", y, nullptr);
 		contentPropertyData.addChild(newChild, -1, nullptr);
 
 		Subtype *t = new Subtype(getScriptProcessor(), this, name, x, y, 0, 0);
@@ -3783,3 +3206,4 @@ struct PrimitiveArrayDisplay : public SimpleVarBody,
 
 
 } // namespace hise
+#endif  // SCRIPTINGAPICONTENT_H_INCLUDED

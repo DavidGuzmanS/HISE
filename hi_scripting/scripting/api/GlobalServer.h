@@ -69,8 +69,6 @@ struct GlobalServer: public ControlledObject
 
     bool resendLastCallback();
 
-	bool isBaseURLDefined() const { return !baseURL.isEmpty(); };
-
 	void addListener(Listener* l);
 
 	void removeListener(Listener* l);
@@ -98,7 +96,6 @@ struct GlobalServer: public ControlledObject
 		uint32 requestTimeMs = 0;
 		uint32 completionTimeMs = 0;
 		var responseObj;
-		int profileTrackId = -1;
 
 		JUCE_DECLARE_WEAK_REFERENCEABLE(PendingCallback);
 	};
@@ -150,8 +147,7 @@ private:
 	bool initialised = false;
 #endif
     
-	struct WebThread : public Thread,
-					   public ProfiledRecordingSession
+	struct WebThread : public Thread
 	{
 		WebThread(GlobalServer& p);;
 
@@ -183,10 +179,7 @@ private:
 	Array<WeakReference<Listener>> listeners;
     
 public:
-
-	ProfileCollection webProfile;
-	ProfileCollection::ID pCallGET, pCallPOST, pResponse, pDownload;
-
+    
     bool addTrailingSlashes = true;
 };
 

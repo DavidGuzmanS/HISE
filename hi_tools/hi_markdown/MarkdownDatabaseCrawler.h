@@ -263,9 +263,7 @@ private:
 
 	void addImagesInternal(ValueTree c, float maxWidth);
 
-	void createHtmlInternal(ValueTree v, bool isRootElement);
-
-	String currentRootTitle;
+	void createHtmlInternal(ValueTree v);
 
 	void addContentToValueTree(ValueTree& v);
 

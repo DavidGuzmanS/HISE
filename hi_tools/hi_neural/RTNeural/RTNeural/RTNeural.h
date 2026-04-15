@@ -7,7 +7,6 @@
 
 // RTNeural includes:
 #include "config.h"
-
 #include "Model.h"
 #include "ModelT.h"
 #include "model_loader.h"

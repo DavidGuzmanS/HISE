@@ -101,7 +101,7 @@ bool HlacDecoder::decodeBlock(HiseSampleBuffer& destination, bool decodeStereo, 
 
     LOG("DEC " + String(readOffset + readIndex) + "\t\tNew Block");
     
-	while (indexInBlock < COMPRESSION_BLOCK_SIZE && !input.isExhausted())
+	while (indexInBlock < COMPRESSION_BLOCK_SIZE)
 	{
 		auto header = readCycleHeader(input);
 

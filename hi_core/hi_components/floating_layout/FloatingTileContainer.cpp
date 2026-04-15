@@ -750,10 +750,10 @@ ResizableFloatingTileContainer::ResizableFloatingTileContainer(FloatingTile* par
 	Path p;
 
 	if (isVertical())
-		p.loadPathFromData(ColumnIcons::addRowIcon, ColumnIcons::addRowIcon_Size);
+		p.loadPathFromData(ColumnIcons::addRowIcon, sizeof(ColumnIcons::addRowIcon));
 	else
 
-		p.loadPathFromData(ColumnIcons::addColumnIcon, ColumnIcons::addColumnIcon_Size);
+		p.loadPathFromData(ColumnIcons::addColumnIcon, sizeof(ColumnIcons::addColumnIcon));
 
 	addButton->setShape(p, false, false, true);
 
@@ -1042,7 +1042,7 @@ ResizableFloatingTileContainer::InternalResizer::InternalResizer(ResizableFloati
 	setMouseCursor(parent_->isVertical() ? MouseCursor::UpDownResizeCursor : MouseCursor::LeftRightResizeCursor);
     }
 
-	resizeIcon.loadPathFromData(ColumnIcons::bigResizeIcon, ColumnIcons::bigResizeIcon_Size);
+	resizeIcon.loadPathFromData(ColumnIcons::bigResizeIcon, sizeof(ColumnIcons::bigResizeIcon));
 
 	if (!parent->isVertical())
 		resizeIcon.applyTransform(AffineTransform::rotation(float_Pi / 2.0f));

@@ -2173,6 +2173,43 @@ Processor *PresetHandler::loadProcessorFromFile(File fileName, Processor *parent
 	}	
 }
 
+
+
+
+
+XmlElement * PresetHandler::buildFactory(FactoryType *t, const String &factoryName)
+{
+	
+	XmlElement *xml = new XmlElement(factoryName);
+
+	for (int j = 0; j < t->getNumProcessors(); j++)
+	{
+
+		ScopedPointer<Processor> p = t->createProcessor(j, "X");
+
+		if (p == nullptr) continue;
+
+		// "Hardcoded Master FX", aaarg!
+		auto tagName = p->getType().toString().removeCharacters(" ");
+
+		XmlElement *child = new XmlElement(tagName);
+
+		for (int i = 0; i < p->getNumParameters(); i++)
+		{
+			Identifier id = p->getIdentifierForParameterIndex(i);
+
+
+			child->setAttribute(Identifier("id" + String(i)), id.toString());
+		}
+        
+        
+
+		xml->addChildElement(child);
+	}
+
+	return xml;
+}
+
 juce::File PresetHandler::getGlobalScriptFolder(Processor* p)
 {
 	auto f = dynamic_cast<GlobalSettingManager*>(p->getMainController())->getSettingsObject().getSetting(HiseSettings::Scripting::GlobalScriptPath);
@@ -2490,11 +2527,19 @@ void AboutPage::refreshText()
 	infoData.append(JucePlugin_Manufacturer, normal, bright);
 #endif
 
+#if USE_COPY_PROTECTION
+
+	
+
+#endif
+
+
 #endif
 
 #if USE_IPP
 	infoData.append("\n\naccelerated by FFT routines from the IPP library\n", normal, bright);
 #endif
+
 
 	repaint();
 }
@@ -3055,12 +3100,11 @@ void FileHandlerBase::exportAllPoolsToTemporaryDirectory(ModulatorSynthChain* ch
 	
 
 	auto previousLogger = Logger::getCurrentLogger();
-	ignoreUnused(previousLogger);
 
 	ScopedPointer<Logger> outputLogger = new ConsoleLogger(chain);
 
-	//if(!CompileExporter::isExportingFromCommandLine())
-	//Logger::setCurrentLogger(outputLogger);
+	if(!CompileExporter::isExportingFromCommandLine())
+		Logger::setCurrentLogger(outputLogger);
 
 	auto* progress = logData != nullptr ? &logData->progress : nullptr;
 
@@ -3093,7 +3137,7 @@ void FileHandlerBase::exportAllPoolsToTemporaryDirectory(ModulatorSynthChain* ch
 	if (logData != nullptr) logData->logFunction("Export MIDI files");
 	chain->getMainController()->getCurrentMidiFilePool()->getDataProvider()->writePool(new FileOutputStream(midiOutputFile), progress);
 
-    //Logger::setCurrentLogger(previousLogger);
+    Logger::setCurrentLogger(previousLogger);
 
 	outputLogger = nullptr;
 #else
@@ -3428,8 +3472,6 @@ void ModuleStateManager::restoreFromValueTree(const ValueTree &v)
 		if (p != nullptr)
 		{
 			auto mcopy = m.createCopy();
-            
-            Processor::ScopedChildSkipper scs(*p);
 			
 			for (auto ms : modules)
 			{

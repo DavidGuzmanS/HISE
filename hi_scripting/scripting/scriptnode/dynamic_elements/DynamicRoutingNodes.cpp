@@ -162,9 +162,9 @@ using SelectorEditor = HostHelpers::NoExtraComponent;
 
 struct ProcessingCheck
 {
-	void initialise(ObjectWithValueTree* n)
+	void initialise(NodeBase* n)
 	{
-		b = dynamic_cast<NodeBase*>(n);
+		b = n;
 	}
 
 	void prepare(PrepareSpecs ps)
@@ -216,10 +216,14 @@ void local_cable_base::Manager::refreshAllConnections(const String& v)
 
 	for(auto con: registeredCables)
 	{
-		if(con->cable->getVariableId() == v || v.isEmpty())
-			con->variableIndex = variables.indexOf(con->cable->getVariableId());
+		
 
-		con->cable->refreshConnection(con->variableIndex);
+		if(con->cable->getVariableId() == v || v.isEmpty())
+		{
+			con->variableIndex = variables.indexOf(con->cable->getVariableId());
+			con->cable->refreshConnection(con->variableIndex);
+		}
+			
 	}
 }
 
@@ -318,8 +322,7 @@ void local_cable_base::editor::timerCallback()
 		if(!name.initialised)
 		{
 			auto sa = Helpers::getListOfLocalVariableNames(n->node->getRootNetwork()->getValueTree());
-
-			name.initModes(sa, n);
+			name.initModes(sa, n->node.get());
 			return;
 		}
 
@@ -333,6 +336,8 @@ void local_cable_base::editor::timerCallback()
 				name.clear(dontSendNotification);
 				name.addItemList(sa, 1);
 				name.setText(cv, dontSendNotification);
+
+						
 			}
 		}
 
@@ -748,9 +753,9 @@ StringArray LocalCableHelpers::getListOfLocalVariableNames(const ValueTree& netw
 	return sa;
 }
 
-void local_cable_base::initialise(ObjectWithValueTree* n)
+void local_cable_base::initialise(NodeBase* n)
 {
-	node = dynamic_cast<NodeBase*>(n);
+	node = n;
 
 	if(node->getParameterTree().getNumChildren() == 0)
 	{
@@ -839,8 +844,8 @@ Factory::Factory(DspNetwork* n) :
 
 	registerNode<matrix<dynamic_matrix>, MatrixEditor>();
 
-	registerPolyNode<dynamic_send<1>, dynamic_send<NUM_POLYPHONIC_VOICES>, cable::dynamic::editor>();
-	registerPolyNode<dynamic_receive<1>, dynamic_receive<NUM_POLYPHONIC_VOICES>, cable::dynamic::editor>();
+	registerNode<dynamic_send, cable::dynamic::editor>();
+	registerNode<dynamic_receive, cable::dynamic::editor>();
 	registerNode<ms_encode>();
 	registerNode<ms_decode>();
 	registerNode<public_mod>();
@@ -861,19 +866,42 @@ Factory::Factory(DspNetwork* n) :
 
 namespace cable
 {
+snex::NamespacedIdentifier dynamic::getReceiveId()
+{
+	return NamespacedIdentifier("routing").getChildId(dynamic_receive::getStaticId());
+}
 
-
-void dynamic::prepareDynamic(PrepareSpecs ps)
+void dynamic::prepare(PrepareSpecs ps)
 {
 	sendSpecs = ps;
 
-	numChannels = ps.numChannels;
-
 	checkSourceAndTargetProcessSpecs();
 
-	useFrameDataForDisplay = ps.blockSize == 1;
+	numChannels = ps.numChannels;
 
-	
+	if (ps.blockSize == 1)
+	{
+		useFrameDataForDisplay = true;
+		frameData.referTo(data_, ps.numChannels);
+		buffer.setSize(0);
+	}
+	else
+	{
+		useFrameDataForDisplay = false;
+
+		frameData.referTo(data_, ps.numChannels);
+		DspHelpers::increaseBuffer(buffer, ps);
+
+
+		auto ptr = buffer.begin();
+		FloatVectorOperations::clear(ptr, ps.blockSize * ps.numChannels);
+
+		for (int i = 0; i < ps.numChannels; i++)
+		{
+			channels[i].referToRawData(ptr, ps.blockSize);
+			ptr += ps.blockSize;
+		}
+	}
 }
 
 void dynamic::restoreConnections(Identifier id, var newValue)
@@ -893,9 +921,6 @@ void dynamic::restoreConnections(Identifier id, var newValue)
 			ids.removeDuplicates(false);
 			ids.removeEmptyStrings(true);
 
-			if(ids.isEmpty())
-				return true;
-
 			auto network = safePtr->parentNode->getRootNetwork();
 			auto list = network->getListOfNodesWithPath(getReceiveId(), false);
 
@@ -903,22 +928,24 @@ void dynamic::restoreConnections(Identifier id, var newValue)
 			{
 				if (auto rn = dynamic_cast<InterpretedNode*>(n.get()))
 				{
-					auto& ro = rn->getWrappedObject().as<routing::receive_base>();
+					auto& ro = rn->getWrappedObject();
+
+					auto source = ro.as<dynamic_receive>().source;
 
 					if (ids.contains(rn->getId()))
 					{
-						safePtr->asBaseCable()->connect(ro);
+						source = safePtr.get();
+						source->connect(ro.as<dynamic_receive>());
                         ok = true;
 					}
 					else
 					{
-						auto targetSource = *ro.getSourceCablePtr();
-
-						if(targetSource == safePtr->asBaseCable())
+						if (source == safePtr.get())
 						{
-							safePtr->asBaseCable()->disconnect(ro);
-							ok = true;
+							source = &(ro.as<dynamic_receive>().null);
+                            ok = true;
 						}
+							
 					}
 				}
 			}
@@ -930,11 +957,13 @@ void dynamic::restoreConnections(Identifier id, var newValue)
 	parentNode->getRootNetwork()->addPostInitFunction(f);
 }
 
-void dynamic::setConnection(routing::receive_base& receiveTarget, bool addAsConnection)
+void dynamic::setConnection(dynamic_receive& receiveTarget, bool addAsConnection)
 {
+	receiveTarget.source = addAsConnection ? this : &receiveTarget.null;
+
 	if (sendSpecs)
 	{
-		asBaseCable()->prepare(sendSpecs);
+		prepare(sendSpecs);
 	}
 
 	if (parentNode != nullptr)
@@ -945,7 +974,7 @@ void dynamic::setConnection(routing::receive_base& receiveTarget, bool addAsConn
 		{
 			if (auto typed = dynamic_cast<InterpretedNode*>(n.get()))
 			{
-				if (&typed->getWrappedObject().as<routing::receive_base>() == &receiveTarget)
+				if (&typed->getWrappedObject().as<dynamic_receive>() == &receiveTarget)
 				{
 					auto rIds = StringArray::fromTokens(receiveIds.getValue(), ";", "");
 
@@ -1011,32 +1040,39 @@ void dynamic::checkSourceAndTargetProcessSpecs()
 	}
 }
 
-NamespacedIdentifier dynamic::getReceiveId()
-{
-	return NamespacedIdentifier("routing").getChildId("receive");
-}
-
 dynamic::dynamic() :
 	receiveIds(PropertyIds::Connection, "")
 {
 
 }
 
+void dynamic::reset()
+{
+	for (auto& d : frameData)
+		d = 0.0f;
 
+	for (auto& v : buffer)
+		v = 0.0f;
+}
 
-void dynamic::validateDynamic(PrepareSpecs receiveSpecs_)
+void dynamic::validate(PrepareSpecs receiveSpecs_)
 {
 	receiveSpecs = receiveSpecs_;
 
 	checkSourceAndTargetProcessSpecs();
 }
 
-void dynamic::initialiseDynamic(ObjectWithValueTree* n)
+void dynamic::initialise(NodeBase* n)
 {
-	parentNode = dynamic_cast<NodeBase*>(n);
+	parentNode = n;
 
 	receiveIds.initialise(n);
-    receiveIds.setAdditionalCallback(BIND_MEMBER_FUNCTION_2(dynamic::restoreConnections), true);
+	receiveIds.setAdditionalCallback(BIND_MEMBER_FUNCTION_2(dynamic::restoreConnections), true);
+}
+
+void dynamic::connect(routing::receive<cable::dynamic>& receiveTarget)
+{
+	setConnection(receiveTarget, true);
 }
 
 template <typename T> static void callForEach(Component* root, const std::function<void(T*)>& f)
@@ -1092,7 +1128,7 @@ void dynamic::editor::resized()
 
 	auto iconBounds = isSend ? b.removeFromRight(getHeight()) : b.removeFromLeft(getHeight());
 
-	icon.loadPathFromData(ColumnIcons::targetIcon, SIZE_OF_PATH(ColumnIcons::targetIcon));
+	icon.loadPathFromData(ColumnIcons::targetIcon, sizeof(ColumnIcons::targetIcon));
 
 	PathFactory::scalePath(icon, iconBounds.toFloat().reduced(2.0f));
 
@@ -1108,23 +1144,22 @@ Error dynamic::editor::checkConnectionWhileDragging(const SourceDetails& dragSou
 
 		auto other = dynamic_cast<editor*>(dragSourceDetails.sourceComponent.get());
 
-		dynamic* cb = nullptr;
-
 		if (auto rn = other->getAsReceiveNode())
 		{
 			if (auto sn = getAsSendNode())
-				cb = dynamic_cast<dynamic*>(sn->getCable());
+			{
+				sp = sn->cable.sendSpecs;
+				rp = sn->cable.receiveSpecs;
+			}
 		}
 		if (auto rn = getAsReceiveNode())
 		{
 			if (auto sn = other->getAsSendNode())
-				cb = dynamic_cast<dynamic*>(sn->getCable());
+			{
+				sp = sn->cable.sendSpecs;
+				rp = sn->cable.receiveSpecs;
+			}
 		}
-
-		jassert(cb != nullptr);
-		
-		sp = cb->sendSpecs;
-		rp = cb->receiveSpecs;
 
 		DspHelpers::validate(sp, rp);
 	}
@@ -1198,12 +1233,12 @@ void dynamic::editor::timerCallback()
 	float feedbackValue = 1.0f;
 
 	if (auto sn = getAsSendNode())
-		c = dynamic_cast<dynamic*>(sn->getCable());
+		c = &sn->cable;
 
 	if (auto rn = getAsReceiveNode())
 	{
-		c = dynamic_cast<dynamic*>(*rn->getSourceCablePtr());
-		feedbackValue = rn->getFeedbackDisplayValue();
+		c = rn->source;
+		feedbackValue = rn->feedback;
 	}
 
 	if (c == nullptr)
@@ -1212,8 +1247,25 @@ void dynamic::editor::timerCallback()
 		return;
 	}
 
-	auto peaks = c->getDisplayPeakValues();
-	levelDisplay.setPeak(peaks.first * feedbackValue, peaks.second * feedbackValue);
+	int numChannels = c->getNumChannels();
+
+
+	if (c->useFrameDataForDisplay)
+	{
+		auto l = c->frameData[0];
+		auto r = numChannels == 2 ? c->frameData[1] : l;
+
+		levelDisplay.setPeak(l * feedbackValue, r * feedbackValue);
+	}
+	else
+	{
+		int numSamples = c->channels[0].size();
+
+		float l = DspHelpers::findPeak(c->channels[0].begin(), numSamples);
+		float r = numChannels == 2 ? DspHelpers::findPeak(c->channels[1].begin(), numSamples) : l;
+
+		levelDisplay.setPeak(l * feedbackValue, r * feedbackValue);
+	}
 }
 
 juce::DragAndDropContainer* dynamic::editor::getDragAndDropContainer()
@@ -1238,7 +1290,7 @@ juce::Image dynamic::editor::createDragImage(const String& m, Colour bgColour)
 
 	float margin = 10.0f;
 
-	p.loadPathFromData(ColumnIcons::targetIcon, SIZE_OF_PATH(ColumnIcons::targetIcon));
+	p.loadPathFromData(ColumnIcons::targetIcon, sizeof(ColumnIcons::targetIcon));
 	p.scaleToFit(5.0f, 5.0f, 15.0f, 15.0f, true);
 
 	MarkdownRenderer mp(m, nullptr);
@@ -1267,6 +1319,27 @@ juce::Image dynamic::editor::createDragImage(const String& m, Colour bgColour)
 
 
 
+
+scriptnode::cable::dynamic::dynamic_send* dynamic::editor::getAsSendNode()
+{
+	if (auto c = dynamic_cast<dynamic_send*>(getObject()))
+	{
+		return c;
+	}
+
+	return nullptr;
+}
+
+scriptnode::cable::dynamic::dynamic_receive* dynamic::editor::getAsReceiveNode()
+{
+	if (auto c = dynamic_cast<dynamic_receive*>(getObject()))
+	{
+		return c;
+	}
+
+	return nullptr;
+}
+
 void dynamic::editor::itemDropped(const SourceDetails& dragSourceDetails)
 {
 	auto src = dynamic_cast<editor*>(dragSourceDetails.sourceComponent.get());
@@ -1275,7 +1348,7 @@ void dynamic::editor::itemDropped(const SourceDetails& dragSourceDetails)
 
 
 
-	if (routing::send_base* thisAsCable = getAsSendNode())
+	if (auto thisAsCable = getAsSendNode())
 	{
 		if (auto srcAsReceive = src->getAsReceiveNode())
 			thisAsCable->connect(*srcAsReceive);
@@ -1303,7 +1376,7 @@ void dynamic::editor::mouseDown(const MouseEvent& e)
 		{
 			if (rn->isConnected())
 			{
-				(*rn->getSourceCablePtr())->disconnect(*rn);
+				rn->source->setConnection(*rn, false);
 				findParentComponentOfClass<DspNetworkGraph>()->repaint();
 			}
 		}
@@ -1361,7 +1434,7 @@ void dynamic::editor::mouseDoubleClick(const MouseEvent& event)
 	{
 		if (rn->isConnected())
 		{
-			(*rn->getSourceCablePtr())->disconnect(*rn);
+			rn->source->setConnection(*rn, false);
 			findParentComponentOfClass<DspNetworkGraph>()->repaint();
 		}
 	}
@@ -1375,11 +1448,7 @@ bool dynamic::editor::isConnected()
 		return rn->isConnected();
 
 	if (auto sn = getAsSendNode())
-	{
-		auto dc = dynamic_cast<dynamic*>(sn->getCable());
-		jassert(dc != nullptr);
-		return dc->receiveIds.getValue().isNotEmpty();
-	}
+		return sn->cable.receiveIds.getValue().isNotEmpty();
 
 	return false;
 }

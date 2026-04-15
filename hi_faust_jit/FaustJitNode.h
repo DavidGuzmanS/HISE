@@ -103,7 +103,7 @@ protected:
     
     Result compileResult;
     
-	void initialise(ObjectWithValueTree* n);
+	void initialise(NodeBase* n);
 
 	void loadSource();
 	NodePropertyT<String> classId;
@@ -258,6 +258,7 @@ template <int NV> struct faust_jit_node: public faust_jit_node_base
 	{
 		if (isBypassed()) return;
         
+        NodeProfiler np(this, data.getNumSamples());
         ProcessDataPeakChecker fd(this, data);
         
 		hise::SimpleReadWriteLock::ScopedReadLock sl(getFaustCompileLock());
@@ -281,8 +282,6 @@ template <int NV> struct faust_jit_node: public faust_jit_node_base
 			lastSpecs = specs;
 			hise::SimpleReadWriteLock::ScopedReadLock sl(getFaustCompileLock());
 			faust->prepare(specs);
-
-			getRootNetwork()->checkAllowCompilationFlag(this, true);
 		}
 		catch (scriptnode::Error& e)
 		{

@@ -46,17 +46,14 @@ void StyleSheetLookAndFeel::drawButtonBackground(Graphics& g, Button& tb, const 
 	{
 		if(auto ss = root.css.getForComponent(&tb))
 		{
-			if(ss->hasNonLayoutProperties())
-			{
-				Renderer r(&tb, root.stateWatcher);
-				ss->setDefaultColour("background-color", tb.findColour(TextButton::buttonColourId));
+			Renderer r(&tb, root.stateWatcher);
+			ss->setDefaultColour("background-color", tb.findColour(TextButton::buttonColourId));
 
-				auto currentState = Renderer::getPseudoClassFromComponent(&tb);
-				ed->stateWatcher.checkChanges(&tb, ss, currentState);
-				r.drawBackground(g, tb.getLocalBounds().toFloat(), ss);
+			auto currentState = Renderer::getPseudoClassFromComponent(&tb);
+			ed->stateWatcher.checkChanges(&tb, ss, currentState);
+			r.drawBackground(g, tb.getLocalBounds().toFloat(), ss);
 
-				return;
-			}
+			return;
 		}
 	}
 
@@ -74,6 +71,7 @@ bool StyleSheetLookAndFeel::drawButtonText(Graphics& g, Button* b)
 			r.renderText(g, b->getLocalBounds().toFloat(), b->getButtonText(), ss);
 			return true;
 		}
+		
 	}
 
 	return false;
@@ -108,12 +106,9 @@ void StyleSheetLookAndFeel::drawToggleButton(Graphics& g, ToggleButton& tb, bool
 	{
 		if(auto ss = root.css.getForComponent(&tb))
 		{
-			if(ss->hasNonLayoutProperties())
-			{
-				drawButtonBackground(g, tb, {}, shouldDrawButtonAsHighlighted, shouldDrawButtonAsDown);
-				drawButtonText(g, &tb);
-				return;
-			}
+			drawButtonBackground(g, tb, {}, shouldDrawButtonAsHighlighted, shouldDrawButtonAsDown);
+			drawButtonText(g, &tb);
+			return;
 		}
 	}
 
@@ -126,24 +121,21 @@ void StyleSheetLookAndFeel::fillTextEditorBackground(Graphics& g, int width, int
 	{
 		if(auto ss = root.css.getForComponent(&textEditor))
 		{
-			if(ss->hasNonLayoutProperties())
-			{
-				Renderer r(&textEditor, root.stateWatcher);
+			Renderer r(&textEditor, root.stateWatcher);
 
-				auto currentState = Renderer::getPseudoClassFromComponent(&textEditor);
-				ed->stateWatcher.checkChanges(&textEditor, ss, currentState);
+			auto currentState = Renderer::getPseudoClassFromComponent(&textEditor);
+			ed->stateWatcher.checkChanges(&textEditor, ss, currentState);
 
-				ss->setDefaultColour("background-color", textEditor.findColour(TextEditor::backgroundColourId));
-				ss->setDefaultColour("color", textEditor.findColour(TextEditor::textColourId));
-				
-				r.drawBackground(g, textEditor.getLocalBounds().toFloat(), ss);
-
-				return;
-			}
+			ss->setDefaultColour("background-color", textEditor.findColour(TextEditor::backgroundColourId));
+			ss->setDefaultColour("color", textEditor.findColour(TextEditor::textColourId));
+			
+			r.drawBackground(g, textEditor.getLocalBounds().toFloat(), ss);
 		}
-
-		GlobalHiseLookAndFeel::fillTextEditorBackground(g, width, height, textEditor);
-		GlobalHiseLookAndFeel::drawTextEditorOutline(g, width, height, textEditor);
+		else
+		{
+			GlobalHiseLookAndFeel::fillTextEditorBackground(g, width, height, textEditor);
+			GlobalHiseLookAndFeel::drawTextEditorOutline(g, width, height, textEditor);
+		}
 	}
 }
 
@@ -152,36 +144,37 @@ void StyleSheetLookAndFeel::drawLinearSlider(Graphics& g, int x, int y, int widt
 {
 	if(auto ss = root.css.getForComponent(&slider))
 	{
-		if(ss->hasNonLayoutProperties())
-		{
-			auto nr = NormalisableRange<double>(slider.getRange());
-			nr.skew = slider.getSkewFactor();
-			auto normPos = nr.convertTo0to1(slider.getValue());
-			ss->setPropertyVariable("value", String(normPos, 4));
-			auto text = slider.getTextFromValue(slider.getValue());
+		auto nr = NormalisableRange<double>(slider.getRange());
+		nr.skew = slider.getSkewFactor();
+
+		auto normPos = nr.convertTo0to1(slider.getValue());
 			
-			Renderer r(&slider, root.stateWatcher);
+		ss->setPropertyVariable("value", String(normPos, 4));
+		
+		auto text = slider.getTextFromValue(slider.getValue());
+		
+		Renderer r(&slider, root.stateWatcher);
 
-			int currentState = 0;
+		int currentState = 0;
 
-			if(auto sp = slider.findParentComponentOfClass<SliderPack>())
-			{
-				currentState = sp->getHoverStateForSlider(&slider);
-				r.setPseudoClassState(currentState, true);
-			}
-			else
-				currentState = Renderer::getPseudoClassFromComponent(&slider);
-
-			root.stateWatcher.checkChanges(&slider, ss, currentState);
-
-			r.drawBackground(g, slider.getLocalBounds().toFloat(), ss);
-			r.renderText(g, slider.getLocalBounds().toFloat(), text, ss, PseudoElementType::None, Justification(0), false);
-			return;
+		if(auto sp = slider.findParentComponentOfClass<SliderPack>())
+		{
+			currentState = sp->getHoverStateForSlider(&slider);
+			r.setPseudoClassState(currentState, true);
 		}
-	}
+		else
+			currentState = Renderer::getPseudoClassFromComponent(&slider);
 
-	GlobalHiseLookAndFeel::drawLinearSlider(g, x, y, width, height, sliderPos, minSliderPos, maxSliderPos,
+		root.stateWatcher.checkChanges(&slider, ss, currentState);
+
+		r.drawBackground(g, slider.getLocalBounds().toFloat(), ss);
+		r.renderText(g, slider.getLocalBounds().toFloat(), text, ss, PseudoElementType::None, Justification(0), false);
+	}
+	else
+	{
+		GlobalHiseLookAndFeel::drawLinearSlider(g, x, y, width, height, sliderPos, minSliderPos, maxSliderPos,
 		                                        sliderStyle, slider);
+	}
 }
 
 void StyleSheetLookAndFeel::drawRotarySlider(Graphics& graphics, int x, int y, int width, int height,
@@ -189,42 +182,32 @@ void StyleSheetLookAndFeel::drawRotarySlider(Graphics& graphics, int x, int y, i
 {
 	if(auto ss = root.css.getForComponent(&slider))
 	{
-		if(ss->hasNonLayoutProperties())
-		{
-			auto normPos = NormalisableRange<double>(slider.getRange()).convertTo0to1(slider.getValue());
+		auto normPos = NormalisableRange<double>(slider.getRange()).convertTo0to1(slider.getValue());
 			
-			ss->setPropertyVariable("value", String(normPos, 4));
+		ss->setPropertyVariable("value", String(normPos, 4));
 
-			Renderer r(&slider, root.stateWatcher);
+		Renderer r(&slider, root.stateWatcher);
 
-			auto currentState = Renderer::getPseudoClassFromComponent(&slider);
-			root.stateWatcher.checkChanges(&slider, ss, currentState);
+		auto currentState = Renderer::getPseudoClassFromComponent(&slider);
+		root.stateWatcher.checkChanges(&slider, ss, currentState);
 
-			r.drawBackground(graphics, slider.getLocalBounds().toFloat(), ss);
-			auto t = slider.getTextFromValue(slider.getValue());
-			r.renderText(graphics, slider.getLocalBounds().toFloat(), t, ss);
-
-			return;
-		}
+		r.drawBackground(graphics, slider.getLocalBounds().toFloat(), ss);
+		auto t = slider.getTextFromValue(slider.getValue());
+		r.renderText(graphics, slider.getLocalBounds().toFloat(), t, ss);
 	}
-
-	GlobalHiseLookAndFeel::drawRotarySlider(graphics, x, y, width, height, sliderPosProportional, rotaryStartAngle,
+	else
+	{
+		GlobalHiseLookAndFeel::drawRotarySlider(graphics, x, y, width, height, sliderPosProportional, rotaryStartAngle,
 	                                        rotaryEndAngle, slider);
+	}
+	
 }
 
-void StyleSheetLookAndFeel::drawGenericComponentText(Graphics& g, const String& text, bool drawEmptyText, Component* c, Selector s)
+void StyleSheetLookAndFeel::drawGenericComponentText(Graphics& g, const String& text, Component* c, Selector s)
 {
 	if(auto ss = s ? root.css.getWithAllStates(c, s) : root.css.getForComponent(c))
 	{
 		Renderer r(c, root.stateWatcher);
-
-		auto currentState = Renderer::getPseudoClassFromComponent(c);
-
-		if(drawEmptyText)
-			currentState |= (int)PseudoClassType::Empty;
-
-		r.setPseudoClassState(currentState, true);
-
 		r.renderText(g, c->getLocalBounds().toFloat(), text, ss);
 	}
 }
@@ -233,15 +216,12 @@ bool StyleSheetLookAndFeel::drawComponentBackground(Graphics& g, Component* c, S
 {
 	if(auto ss = s ? root.css.getWithAllStates(c, s) : root.css.getForComponent(c))
 	{
-		if(ss->hasNonLayoutProperties())
-		{
-			Renderer r(c, root.stateWatcher);
+		Renderer r(c, root.stateWatcher);
 
-			auto state = r.getPseudoClassFromComponent(c);
-			root.stateWatcher.checkChanges(c, ss, state);
-			r.drawBackground(g, c->getLocalBounds().toFloat(), ss);
-			return true;
-		}
+		auto state = r.getPseudoClassFromComponent(c);
+		root.stateWatcher.checkChanges(c, ss, state);
+		r.drawBackground(g, c->getLocalBounds().toFloat(), ss);
+		return true;
 	}
 
 	return false;
@@ -506,8 +486,6 @@ void StyleSheetLookAndFeel::drawLabel(Graphics& g, Label& l)
 		else
 			state &= (0xFFFFFFFF ^ (int)PseudoClassType::Focus);
 
-		if(l.getText().isEmpty())
-			state |= (int)PseudoClassType::Empty;
 
 		r.setPseudoClassState(state, true);
 
@@ -539,39 +517,25 @@ void StyleSheetLookAndFeel::drawComboBox(Graphics& g, int width, int height, boo
 {
 	if(auto ss = root.css.getForComponent(&cb))
 	{
-		if(ss->hasNonLayoutProperties())
-		{
-			Renderer r(&cb, root.stateWatcher);
+		Renderer r(&cb, root.stateWatcher);
+			
+		root.stateWatcher.checkChanges(&cb, ss, r.getPseudoClassState());
 
-			auto state = r.getPseudoClassState();
+		r.drawBackground(g, cb.getLocalBounds().toFloat(), ss);
 
-			if(cb.getNumItems() == 0)
-				state |= (int)PseudoClassType::Empty;
-
-			r.setPseudoClassState(state, true);
-
-			root.stateWatcher.checkChanges(&cb, ss, state);
-			r.drawBackground(g, cb.getLocalBounds().toFloat(), ss);
-			r.renderText(g, cb.getLocalBounds().toFloat(), cb.getText(), ss);
-			return;
-		}
+		r.renderText(g, cb.getLocalBounds().toFloat(), cb.getText(), ss);
 	}
-
-	GlobalHiseLookAndFeel::drawComboBox(g, width, height, isButtonDown, buttonX, buttonY, buttonW, buttonH, cb);
+	else
+	{
+		GlobalHiseLookAndFeel::drawComboBox(g, width, height, isButtonDown, buttonX, buttonY, buttonW, buttonH, cb);
+	}
 }
 
 void StyleSheetLookAndFeel::positionComboBoxText(ComboBox& cb, Label& label)
 {
 	// position it but then hide it so that the popup menu size will be initialised correctly (wtf, 1 hour of debugging for this...)
 	GlobalHiseLookAndFeel::positionComboBoxText(cb, label);
-
-	if(auto ss = root.css.getForComponent(&cb))
-	{
-		if(ss->hasNonLayoutProperties())
-		{
-			label.setVisible(false);
-		}
-	}
+	label.setVisible(false);
 }
 
 void StyleSheetLookAndFeel::drawTableHeaderBackground(Graphics& graphics, TableHeaderComponent& tableHeaderComponent)

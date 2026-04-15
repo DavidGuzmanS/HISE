@@ -43,9 +43,7 @@ class ConstantModulator: public VoiceStartModulator
 {
 public:
 
-	SET_PROCESSOR_NAME("Constant", "Constant", "")
-
-	static ProcessorMetadata createMetadata();
+	SET_PROCESSOR_NAME("Constant", "Constant", "creates a constant modulation signal (1.0).");
 
 	/// Additional Parameters for the constant modulator
 	enum SpecialParameters

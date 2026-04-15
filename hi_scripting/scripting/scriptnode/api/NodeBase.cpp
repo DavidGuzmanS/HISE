@@ -45,7 +45,6 @@ struct NodeBase::Wrapper
 	API_VOID_METHOD_WRAPPER_2(NodeBase, setParent);
 	API_METHOD_WRAPPER_2(NodeBase, connectTo);
 	API_VOID_METHOD_WRAPPER_1(NodeBase, connectToBypass);
-	API_METHOD_WRAPPER_1(NodeBase, getOrCreateParameter);
 	API_METHOD_WRAPPER_1(NodeBase, getParameter);
     API_METHOD_WRAPPER_3(NodeBase, setComplexDataIndex);
 	API_METHOD_WRAPPER_0(NodeBase, getNumParameters);
@@ -53,30 +52,6 @@ struct NodeBase::Wrapper
 };
 
 
-#if HISE_INCLUDE_PROFILING_TOOLKIT
-struct DspNetworkHeatmapGenerator: public DebugSession::ProfileDataSource::HeatmapGenerator<NodeBase>
-{
-	DspNetworkHeatmapGenerator(NodeBase* rootNode):
-	  HeatmapGenerator<NodeBase>(rootNode)
-	{};
-
-	DebugSession::ProfileDataSource* getSourceFromDataType(NodeBase* d) override
-	{
-		return d->profileData.get();
-	}
-
-	int getNumChildren(NodeBase* d) const override
-	{
-		return d->getValueTree().getChildWithName(PropertyIds::Nodes).getNumChildren();
-	}
-
-	NodeBase* getChild(NodeBase* n, int index) override
-	{
-		auto children = n->getValueTree().getChildWithName(PropertyIds::Nodes);
-		return n->getRootNetwork()->getNodeForValueTree(children.getChild(index));
-	}
-};
-#endif
 
 NodeBase::NodeBase(DspNetwork* rootNetwork, ValueTree data_, int numConstants_) :
 	ConstScriptingObject(rootNetwork->getScriptProcessor(), 8),
@@ -84,16 +59,8 @@ NodeBase::NodeBase(DspNetwork* rootNetwork, ValueTree data_, int numConstants_) 
 	v_data(data_),
 	helpManager(this, data_),
 	currentId(v_data[PropertyIds::ID].toString()),	
-	subHolder(rootNetwork->getCurrentHolder()),
-	profileData(new DebugSession::ProfileDataSource())
+	subHolder(rootNetwork->getCurrentHolder())
 {
-#if HISE_INCLUDE_PROFILING_TOOLKIT
-	profileData->name = getId();
-	profileData->preferredDomain = DebugSession::ProfileDataSource::TimeDomain::CpuUsage;
-	profileData->locationString = dynamic_cast<Processor*>(getScriptProcessor())->getId() + "." + profileData->name;
-	profileData->sourceType = DebugSession::ProfileDataSource::SourceType::Scriptnode;
-#endif
-
 	if (!v_data.hasProperty(PropertyIds::Bypassed))
 		v_data.setProperty(PropertyIds::Bypassed, false, getUndoManager());
 
@@ -115,7 +82,6 @@ NodeBase::NodeBase(DspNetwork* rootNetwork, ValueTree data_, int numConstants_) 
 	ADD_API_METHOD_1(setBypassed);
 	ADD_API_METHOD_0(isBypassed);
 	ADD_API_METHOD_2(setParent);
-	ADD_API_METHOD_1(getOrCreateParameter);
 	ADD_API_METHOD_1(getParameter);
 	ADD_API_METHOD_2(connectTo);
 	ADD_API_METHOD_1(connectToBypass);
@@ -125,8 +91,6 @@ NodeBase::NodeBase(DspNetwork* rootNetwork, ValueTree data_, int numConstants_) 
 
 	for (auto c : getPropertyTree())
 		addConstant(c[PropertyIds::ID].toString(), c[PropertyIds::ID]);
-
-	registerStreamCreator(this);
 }
 
 NodeBase::~NodeBase()
@@ -359,7 +323,7 @@ juce::String NodeBase::getId() const
 	return v_data[PropertyIds::ID].toString();
 }
 
-juce::UndoManager* NodeBase::getUndoManager() const
+juce::UndoManager* NodeBase::getUndoManager(bool returnIfPending) const
 {
 	return getRootNetwork()->getUndoManager(returnIfPending);
 }
@@ -564,6 +528,28 @@ bool NodeBase::isClone() const
 	return findParentNodeOfType<CloneNode>() != nullptr;
 }
 
+void NodeBase::setEmbeddedNetwork(NodeBase::Holder* n)
+{
+	embeddedNetwork = n;
+
+	if (getEmbeddedNetwork()->canBeFrozen())
+	{
+		setDefaultValue(PropertyIds::Frozen, true);
+		frozenListener.setCallback(v_data, { PropertyIds::Frozen }, valuetree::AsyncMode::Synchronously,
+			BIND_MEMBER_FUNCTION_2(NodeBase::updateFrozenState));
+	}
+}
+
+scriptnode::DspNetwork* NodeBase::getEmbeddedNetwork()
+{
+	return static_cast<DspNetwork*>(embeddedNetwork.get());
+}
+
+const scriptnode::DspNetwork* NodeBase::getEmbeddedNetwork() const
+{
+	return static_cast<const DspNetwork*>(embeddedNetwork.get());
+}
+
 ValueTree findBypassConnectionTree(const ValueTree& v, const String& nodeId)
 {
 	if (v.getType() == PropertyIds::Connection)
@@ -629,6 +615,22 @@ String NodeBase::getDynamicBypassSource(bool forceUpdate /*= true*/) const
 	}
 
 	return dynamicBypassId;
+}
+
+void NodeBase::updateFrozenState(Identifier id, var newValue)
+{
+	if (auto n = getEmbeddedNetwork())
+	{
+		try
+		{
+			if (n->canBeFrozen())
+				n->setUseFrozenNode((bool)newValue);
+		}
+		catch (Error& e)
+		{
+			getRootNetwork()->getExceptionHandler().addError(this, e);
+		}
+	}
 }
 
 Colour NodeBase::getColour() const
@@ -697,75 +699,42 @@ var NodeBase::getParameter(var indexOrId) const
 {
 	Parameter* p = nullptr;
 
-	if(auto obj = indexOrId.getDynamicObject())
-	{
-		auto id = obj->getProperty(PropertyIds::ID).toString();
-		p = getParameterFromName(id);
-	}
-	else if (indexOrId.isString())
+	if (indexOrId.isString())
 		p = getParameterFromName(indexOrId.toString());
 	else
 		p = getParameterFromIndex((int)indexOrId);
 
 	if (p != nullptr)
 		return var(p);
-
-	return var();
-}
-
-var NodeBase::getOrCreateParameter(var indexOrId) const
-{
-	auto existing = getParameter(indexOrId);
-
-	if(existing.isObject())
-		return existing;
-
-	if(auto nc = dynamic_cast<const NodeContainer*>(this))
-    {
-        auto name = indexOrId[PropertyIds::ID].toString();
-		auto idSet = RangeHelpers::getIdSetForJSON(indexOrId);
-		auto rng = RangeHelpers::getDoubleRange(indexOrId, idSet);
-
-        ValueTree p(PropertyIds::Parameter);
-
-        p.setProperty(PropertyIds::ID, name, nullptr);
-
-		auto defaultValue = RangeHelpers::getDefaultValue(indexOrId);
-
-		RangeHelpers::storeDoubleRange(p, rng, nullptr);
-
-		if(indexOrId.hasProperty("mode"))
-			p.setProperty(PropertyIds::TextToValueConverter, indexOrId["mode"], nullptr);
-
-		PropertyIds::Helpers::setToDefault(p, PropertyIds::ModColour);
-		PropertyIds::Helpers::setToDefault(p, PropertyIds::ExternalModulation);
-		PropertyIds::Helpers::setToDefault(p, PropertyIds::Page);
-		PropertyIds::Helpers::setToDefault(p, PropertyIds::SubGroup);
-
-		if(defaultValue.first)
-		{
-			p.setProperty(PropertyIds::DefaultValue, defaultValue.second, nullptr);
-			p.setProperty(PropertyIds::Value, defaultValue.second, nullptr);
-		}
-        
-        getValueTree().getChildWithName(PropertyIds::Parameters).addChild(p, -1, getUndoManager());
-        
-        return var(getParameterFromName(name));
-    }
 	else
-	{
-		reportScriptError("Can't create parameter for non-container node");
-	}
+    {
+        if(auto nc = dynamic_cast<const NodeContainer*>(this))
+        {
+            auto name = indexOrId.toString();
+            
+            ValueTree p(PropertyIds::Parameter);
+            p.setProperty(PropertyIds::ID, name, nullptr);
+            p.setProperty(PropertyIds::MinValue, 0.0, nullptr);
+            p.setProperty(PropertyIds::MaxValue, 1.0, nullptr);
 
-	return {};
+            PropertyIds::Helpers::setToDefault(p, PropertyIds::StepSize);
+            PropertyIds::Helpers::setToDefault(p, PropertyIds::SkewFactor);
+
+            p.setProperty(PropertyIds::Value, 1.0, nullptr);
+            getValueTree().getChildWithName(PropertyIds::Parameters).addChild(p, -1, getUndoManager());
+            
+            return var(getParameterFromName(name));
+        }
+        
+        return {};
+    }
+		
 }
 
 struct Parameter::Wrapper
 {
 	API_METHOD_WRAPPER_0(NodeBase::Parameter, getId);
 	API_METHOD_WRAPPER_0(NodeBase::Parameter, getValue);
-	API_VOID_METHOD_WRAPPER_1(NodeBase::Parameter, setValue);
-	API_VOID_METHOD_WRAPPER_1(NodeBase::Parameter, setUseExternalConnection);
     API_VOID_METHOD_WRAPPER_2(NodeBase::Parameter, setRangeProperty);
 	API_METHOD_WRAPPER_1(NodeBase::Parameter, addConnectionFrom);
 	API_VOID_METHOD_WRAPPER_1(NodeBase::Parameter, setValueSync);
@@ -778,17 +747,14 @@ Parameter::Parameter(NodeBase* parent_, const ValueTree& data_) :
 	ConstScriptingObject(parent_->getScriptProcessor(), 4),
 	parent(parent_),
 	data(data_),
-	dynamicParameter(),
-    externalConnection(data, PropertyIds::AutomatedExternal, parent_->getUndoManager(), false)
+	dynamicParameter()
 {
 	auto weakThis = WeakReference<Parameter>(this);
 
 	ADD_API_METHOD_0(getValue);
-	ADD_API_METHOD_1(setValue);
-	ADD_API_METHOD_1(setUseExternalConnection);
 	ADD_API_METHOD_1(addConnectionFrom);
-	ADD_API_METHOD_1(setValueAsync); DIAGNOSTIC_MARK_DEPRECATED(setValueAsync, "Use setUseExternalConnection(), then setValue() instead.");
-	ADD_API_METHOD_1(setValueSync);  DIAGNOSTIC_MARK_DEPRECATED(setValueSync, "Use setUseExternalConnection(), then setValue() instead.");
+	ADD_API_METHOD_1(setValueAsync);
+	ADD_API_METHOD_1(setValueSync);
     ADD_API_METHOD_2(setRangeProperty);
 	ADD_API_METHOD_0(getId);
 	ADD_API_METHOD_1(setRangeFromObject);
@@ -804,7 +770,7 @@ Parameter::Parameter(NodeBase* parent_, const ValueTree& data_) :
 	valuePropertyUpdater.setCallback(data, { PropertyIds::Value }, valuetree::AsyncMode::Synchronously,
 		std::bind(&NodeBase::Parameter::updateFromValueTree, this, std::placeholders::_1, std::placeholders::_2));
 
-	rangeListener.setCallback(data, RangeHelpers::getRangeIds(), valuetree::AsyncMode::Synchronously, VT_BIND_PROPERTY_LISTENER(updateRange));
+	rangeListener.setCallback(data, RangeHelpers::getRangeIds(), valuetree::AsyncMode::Synchronously, BIND_MEMBER_FUNCTION_2(NodeBase::Parameter::updateRange));
 
 	automationRemover.setCallback(data, valuetree::AsyncMode::Synchronously, true, BIND_MEMBER_FUNCTION_1(Parameter::updateConnectionOnRemoval));
 }
@@ -921,7 +887,7 @@ bool NodeBase::setComplexDataIndex(String dataType, int dataSlot, int indexValue
 	if(!v.isValid())
 		return false;
         
-	v.setProperty(PropertyIds::Index, indexValue, getUndoManager());
+	v.setProperty(PropertyIds::Index, dataSlot, getUndoManager());
         
 	return true;
 }
@@ -1119,41 +1085,6 @@ void Parameter::setValueSync(double newValue)
 	data.setProperty(PropertyIds::Value, newValue, parent->getUndoManager());
 }
 
-void Parameter::setValue(double newValue)
-{
-	if (externalConnection)
-		setValueAsync(newValue);
-	else
-	{
-#if USE_BACKEND
-		auto t = getScriptProcessor()->getMainController_()->getKillStateHandler().getCurrentThread();
-
-		if (t == MainController::KillStateHandler::TargetThread::AudioThread)
-			reportScriptError("You need to call setUseExternalConnection before calling this on the audio thread");
-#endif
-
-		setValueSync(newValue);
-	}
-		
-}
-
-void Parameter::setUseExternalConnection(bool usesExternalConnection)
-{
-	externalConnection.setValue(usesExternalConnection, parent->getUndoManager());
-
-	if (externalConnection)
-		data.removeProperty(PropertyIds::Value, parent->getUndoManager());
-	else
-	{
-		auto v = (double)data[PropertyIds::DefaultValue];
-
-		if (dynamicParameter != nullptr)
-			v = dynamicParameter->getDisplayValue();
-
-		data.setProperty(PropertyIds::Value, v, parent->getUndoManager());
-	}
-}
-
 juce::ValueTree Parameter::getConnectionSourceTree(bool forceUpdate)
 {
 	if (forceUpdate)
@@ -1306,7 +1237,6 @@ struct DragHelpers
 void NodeBase::connectToBypass(var dragDetails)
 {
 	auto sourceParameterTree = DragHelpers::getValueTreeOfSourceParameter(this, dragDetails);
-	auto modNode = DragHelpers::getModulationSource(this, dragDetails);
 
 	if (sourceParameterTree.isValid())
 	{
@@ -1314,18 +1244,11 @@ void NodeBase::connectToBypass(var dragDetails)
 		newC.setProperty(PropertyIds::NodeId, getId(), nullptr);
 		newC.setProperty(PropertyIds::ParameterId, PropertyIds::Bypassed.toString(), nullptr);
 
+		String connectionId = DragHelpers::getSourceNodeId(dragDetails) + "." + 
+							  DragHelpers::getSourceParameterId(dragDetails);
+
 		ValueTree connectionTree = sourceParameterTree.getChildWithName(PropertyIds::Connections);
 		connectionTree.addChild(newC, -1, getUndoManager());
-		return;
-	}
-	else if (modNode != nullptr)
-	{
-		ValueTree newC(PropertyIds::Connection);
-		newC.setProperty(PropertyIds::NodeId, getId(), nullptr);
-		newC.setProperty(PropertyIds::ParameterId, PropertyIds::Bypassed.toString(), nullptr);
-
-		modNode->getModulationTargetTree().addChild(newC, -1, getUndoManager());
-		return;
 	}
 	else
 	{
@@ -1365,20 +1288,6 @@ void NodeBase::connectToBypass(var dragDetails)
 				}
 			}
 		}
-		else
-		{
-			if (auto modNode = dynamic_cast<ModulationSourceNode*>(getRootNetwork()->getNodeWithId(src)))
-			{
-				for(auto c: modNode->getModulationTargetTree())
-				{
-					if (c[PropertyIds::NodeId] == getId() && c[PropertyIds::ParameterId].toString() == "Bypassed")
-					{
-						c.getParent().removeChild(c, getUndoManager());
-						return;
-					}
-				}
-			}
-		}
 	}
 }
 
@@ -1388,7 +1297,7 @@ var NodeBase::Parameter::addConnectionFrom(var dragDetails)
 
 	if (shouldAdd)
 	{
-		if (data[PropertyIds::Automated] || data[PropertyIds::AutomatedExternal])
+		if (data[PropertyIds::Automated])
 			return var();
 
 		data.setProperty(PropertyIds::Automated, true, parent->getUndoManager());
@@ -1743,9 +1652,8 @@ scriptnode::parameter::dynamic_base::Ptr ConnectionBase::createParameterFromConn
 
 		n->getRootNetwork()->getExceptionHandler().removeError(tn, Error::UnscaledModRangeMismatch);
 
-		parameter::dynamic_base::Ptr p;
 
-		auto targetIsMacro = dynamic_cast<NodeContainer*>(tn) != nullptr;
+		parameter::dynamic_base::Ptr p;
 
 		if (pId == PropertyIds::Bypassed.toString())
 		{
@@ -1763,23 +1671,13 @@ scriptnode::parameter::dynamic_base::Ptr ConnectionBase::createParameterFromConn
 		{
 			p = param->getDynamicParameter();
 
-			if(auto dh = dynamic_cast<parameter::dynamic_base_holder*>(p.get()))
-			{
-				dh->setAllowForwardToParameter(false);
-				dh->updateRange(param->data);
-			}
-
 			isUnscaledTarget = cppgen::CustomNodeProperties::isUnscaledParameter(param->data);
 		}
 		else
 			return nullptr;
 
-		auto targetNodeType = tn->getPath().toString();
-		auto isCableValueParameter = targetNodeType.contains("local_cable") || targetNodeType.contains("global_cable");
 
-		
-		
-		if (numConnections == 1 && !isCableValueParameter && !targetIsMacro)
+		if (numConnections == 1)
 		{
 			auto sameRange = RangeHelpers::equalsWithError(p->getRange(), inputRange, 0.001);
 			
@@ -1903,7 +1801,26 @@ void ProcessDataPeakChecker::check(bool post)
 #endif
 }
 
+RealNodeProfiler::RealNodeProfiler(NodeBase* n, int numSamples_) :
+	enabled(n->getRootNetwork()->getCpuProfileFlag()),
+	profileFlag(n->getCpuFlag()),
+	numSamples(numSamples_),
+	node(n)
+{
+	if (enabled)
+		start = Time::getMillisecondCounterHiRes();
+}
 
+RealNodeProfiler::~RealNodeProfiler()
+{
+	if (enabled)
+	{
+		auto delta = Time::getMillisecondCounterHiRes() - start;
+		profileFlag = profileFlag * 0.9 + 0.1 * delta;
+
+		node->processProfileInfo(profileFlag, numSamples);
+	}
+}
 
 Parameter::ScopedAutomationPreserver::ScopedAutomationPreserver(NodeBase* n) :
 	parent(n)

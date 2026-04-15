@@ -62,7 +62,6 @@ void fix_delay::createParameters(ParameterDataList& data)
 		p.setRange({ 0.0, 1000.0, 0.1 });
 		p.setSkewForCentre(100.0);
 		p.setDefaultValue(100.0);
-		p.info.textConverter = parameter::pod::Time;
 		data.add(std::move(p));
 	}
 	{

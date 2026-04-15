@@ -52,6 +52,21 @@ struct LocalCableHelpers
 	
 };
 
+/* TODO: Ideas for routing:
+
+	- make popup that shows all routing destination / targets OK
+	- make debug popup OK
+	- add debug popup to module browser
+	- use connection range from script component
+	- implement code goto
+	- allow set from receive OK
+	- make scripting layer for cables / signals OK
+	- attach scripting callback to the value send (with sync / async option)... OK
+	- increase margin in cable editor OK
+	- make global 64 block processing
+	- throw error if network is set to compileable (perhaps make compile-check system based on a `AllowCompilation` property listener) OK
+*/
+
 struct GlobalRoutingManager: public ReferenceCountedObject
 {
 	using Ptr = ReferenceCountedObjectPtr<GlobalRoutingManager>;
@@ -95,11 +110,7 @@ struct GlobalRoutingManager: public ReferenceCountedObject
 
 		virtual ~CableTargetBase() {};
 
-		virtual bool shouldBeCleanedUp() const { return false; }
-
 		virtual void sendValue(double v) = 0;
-
-		virtual void sendData(const void* data, size_t numBytes) {};
 
 		virtual Path getTargetIcon() const = 0;
 
@@ -114,13 +125,8 @@ struct GlobalRoutingManager: public ReferenceCountedObject
         {
             target->onValue(v);
         }
-
-		void sendData(const void* data, size_t numBytes) override
-        {
-	        target->onData(data, numBytes);
-        }
-
-        runtime_target::typed_target<double>* target;
+        
+        runtime_target::target_base<double>* target;
     };
     
 	struct RoutingIcons : public PathFactory
@@ -173,7 +179,7 @@ struct GlobalRoutingManager: public ReferenceCountedObject
 	struct Cable : public SlotBase,
                    public runtime_target::source_base
 	{
-        using TargetType = runtime_target::typed_target<double>;
+        using TargetType = runtime_target::target_base<double>;
         
 		Cable(const String& id_);;
 
@@ -188,9 +194,7 @@ struct GlobalRoutingManager: public ReferenceCountedObject
         {
             return runtime_target::RuntimeTarget::GlobalCable;
         }
-
-		static void sendDataStatic(source_base* sb, void* data, size_t numBytes);
-
+        
         static void setValueStatic(source_base* sb, double newValue)
         {
             auto c = static_cast<Cable*>(sb);
@@ -199,26 +203,18 @@ struct GlobalRoutingManager: public ReferenceCountedObject
         
         
         
-        template <bool Add> static bool connectStatic(runtime_target::source_base* sb, runtime_target::target_base* target)
+        template <bool Add> static bool connectStatic(runtime_target::source_base* sb, TargetType* target)
         {
 			auto c = dynamic_cast<Cable*>(sb);
-			auto tt = dynamic_cast<TargetType*>(target);
 
             auto& rt = c->initRuntimeTarget();
             
             if(Add)
             {
-                auto ok = rt.runtimeTargets.addIfNotAlreadyThere(tt);
-
-				if(ok && c->lastData.getSize() > 0)
-				{
-					tt->onData(c->lastData.getData(), c->lastData.getSize());
-				}
-
-				return ok;
+                return rt.runtimeTargets.addIfNotAlreadyThere(target);
             }
             else
-                return rt.runtimeTargets.removeAllInstancesOf(tt) != 0;
+                return rt.runtimeTargets.removeAllInstancesOf(target) != 0;
 
         }
         
@@ -226,10 +222,9 @@ struct GlobalRoutingManager: public ReferenceCountedObject
         {
             auto c = source_base::createConnection();
             
-            c.connectFunction = connectStatic<true>;
-            c.disconnectFunction = connectStatic<false>;
+            c.connectFunction = (void*)connectStatic<true>;
+            c.disconnectFunction = (void*)connectStatic<false>;
             c.sendBackFunction = (void*)setValueStatic;
-			c.sendBackDataFunction = (void*)sendDataStatic;
             
             return c;
         }
@@ -242,12 +237,11 @@ struct GlobalRoutingManager: public ReferenceCountedObject
 		void addTarget(CableTargetBase* n);
 		void removeTarget(CableTargetBase* n);
 
-        void sendData(CableTargetBase* source, void* data, size_t numBytes);
-
-        void sendValue(CableTargetBase* source, double v);
+        
+        
+		void sendValue(CableTargetBase* source, double v);
 		double getLastValue() const { return lastValue; }
 
-		MemoryBlock lastData;
 		double lastValue = 0.0;
 		CableTargetBase::List targets;
         
@@ -257,12 +251,6 @@ struct GlobalRoutingManager: public ReferenceCountedObject
             {
                 for(auto t: runtimeTargets)
                     t->onValue(v);
-            }
-
-			void sendData(const void* data, size_t numBytes) override
-            {
-	            for(auto t: runtimeTargets)
-					t->onData(data, numBytes);
             }
 
             Path getTargetIcon() const override
@@ -377,50 +365,6 @@ struct GlobalRoutingManager: public ReferenceCountedObject
 	LambdaBroadcaster<OSCConnectionData::Ptr> oscListeners;
 
 	hise::AdditionalEventStorage additionalEventStorage;
-	struct GlobalUUIDManager: public hise::DllBoundaryUUIDManager
-	{
-		/** Override this method, make sure that the initialId is unique and update the char buffer and length accordingly. */
-		void registerUUID(void* obj, char* initialId, int& numBytes) override
-		{
-			if (uuids.find(obj) != uuids.end())
-			{
-				auto x = uuids.at(obj);
-
-				numBytes = x.length();
-				memcpy(initialId, x.begin().getAddress(), numBytes);
-				return;
-			}
-
-			String id(initialId, numBytes);
-
-			int numFound = 0;
-
-			for (const auto& existing : uuids)
-			{
-				if (existing.second == id)
-					numFound++;
-			}
-
-			if (numFound != 0)
-				id << String(numFound);
-
-			uuids[obj] = id;
-
-			numBytes = (int)id.getNumBytesAsUTF8();
-			memcpy(initialId, id.begin().getAddress(), numBytes);
-		}
-
-		/** Override this method and remove the UUID for the given object. */
-		bool deregisterUUID(void* obj) override
-		{
-			return uuids.erase(obj) != 0;
-		}
-
-		/** Removes all UUIDs. */
-		void clearUUIDs() override { uuids.clear(); }
-
-		std::map<void*, juce::String> uuids;
-	} uuidManager;
 
 	void sendOSCError(const String& r);
 

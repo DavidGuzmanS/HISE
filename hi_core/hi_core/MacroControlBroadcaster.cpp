@@ -155,18 +155,8 @@ namespace hise { using namespace juce;
 			}
 
 			newValue = pd->getParameterRange().convertTo0to1(newValue);
-
-			for(auto p: ap->getParameters())
-			{
-				if(auto typed = dynamic_cast<HisePluginParameterBase*>(p))
-				{
-					if(typed->getType() == HisePluginParameterBase::Type::Macro && typed->matchesIndex(macroIndex))
-					{
-						p->setValueNotifyingHost(newValue);
-						break;
-					}
-				}
-			}
+			
+			ap->setParameterNotifyingHost(macroIndex, newValue);
 		}
 
 #endif
@@ -227,11 +217,7 @@ namespace hise { using namespace juce;
         
 
 #if USE_BACKEND
-
-		auto mc = thisAsSynth->getMainController();
-		auto numMacros = HISE_GET_PREPROCESSOR(mc, HISE_NUM_MACROS);
-
-		for(int i = 0; i < numMacros; i++)
+		for(int i = 0; i < HISE_NUM_MACROS; i++)
 		{
 			auto md = getMacroControlData(i);
 
@@ -352,12 +338,9 @@ namespace hise { using namespace juce;
 MacroControlBroadcaster::MacroControlBroadcaster(ModulatorSynthChain *chain):
 	thisAsSynth(chain)
 {
-	auto mc = thisAsSynth->getMainController();
-	auto numMacros = HISE_GET_PREPROCESSOR(mc, HISE_NUM_MACROS);
-
-	for(int i = 0; i < numMacros; i++)
+	for(int i = 0; i < HISE_NUM_MACROS; i++)
 	{
-		macroControls.add(new MacroControlData(i, *this, mc));
+		macroControls.add(new MacroControlData(i, *this, chain->getMainController()));
 	}
 }
 
@@ -408,12 +391,11 @@ void MacroControlBroadcaster::MacroControlledParameterData::setAttribute(double 
 				d->call(value, dispatch::DispatchType::sendNotificationSync);
 		}
 		else
-		{
-			controlledProcessor.get()->setAttribute(parameter, value, sendNotificationSync);
-			//controlledProcessor.get()->setAttribute(parameter, value, readOnly ? sendNotificationSync : dontSendNotification);
-		}
+			controlledProcessor.get()->setAttribute(parameter, value, readOnly ? sendNotificationSync : dontSendNotification);
 	}
+	
 };
+
 		
 
 bool MacroControlBroadcaster::MacroControlledParameterData::matchesCustomAutomation(const Identifier& id) const
@@ -561,9 +543,7 @@ void MacroControlBroadcaster::loadMacrosFromValueTree(const ValueTree &v, bool l
 	{
 		sendMacroConnectionChangeMessageForAll(false);
 
-		auto numMacros = HISE_GET_PREPROCESSOR(thisAsSynth->getMainController(), HISE_NUM_MACROS);
-
-        int numToRestore = jmin(numMacros, macroControls.size(), macroData.getNumChildren());
+        int numToRestore = jmin(HISE_NUM_MACROS, macroControls.size(), macroData.getNumChildren());
         
         for(int i = 0; i < numToRestore; i++)
         {
@@ -591,10 +571,8 @@ void MacroControlBroadcaster::loadMacroValuesFromValueTree(const ValueTree &v)
         // The macro controls could not be found...
         return;
     }
-
-	auto numMacros = HISE_GET_PREPROCESSOR(thisAsSynth->getMainController(), HISE_NUM_MACROS);
-
-	int numToRestore = jmin(numMacros, macroControls.size(), data.getNumChildren());
+    
+    int numToRestore = jmin(HISE_NUM_MACROS, macroControls.size(), data.getNumChildren());
     
 	for (int i = 0; i < numToRestore; i++)
 	{
@@ -876,7 +854,7 @@ void MacroControlBroadcaster::setMacroControl(int macroIndex, float newValue, No
 		// Skip sending parameter changes before everything is loaded
 		if(macroIndex >= p->getNumParameters()) return;
 
-#if USE_BACKEND && !HISE_JUCE8
+#if USE_BACKEND
 		p->setParameterNotifyingHost(macroIndex, newValue / 127.0f);
 #endif
 	}

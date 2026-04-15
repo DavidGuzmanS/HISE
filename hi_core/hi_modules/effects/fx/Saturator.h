@@ -42,9 +42,7 @@ class SaturatorEffect : public MasterEffectProcessor
 {
 public:
 
-	SET_PROCESSOR_NAME("Saturator", "Saturator", "")
-
-	static ProcessorMetadata createMetadata();
+	SET_PROCESSOR_NAME("Saturator", "Saturator", "Applies a simple saturation effect")
 
 	enum InternalChains
 	{
@@ -74,6 +72,7 @@ public:
 
 	void setInternalAttribute(int parameterIndex, float newValue) override;;
 	float getAttribute(int parameterIndex) const override;
+	float getDefaultValue(int parameterIndex) const override;
 
 	void restoreFromValueTree(const ValueTree &v) override;;
 	ValueTree exportAsValueTree() const override;

@@ -53,100 +53,11 @@ namespace hise { using namespace juce;
 *
 */
 class CurveEq: public MasterEffectProcessor,
-               public ProcessorWithStaticExternalData,
-			   public ProcessorFilterStatistics::Holder
+               public ProcessorWithStaticExternalData
 {
 public:
 
-	SET_PROCESSOR_NAME("CurveEq", "Parametriq EQ", "")
-
-	using BandParameter = ProcessorFilterStatistics::BandParameter;
-
-	static ProcessorMetadata createMetadata();
-
-	ProcessorMetadata getMetadata() const override
-	{
-		auto md = createMetadata().asDynamic();
-		
-		static const StringArray parameterNames({
-			"Gain", 
-			"Freq", 
-			"Q", 
-			"Enabled", 
-			"Type", 
-		});
-
-		static const StringArray modeNames({
-			"LowPass",
-			"HighPass",
-			"LowShelf",
-			"HighShelf",
-			"Peak"
-		});
-
-		static const StringArray descriptions({
-			"The gain in decibels if supported from the filter type.",
-			"The frequency in Hz.",
-			"The bandwidth of the filter if supported.",
-			"the state of the filter band.",
-			"the filter type of the filter band."
-		});
-
-		std::array<float, BandParameter::numBandParameters> defaultValues({
-			0.0f,
-			1500.0f,
-			1.0f,
-			1.0f,
-			4.0f
-		});
-
-		for (int i = 0; i < getNumFilterBands(); i++)
-		{
-			using Range = scriptnode::InvertableParameterRange;
-
-			for (int m = 0; m < BandParameter::numBandParameters; m++)
-			{
-				ProcessorMetadata::ParameterMetadata pd(getParameterIndex(i, m));
-				
-				pd = pd.withId("Band " + String(i + 1) + " " + parameterNames[m]);
-				pd = pd.withDescription(descriptions[m]);
-				pd = pd.withDefault(defaultValues[m]);
-
-				switch ((BandParameter)m)
-				{
-				case BandParameter::Gain:
-					pd = pd.withSliderMode(HiSlider::Decibel, { -18.0, 18.0 });
-					pd = pd.withValueToTextConverter("Decibel");
-					break;
-				case BandParameter::Freq:
-					pd = pd.withSliderMode(HiSlider::Frequency, Range(20.0, 20000.0).withCentreSkew(1500.0));
-					pd = pd.withValueToTextConverter("Frequency");
-					break;
-				case BandParameter::Q:
-					pd = pd.withRange(Range(0.3, 8.0).withCentreSkew(1.0));
-					break;
-				case BandParameter::Enabled:
-					pd = pd.asToggle();
-					break;
-				case BandParameter::Type:
-					pd = pd.withValueList(modeNames, 0);
-					break;
-				}
-
-				if (m == BandParameter::Gain)
-				{
-					auto type = (FilterType)(int)getAttribute(getParameterIndex(i, BandParameter::Type));
-
-					if (type == FilterType::LowPass || type == FilterType::HighPass)
-						pd = pd.asDisabled();
-				}
-				
-				md = md.withParameter(pd.asDynamic());
-			}
-		}
-
-		return md;
-	}
+	SET_PROCESSOR_NAME("CurveEq", "Parametriq EQ", "A parametric EQ with a variable amount of filter bands.")
 
 	enum Parameters
 	{
@@ -162,6 +73,17 @@ public:
 		HighShelf, ///< a shelving eq for the high end
 		Peak, ///< a peak eq
 		numFilterTypes
+	};
+
+	/** The parameters for each band. */
+	enum BandParameter
+	{
+		Gain = 0, ///< the gain (not available on HP/LP)
+		Freq, ///< the center frequency
+		Q, ///< the q factor (not available on HP/LP)
+		Enabled, ///< enables / disables the band
+		Type, ///< defines the type of the band @see FilterType
+		numBandParameters
 	};
 
 #if HISE_USE_SVF_FOR_CURVE_EQ
@@ -203,7 +125,7 @@ public:
 
 	int getParameterIndex(int filterIndex, int parameterType) const
 	{
-		return filterIndex * BandParameter::numBandParameters + parameterType;
+		return filterIndex * numBandParameters + parameterType;
 	}
 
 	float getAttribute(int index) const override;;
@@ -302,10 +224,11 @@ public:
 			filterBands.insert(insertIndex, f);
 		}
 		
-		updateParameterSlots();
-
 		sendBroadcasterMessage("BandAdded", insertIndex == -1 ? filterBands.size() - 1 : insertIndex);
+
 		sendOtherChangeMessage(dispatch::library::ProcessorChangeEvent::Custom);
+
+		updateParameterSlots();
 	}
 
 	void removeFilterBand(int filterIndex)
@@ -317,10 +240,11 @@ public:
 			filterBands.remove(filterIndex);
 		}
 		
-		updateParameterSlots();
-
 		sendBroadcasterMessage("BandRemoved", filterIndex == -1 ? filterBands.size() - 1 : filterIndex);
+
 		sendOtherChangeMessage(dispatch::library::ProcessorChangeEvent::Custom);
+
+		updateParameterSlots();
 	}
 
 	void prepareToPlay(double sampleRate, int samplesPerBlock) override
@@ -348,7 +272,7 @@ public:
 
 		v.setProperty("NumFilters", filterBands.size(), nullptr);
 
-		for(int i = 0; i < filterBands.size() * BandParameter::numBandParameters; i++)
+		for(int i = 0; i < filterBands.size() * numBandParameters; i++)
 		{
 			v.setProperty("Band" + String(i), getAttribute(i), nullptr);
 		}
@@ -383,7 +307,7 @@ public:
 			std::swap(filterBands, newFilters);
 		}
 
-		for(int i = 0; i < numFilters * BandParameter::numBandParameters; i++)
+		for(int i = 0; i < numFilters * numBandParameters; i++)
 		{
             const float value = v.getProperty("Band" + String(i), 0.0f);
             setAttribute(i, value, dontSendNotification);
@@ -391,7 +315,7 @@ public:
 
 		enableSpectrumAnalyser(v.getProperty("FFTEnabled", false));
 
-		sendOtherChangeMessage(dispatch::library::ProcessorChangeEvent::Custom);
+		sendOtherChangeMessage(dispatch::library::ProcessorChangeEvent::Preset);
 
 		updateParameterSlots();
 	}
@@ -406,55 +330,15 @@ public:
 
 	int getNumChildProcessors() const override { return 0; };
 
+	int getNumAttributes() const override { return BandParameter::numBandParameters * filterBands.size(); }
+
 	Processor *getChildProcessor(int /*processorIndex*/) override { return nullptr; };
 
 	const Processor *getChildProcessor(int /*processorIndex*/) const override { return nullptr; };
 
 	ProcessorEditorBody *createEditor(ProcessorEditor *parentEditor)  override;
 
-	
-	
-
-	struct CurveEqFilterStats: public ProcessorFilterStatistics
-	{
-		CurveEqFilterStats(CurveEq* eq_):
-		  ProcessorFilterStatistics(eq_),
-		  eq(eq_)
-		{}
-
-		int getNumFilterBands() const override { return eq->getNumFilterBands(); }
-		void removeFilterBand(int index) override { eq->removeFilterBand(index); }
-
-		int getAttributeIndex(int filterIndex, CurveEq::BandParameter bp) const override
-		{
-			return eq->getParameterIndex(filterIndex, (int)bp);
-		}
-
-		StringArray getFilterModes() const override
-		{
-			return { "Low Pass", "High Pass", "Low Shelf", "High Shelf", "Peak" };
-		}
-		FilterDataObject::CoefficientData getCoefficients(int index) override { return eq->getCoefficients(index); }
-		hise::SimpleReadWriteLock& getEqLock() const override { return eq->bandLock; }
-		void addFilterBand(int index, double freq, double gain) override { eq->addFilterBand(freq, gain, index); }
-
-		SimpleRingBuffer::Ptr getFFTBuffer() override { return eq->getFFTBuffer(); }
-
-		String getTypeString(int filterIndex) const override
-		{
-			if(auto b = eq->getFilterBand(filterIndex))
-				return b->getModes()[b->getType()];
-
-			return {};
-		}
-
-		WeakReference<CurveEq> eq;
-	};
-
-	ProcessorFilterStatistics::Ptr createFilterStatistics() override
-	{
-		return new CurveEqFilterStats(this);
-	}
+	LambdaBroadcaster<String, var> eqBroadcaster;
 
 private:
 

@@ -88,7 +88,7 @@ bool RangeHelpers::isBypassIdentity(InvertableParameterRange d)
 
 bool RangeHelpers::isIdentity(InvertableParameterRange d)
 {
-	if (d.rng.start == 0.0 && d.rng.end == 1.0 && d.rng.skew == 1.0 && d.rng.interval == 0.0 && !d.inv)
+	if (d.rng.start == 0.0 && d.rng.end == 1.0 && d.rng.skew == 1.0 && !d.inv)
 		return true;
 
 	return false;
@@ -180,81 +180,7 @@ void RangeHelpers::storeDoubleRange(ValueTree& d, InvertableParameterRange r, Un
 	}
 	
 	d.setProperty(ri(rangeIdSet, RangeIdentifier::StepSize), r.rng.interval, um);
-
-	if(rangeIdSet == IdSet::ScriptComponents)
-	{
-		if(r.rng.skew != 1.0)
-		{
-			auto midPosition = r.convertFrom0to1(0.5, false);
-			midPosition = std::round(midPosition * 100.0) / 100.0;
-			d.setProperty(ri(rangeIdSet, RangeIdentifier::SkewFactor), midPosition, um);
-		}
-	}
-	else
-	{
-		d.setProperty(ri(rangeIdSet, RangeIdentifier::SkewFactor), r.rng.skew, um);
-	}
-
-	
-}
-
-std::pair<bool, double> RangeHelpers::getDefaultValue(const var& obj)
-{
-	double defaultValue = 0.0;
-
-	// the default value is not part of the RangeHelper::IdSet so we must fetch this manually
-	if(obj.hasProperty(PropertyIds::DefaultValue))
-		defaultValue = (double)obj[PropertyIds::DefaultValue];
-	else if(obj.hasProperty("defaultValue"))
-		defaultValue = (double)obj["defaultValue"];
-	else
-		return { false, 0.0 };
-		
-	FloatSanitizers::sanitizeDoubleNumber(defaultValue);
-
-	auto idSet = getIdSetForJSON(obj);
-	auto rng = getDoubleRange(obj, idSet);
-
-	if(defaultValue < rng.rng.start)
-		defaultValue = rng.getRange().getStart();
-	if(defaultValue > rng.rng.end)
-		defaultValue = rng.getRange().getEnd();
-
-	return {true, defaultValue};
-}
-
-std::pair<bool, double> RangeHelpers::parseMidPointValue(const var& mp)
-{
-	// disabled sentinel
-	if (mp.isString())
-	{
-		auto s = mp.toString().trim();
-		if (s == "disabled")
-			return { false, DBL_MAX };
-
-		if (s.isEmpty())
-			return { false, 0.0 };
-
-		char* endPtr = nullptr;
-		const auto raw = s.toRawUTF8();
-		const double v = std::strtod(raw, &endPtr);
-		if (endPtr != raw && *endPtr == '\0' && std::isfinite(v))
-		{
-			double sanitized = v;
-			FloatSanitizers::sanitizeDoubleNumber(sanitized);
-			return { true, sanitized };
-		}
-
-		return { false, 0.0 };
-	}
-	// numeric var
-	if (mp.isInt() || mp.isInt64() || mp.isDouble() || mp.isBool())
-	{
-		double v = (double)mp;
-		FloatSanitizers::sanitizeDoubleNumber(v);
-		return { true, v };
-	}
-	return { false, 0.0 };
+	d.setProperty(ri(rangeIdSet, RangeIdentifier::SkewFactor), r.rng.skew, um);
 }
 
 void RangeHelpers::storeDoubleRange(var& obj, InvertableParameterRange r, IdSet rangeIdSet)
@@ -285,19 +211,7 @@ void RangeHelpers::storeDoubleRange(var& obj, InvertableParameterRange r, IdSet 
 	}
 
 	d->setProperty(ri(rangeIdSet, RangeIdentifier::StepSize), r.rng.interval);
-
-	if(rangeIdSet == IdSet::ScriptComponents)
-	{
-		if(r.rng.skew != 1.0)
-		{
-			auto midPosition = r.convertFrom0to1(0.5, false);
-			d->setProperty(ri(rangeIdSet, RangeIdentifier::SkewFactor), midPosition);
-		}
-	}
-	else
-	{
-		d->setProperty(ri(rangeIdSet, RangeIdentifier::SkewFactor), r.rng.skew);
-	}
+	d->setProperty(ri(rangeIdSet, RangeIdentifier::SkewFactor), r.rng.skew);
 }
 
 bool RangeHelpers::equalsWithError(const InvertableParameterRange& r1, const InvertableParameterRange& r2, double maxError)
@@ -317,15 +231,6 @@ bool RangeHelpers::equalsWithError(const InvertableParameterRange& r1, const Inv
 
 	return thisError < hmath::abs(maxError);
 
-}
-
-bool RangeHelpers::isEqual(const InvertableParameterRange& r1, const InvertableParameterRange& r2)
-{
-	return  r1.rng.start == r2.rng.start &&
-		r1.rng.end == r2.rng.end &&
-		r1.rng.skew == r2.rng.skew &&
-		r1.rng.interval == r2.rng.interval &&
-		r1.inv == r2.inv;
 }
 
 scriptnode::InvertableParameterRange RangeHelpers::getDoubleRange(const ValueTree& t, IdSet set)
@@ -371,23 +276,14 @@ scriptnode::InvertableParameterRange RangeHelpers::getDoubleRange(const ValueTre
 	{
 		if(set == IdSet::ScriptComponents)
 		{
-			auto midPos = t[skewId];
-
-			auto mp = parseMidPointValue(t[skewId]);
-
-			if (mp.first)
-			{
-				if (mp.second > r.rng.start && mp.second < r.rng.end)
-					r.rng.setSkewForCentre(jlimit(r.rng.start, r.rng.end, mp.second));
-			}
+			r.rng.setSkewForCentre(jlimit(r.rng.start, r.rng.end, (double)t[skewId]));
 		}
 		else
 		{
 			r.rng.skew = jlimit(0.001, 100.0, (double)t[skewId]);
 		}
 	}
-
-	r.checkIfIdentity();
+		
 
 	return r;
 }
@@ -403,91 +299,6 @@ scriptnode::InvertableParameterRange RangeHelpers::getDoubleRange(const var& obj
 	}
 
 	return getDoubleRange(v, set);
-}
-
-RangeHelpers::IdSet RangeHelpers::getIdSetForJSON(const var& obj)
-{
-	Array<Identifier> thisIds;
-
-	if(auto o = obj.getDynamicObject())
-	{
-		for(auto& nv: o->getProperties())
-			thisIds.add(nv.name);
-	}
-
-	for(const auto& id: thisIds)
-	{
-		if(getRangeIds(false, IdSet::scriptnode).contains(id))
-			return IdSet::scriptnode;
-		if(getRangeIds(false, IdSet::ScriptComponents).contains(id))
-			return IdSet::ScriptComponents;
-		if(getRangeIds(false, IdSet::MidiAutomation).contains(id))
-			return IdSet::MidiAutomation;
-		if(getRangeIds(false, IdSet::MidiAutomationFull).contains(id))
-			return IdSet::MidiAutomationFull;
-	}
-
-	return IdSet::scriptnode;
-}
-
-RangeHelpers::RangePresets::RangePresets()
-{
-	auto createDefaultRange = [&](const String & id, InvertableParameterRange d, double midPoint = -10000000.0, parameter::pod::TextValueConverters tc=parameter::pod::TextValueConverters::Undefined)
-	{
-		Preset p;
-		p.id = id;
-		p.nr = d;
-		p.textConverter = parameter::pod::getTextValueConverterNames()[(int)tc];
-		p.index = presets.size() + 1;
-
-		if (d.getRange().contains(midPoint))
-			p.nr.setSkewForCentre(midPoint);
-
-		presets.add(p);
-	};
-
-	createDefaultRange("0-1", { 0.0, 1.0 }, 0.5, parameter::pod::TextValueConverters::NormalizedPercentage);
-	createDefaultRange("Inverted 0-1", InvertableParameterRange().inverted(), -1.0, parameter::pod::TextValueConverters::NormalizedPercentage);
-	createDefaultRange("Decibel Gain", { -100.0, 0.0, 0.1 }, -12.0, parameter::pod::TextValueConverters::Decibel);
-	createDefaultRange("1-16 steps", { 1.0, 16.0, 1.0 });
-	createDefaultRange("Osc LFO", { 0.0, 10.0, 0.0, 1.0 }, parameter::pod::TextValueConverters::Frequency);
-	createDefaultRange("Osc Freq", { 20.0, 20000.0, 0.0 }, 1000.0, parameter::pod::TextValueConverters::Frequency);
-	createDefaultRange("Linear 0-20k Hz", { 0.0, 20000.0, 0.0 }, -1.0, parameter::pod::TextValueConverters::Frequency);
-	createDefaultRange("Freq Ratio Harmonics", { 1.0, 16.0, 1.0 });
-	createDefaultRange("Freq Ratio Detune Coarse", { 0.5, 2.0, 0.0 }, 1.0, parameter::pod::TextValueConverters::NormalizedPercentage);
-	createDefaultRange("Freq Ratio Detune Fine", { 1.0 / 1.1, 1.1, 0.0 }, 1.0);
-
-#if 0
-	ValueTree v("Ranges");
-
-	for (const auto& p : presets)
-		v.addChild(p.exportAsValueTree(), -1, nullptr);
-
-	auto xml = v.createXml();
-	fileToLoad.replaceWithText(xml->createDocument(""));
-#endif
-}
-
-
-
-RangeHelpers::RangePresets::~RangePresets()
-{
-
-}
-
-void RangeHelpers::RangePresets::Preset::restoreFromValueTree(const ValueTree& v)
-{
-	nr = RangeHelpers::getDoubleRange(v);
-	id = v[PropertyIds::ID].toString();
-	textConverter = v[PropertyIds::TextToValueConverter].toString();
-}
-
-juce::ValueTree RangeHelpers::RangePresets::Preset::exportAsValueTree() const
-{
-	ValueTree v("Range");
-	v.setProperty(PropertyIds::ID, id, nullptr);
-	RangeHelpers::storeDoubleRange(v, nr, nullptr);
-	return v;
 }
 
 namespace parameter
@@ -519,69 +330,22 @@ namespace parameter
 		RangeHelpers::storeDoubleRange(p, info.toRange(), nullptr);
 
 		p.setProperty(PropertyIds::ID, info.getId(), nullptr);
-		p.setProperty(PropertyIds::TextToValueConverter, pod::getTextValueConverterNames()[(int)info.textConverter], nullptr);
-
-		PageInfo pi(info);
-
-		p.setProperty(PropertyIds::Page, pi.page, nullptr);
-		p.setProperty(PropertyIds::SubGroup, pi.group, nullptr);
 		p.setProperty(PropertyIds::Value, info.defaultValue, nullptr);
 		p.setProperty(PropertyIds::DefaultValue, info.defaultValue, nullptr);
 		return p;
 	}
 
-	scriptnode::parameter::data data::withRange(InvertableParameterRange r) const
+	data data::withRange(InvertableParameterRange r)
 	{
 		data copy(*this);
 		copy.info.setRange(r);
 		return copy;
 	}
 
-	scriptnode::parameter::data data::withClonedParameters() const
-	{
-		data copy(*this);
-
-		if(parameterNames != nullptr)
-			copy.parameterNames = parameterNames->createCopy();
-
-		return copy;
-	}
-
-	hise::ValueToTextConverter data::getValueToTextConverter() const
-	{
-		if (parameterNames != nullptr)
-		{
-			return ValueToTextConverter::createForOptions(getParameterNames().toStringArray());
-		}
-
-		switch (info.textConverter)
-		{
-		case pod::Frequency: return ValueToTextConverter::createForMode("Frequency");
-		case pod::Time:		 return ValueToTextConverter::createForMode("Time");
-		case pod::TempoSync: return ValueToTextConverter::createForMode("TempoSync");
-		case pod::Pan:		 return ValueToTextConverter::createForMode("Pan");
-		case pod::NormalizedPercentage:
-			return ValueToTextConverter::createForMode("NormalizedPercentage");
-		case pod::Decibel:   return ValueToTextConverter::createForMode("Decibel");
-		case pod::Undefined:
-		case pod::numTextValueConverters:
-		default: return {};
-		}
-	}
-
 	void data::setParameterValueNames(const StringArray& valueNames)
 	{
-		MemoryOutputStream mos;
+		parameterNames = valueNames;
 
-		for(const auto& sa: valueNames)
-			mos.writeString(sa);
-
-		mos.flush();
-
-		parameterNames = new RefCountedHeapBuffer((int)mos.getDataSize());
-
-		memcpy(parameterNames->getData(), mos.getData(), mos.getDataSize());
-		
 		if (valueNames.size() > 1)
 			setRange({ 0.0, (double)valueNames.size() - 1.0, 1.0 });
 	}
@@ -665,30 +429,12 @@ namespace parameter
 		return data;
 	}
 
-	juce::StringArray pod::getTextValueConverterNames()
-	{
-		return {
-			"Undefined",
-			"Frequency",
-			"Time",
-			"TempoSync",
-			"Pan",
-			"NormalizedPercentage",
-			"Decibel",
-			"Semitones",
-			"Undefined"
-		};
-	}
-
 	pod::pod(const ValueTree& v)
 	{
 		clearParameterName();
-		clearPageInfo();
 
 		index = v.getParent().indexOf(v);
 		ok = setId(v[PropertyIds::ID].toString());
-
-		setPageGroup(v[PropertyIds::Page].toString(), v[PropertyIds::SubGroup].toString());
 
 		auto range = RangeHelpers::getDoubleRange(v);
 		min = (DataType)range.rng.start;
@@ -697,34 +443,21 @@ namespace parameter
 		skew = (DataType)range.rng.skew;
 		interval = (DataType)range.rng.interval;
 		defaultValue = (DataType)v[PropertyIds::Value];
-
-		auto tv = getTextValueConverterNames().indexOf(v[PropertyIds::TextToValueConverter].toString());
-
-		if(tv != -1)
-		{
-			textConverter = (TextValueConverters)tv;
-		}
 	}
 
 	pod::pod(MemoryInputStream& mis)
 	{
 		clearParameterName();
-		clearPageInfo();
 
 		auto safe = mis.readByte();
 
-		if (safe == 92)
+		if (safe == 91)
 		{
 			ok = true;
-
-			textConverter = (TextValueConverters)mis.readByte();
 			index = mis.readInt();
 			auto s = mis.readString();
 
 			ok = setId(s);
-
-			PageInfo pi(mis);
-			setPageGroup(pi.page, pi.group);
 
 			min = mis.readFloat();
 			max = mis.readFloat();
@@ -743,56 +476,8 @@ namespace parameter
 		s << "id: " << parameterName << nl;
 		s << "min: " << min << nl;
 		s << "max: " << max << nl;
-		s << "converter: " << getTextValueConverterNames()[(int)textConverter];
-		
-		PageInfo pd(*this);
-
-		if(pd)
-		{
-			s << "page: " << pd.page << nl;
-			s << "group: " << pd.group << nl;
-		}
 
 		return s;
-	}
-
-	bool pod::setPageName(const String& newPageName)
-	{
-		if (newPageName.isNotEmpty() && isPositiveAndBelow(newPageName.length(), MaxPageNameLength))
-		{
-			memcpy(pageName, newPageName.getCharPointer().getAddress(), newPageName.length());
-			return true;
-		}
-		else
-		{
-			memset(pageName, 0, MaxPageNameLength);
-			return false;
-		}
-	}
-
-	bool pod::setGroupName(const String& newGroupName)
-	{
-		if (newGroupName.isNotEmpty() && isPositiveAndBelow(newGroupName.length(), MaxPageNameLength))
-		{
-			memcpy(subGroupName, newGroupName.getCharPointer().getAddress(), newGroupName.length());
-			return true;
-		}
-		else
-		{
-			memset(subGroupName, 0, MaxPageNameLength);
-			return false;
-		}
-	}
-
-	void pod::clearParameterName()
-	{
-		memset(parameterName, 0, MaxParameterNameLength);
-	}
-
-	void pod::clearPageInfo()
-	{
-		memset(pageName, 0, MaxPageNameLength);
-		memset(subGroupName, 0, MaxPageNameLength);
 	}
 
 	void pod::setRange(const InvertableParameterRange& r)
@@ -829,30 +514,14 @@ namespace parameter
 		return false;
 	}
 
-	
-	void pod::setPageGroup(const String& p, const String& g)
-	{
-		clearPageInfo();
-
-		if (p.isNotEmpty() && isPositiveAndBelow(p.length(), MaxPageNameLength))
-			memcpy(pageName, p.getCharPointer().getAddress(), p.length());
-		if (g.isNotEmpty() && isPositiveAndBelow(g.length(), MaxPageNameLength))
-			memcpy(subGroupName, g.getCharPointer().getAddress(), g.length());
-	}
-
 	void pod::writeToStream(MemoryOutputStream& b)
 	{
-		b.writeByte(92);
-		b.writeByte((uint8)textConverter);
+		b.writeByte(91);
 		b.writeInt(index);
 
 		String id(parameterName);
 
 		b.writeString(id);
-
-		PageInfo pd(*this);
-		pd.writeToStream(b);
-
 		b.writeFloat(min);
 		b.writeFloat(max);
 		b.writeFloat(defaultValue);
@@ -974,240 +643,6 @@ bool OSCConnectionData::operator==(const OSCConnectionData& otherData) const
 		}
 
 		return true;
-	}
-
-	return false;
-}
-
-PageInfo::Tree::Tree(const ParameterDataList& list)
-{
-	for (const auto& p : list)
-		hasLayout |= (bool)PageInfo(p.info);
-
-	if (!hasLayout)
-		flatList = list;
-	else
-	{
-		String currentPage = "";
-		String currentGroup = "";
-
-		for (const auto& p : list)
-		{
-			PageInfo tp(p.info);
-
-			if (tp.isPage())
-			{
-				currentPage = tp.page;
-			}
-
-			if (tp.isGroup())
-			{
-				currentGroup = tp.group;
-				hasTags = true;
-			}
-
-			getBucket(currentPage, currentGroup).add(p);
-		}
-
-		for (auto outerIt = pageTree.begin(); outerIt != pageTree.end(); )
-		{
-			auto& innerMap = outerIt->second;
-
-			// Remove empty inner maps (if those are maps themselves)
-			for (auto innerIt = innerMap.begin(); innerIt != innerMap.end(); )
-			{
-				if (innerIt->second.isEmpty())
-					innerIt = innerMap.erase(innerIt);
-				else
-					++innerIt;
-			}
-
-			// Now remove the outer entry if its inner map is empty
-			if (innerMap.empty())
-				outerIt = pageTree.erase(outerIt);
-			else
-				++outerIt;
-		}
-	}
-}
-
-int PageInfo::Tree::getNumMaxSlidersPerPage() const
-{
-	if (hasPageLayout())
-	{
-		auto numParameters = 0;
-
-		for (auto& p : pageTree)
-		{
-			auto numOnPage = 0;
-
-			for (auto& g : p.second)
-				numOnPage += g.second.size();
-
-			numParameters = jmax(numParameters, numOnPage);
-		}
-
-		return numParameters;
-	}
-	else
-	{
-		return flatList.size();
-	}
-}
-
-String PageInfo::Tree::getGroupIdForParameter(int parameterIndex) const
-{
-	for (const auto& p : pageTree)
-	{
-		for (const auto& g : p.second)
-		{
-			for (const auto& pr : g.second)
-			{
-				if (pr.info.index == parameterIndex)
-					return g.first;
-			}
-		}
-	}
-
-	return {};
-}
-
-juce::StringArray PageInfo::Tree::getPageNames() const
-{
-	StringArray sa;
-
-	for (const auto& p : pageTree)
-		sa.add(p.first);
-
-	return sa;
-}
-
-juce::StringArray PageInfo::Tree::getGroups(const String& page) const
-{
-	jassert(hasLayout);
-
-	StringArray sa;
-
-	for (const auto& p : pageTree)
-	{
-		if (p.first == page)
-		{
-			for (auto& g : p.second)
-			{
-				sa.addIfNotAlreadyThere(g.first);
-			}
-		}
-	}
-
-	return sa;
-}
-
-scriptnode::ParameterDataList PageInfo::Tree::getList(const String& page, const String& group) const
-{
-	if (!hasLayout)
-		return flatList;
-
-	for (const auto& p : pageTree)
-	{
-		if (page == p.first)
-		{
-			for (const auto& g : p.second)
-			{
-				if (group == g.first)
-					return g.second;
-			}
-		}
-	}
-
-	jassertfalse;
-	return {};
-}
-
-scriptnode::ParameterDataList& PageInfo::Tree::getBucket(const String& page, const String& group)
-{
-	for (auto& p : pageTree)
-	{
-		if (page == p.first)
-		{
-			for (auto& g : p.second)
-			{
-				if (group == g.first)
-					return g.second;
-			}
-
-			p.second.push_back({ group, {} });
-			return p.second.back().second;
-		}
-	}
-
-	std::vector<std::pair<String, ParameterDataList>> newPage;
-	newPage.push_back({ group, {} });
-	pageTree.push_back({ page, newPage });
-	return pageTree.back().second.back().second;
-}
-
-PageInfo::PageInfo(InputStream& mis)
-{
-	auto m = mis.readByte();
-
-	if (m & HasPageMarker)
-		page = mis.readString();
-
-	if (m & HasGroupMarker)
-		group = mis.readString();
-}
-
-PageInfo::PageInfo(const parameter::pod& info) :
-	page(info.pageName),
-	group(info.subGroupName)
-{
-
-}
-
-void PageInfo::writeToStream(OutputStream& mos) const
-{
-	char m = 0;
-
-	if (isPage())
-		m |= HasPageMarker;
-
-	if (isGroup())
-		m |= HasGroupMarker;
-
-	mos.writeByte(m);
-
-	if (isPage())
-		mos.writeString(page);
-	if (isGroup())
-		mos.writeString(group);
-}
-
-std::unique_ptr<scriptnode::PageInfo::Tree> PageInfo::createPageTree(const ValueTree& parameterTree)
-{
-	jassert(parameterTree.getType() == PropertyIds::Parameters);
-
-	ParameterDataList list;
-
-	for (const auto& p : parameterTree)
-	{
-		parameter::data d;
-		d.info = parameter::pod(p);
-		list.add(std::move(d));
-	}
-
-	return std::make_unique<Tree>(list);
-}
-
-bool PageInfo::hasPageData(const ValueTree& pTree)
-{
-	jassert(pTree.getType() == PropertyIds::Parameters);
-
-	for (const auto& p : pTree)
-	{
-		if (p[PropertyIds::Page].toString().isNotEmpty())
-			return true;
-		if (p[PropertyIds::SubGroup].toString().isNotEmpty())
-			return true;
 	}
 
 	return false;

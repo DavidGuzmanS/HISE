@@ -55,7 +55,7 @@ namespace hise { using namespace juce;
 
 	String Modulation::getValueAsSemitone(float input)
 	{
-		return String(input*24.0f - 12.0f, 2) + " st";
+		return String(input*12.0f, 2) + " st";
 	}
 
 	void Modulation::applyModulationValue(Mode m, float& target, const float modValue)
@@ -80,67 +80,6 @@ namespace hise { using namespace juce;
 	Modulation::Mode Modulation::getMode() const noexcept
 	{ return modulationMode; }
 
-	scriptnode::modulation::ParameterMode Modulation::convertToScriptnodeMode(Mode m)
-	{
-		using namespace scriptnode::modulation;
-
-		switch (m)
-		{
-		case GainMode:
-			return scriptnode::modulation::ParameterMode::ScaleOnly;
-		case PitchMode:
-			return scriptnode::modulation::ParameterMode::Pitch;
-		case PanMode:
-			return scriptnode::modulation::ParameterMode::Pan;
-		case GlobalMode:
-			return scriptnode::modulation::ParameterMode::ScaleOnly;
-		case OffsetMode:
-			return scriptnode::modulation::ParameterMode::AddOnly;
-		case CombinedMode:
-			return scriptnode::modulation::ParameterMode::ScaleAdd;
-		case numModes:
-		default:
-			return scriptnode::modulation::ParameterMode::Disabled;
-		}
-	}
-
-	hise::Modulation::Mode Modulation::convertFromScriptnodeMode(scriptnode::modulation::ParameterMode m)
-	{
-		using namespace scriptnode::modulation;
-
-		switch (m)
-		{
-		case ParameterMode::ScaleAdd:
-			return Modulation::Mode::CombinedMode;
-		case ParameterMode::ScaleOnly:
-			return Modulation::Mode::GainMode;
-		case ParameterMode::AddOnly:
-			return Modulation::Mode::OffsetMode;
-		case ParameterMode::Pan:
-			return Modulation::Mode::PanMode;
-		case ParameterMode::Pitch:
-			return Modulation::Mode::PitchMode;
-		case ParameterMode::numModulationModes:
-		case ParameterMode::Disabled:
-		default: // should never happen...
-			jassertfalse;
-			return Modulation::Mode::numModes;
-			break;;
-		}
-	}
-
-	Modulation::Mode Modulation::getModeFromModProperties(const scriptnode::modulation::ParameterProperties& modProperties,
-		int parameterIndex)
-	{
-		if(parameterIndex == -1)
-			return Modulation::Mode::numModes;
-
-		using namespace scriptnode::modulation;
-
-		auto m = modProperties.getParameterMode(parameterIndex);
-		return convertFromScriptnodeMode(m);
-	}
-
 	float Modulation::PitchConverters::octaveRangeToSignedNormalisedRange(float octaveValue)
 	{
 		return (octaveValue / 12.0f);
@@ -160,13 +99,6 @@ namespace hise { using namespace juce;
 	{
 		return std::exp2(octaveValue / 12.0f);
 	}
-
-	float Modulation::PitchConverters::pitchFactorToOutputValue(float pitchFactor)
-	{
-		return jlimit<float>(0.0f, 1.0f, 0.5f + 0.5f * std::log2(pitchFactor));
-	}
-
-	
 
 	void Modulation::PitchConverters::octaveRangeToSignedNormalisedRange(float* octaveValues, int numValues)
 	{
@@ -207,8 +139,6 @@ float Modulation::calcIntensityValue(float calculatedModulationValue) const noex
 	case GainMode:		return calcGainIntensityValue(calculatedModulationValue);
 	case PanMode:		return calcPanIntensityValue(calculatedModulationValue);
 	case GlobalMode:	return calcGlobalIntensityValue(calculatedModulationValue);
-	case OffsetMode:	return calcOffsetIntensityValue(calculatedModulationValue);
-	case CombinedMode:  return calcGainIntensityValue(calculatedModulationValue);
 	default: jassertfalse; return 0.0f;
 	}
 }
@@ -230,11 +160,6 @@ float Modulation::calcPanIntensityValue(float calculatedModulationValue) const n
 }
 
 float Modulation::calcGlobalIntensityValue(float calculatedModulationValue) const noexcept
-{
-	return getIntensity() * calculatedModulationValue;
-}
-
-float Modulation::calcOffsetIntensityValue(float calculatedModulationValue) const
 {
 	return getIntensity() * calculatedModulationValue;
 }
@@ -261,7 +186,6 @@ void Modulation::setIntensityFromSlider(float sliderValue) noexcept
 	case PitchMode:	setIntensity(PitchConverters::octaveRangeToSignedNormalisedRange(sliderValue)); break;
 	case PanMode:	setIntensity(sliderValue / 100.0f); break;
 	case GlobalMode: setIntensity(sliderValue); break;
-	case OffsetMode: setIntensity(sliderValue); break;
     default: jassertfalse; break;
 	}
 }
@@ -275,18 +199,13 @@ void Modulation::setIsBipolar(bool shouldBeBiPolar) noexcept
 {
 	jassert(modulationMode == PitchMode || 
 			modulationMode == PanMode ||
-			modulationMode == GlobalMode ||
-			modulationMode == OffsetMode ||
-	        modulationMode == CombinedMode);
+			modulationMode == GlobalMode);
 
 	bipolar = shouldBeBiPolar;
 }
 
 float Modulation::getInitialValue() const noexcept
 {
-	if(getMode() == Mode::OffsetMode)
-		return 0.0f;
-
 	// Pitch mode is converted to 0.5...2.0 so it's still 1.0f;
 	return getMode() == PanMode ? 0.0f : 1.0f;
 }
@@ -305,8 +224,6 @@ float Modulation::getDisplayIntensity() const noexcept
 	case PitchMode:			return intensity * 12.0f; // return (log(intensity) / log(2.0f)) * 12.0f;
 	case PanMode:			return intensity * 100.0f;
 	case GlobalMode:		return intensity;
-	case OffsetMode:		return intensity;
-	case CombinedMode:		return intensity;
 	default:				jassertfalse; return 0.0f;
 	}
 }
@@ -383,9 +300,8 @@ float Modulator::getValueForTextConverter(float valueToConvert) const
 		outputValue = asMod->calcIntensityValue(outputValue);
 		break;
 	case Modulation::Mode::PitchMode:
-		return Modulation::PitchConverters::pitchFactorToOutputValue(valueToConvert);
 		// The intensity is already in the output value
-		//outputValue = hmath::log(outputValue) / hmath::log(2.0f);
+		outputValue = hmath::log(outputValue) / hmath::log(2.0f);
 		break;
 	default:
 		outputValue = asMod->calcIntensityValue(outputValue);
@@ -480,11 +396,10 @@ void TimeModulation::applyTimeModulation(float* destinationBuffer, int startInde
 
 		switch (modulationMode)
 		{
-		case GainMode:    applyGainModulation(mod, dest, 1.0f, smoothedIntensityValues, samplesToCopy); break;
-		case PitchMode:   applyPitchModulation(mod, dest, 1.0f, smoothedIntensityValues, samplesToCopy); break;
-		case PanMode:	  applyPanModulation(mod, dest, 1.0f, smoothedIntensityValues, samplesToCopy); break;
-		case GlobalMode:  applyGlobalModulation(mod, dest, 1.0f, smoothedIntensityValues, samplesToCopy); break;
-		case OffsetMode:  applyOffsetModulation(mod, dest, 1.0f, smoothedIntensityValues, samplesToCopy); break;
+		case GainMode: applyGainModulation(mod, dest, 1.0f, smoothedIntensityValues, samplesToCopy); break;
+		case PitchMode: applyPitchModulation(mod, dest, 1.0f, smoothedIntensityValues, samplesToCopy); break;
+		case PanMode:	applyPanModulation(mod, dest, 1.0f, smoothedIntensityValues, samplesToCopy); break;
+		case GlobalMode: applyGlobalModulation(mod, dest, 1.0f, smoothedIntensityValues, samplesToCopy); break;
             default: break;
 		}
 	}
@@ -492,11 +407,10 @@ void TimeModulation::applyTimeModulation(float* destinationBuffer, int startInde
 	{
 		switch (modulationMode)
 		{
-		case GainMode:	  applyGainModulation(mod, dest, getIntensity(), samplesToCopy); break;
-		case PitchMode:   applyPitchModulation(mod, dest, getIntensity(), samplesToCopy); break;
-		case PanMode:	  applyPanModulation(mod, dest, getIntensity(), samplesToCopy); break;
-		case GlobalMode:  applyGlobalModulation(mod, dest, getIntensity(), samplesToCopy); break;
-		case OffsetMode:  applyOffsetModulation(mod, dest, getIntensity(), samplesToCopy); break;
+		case GainMode:	applyGainModulation(mod, dest, getIntensity(), samplesToCopy); break;
+		case PitchMode: applyPitchModulation(mod, dest, getIntensity(), samplesToCopy); break;
+		case PanMode:	applyPanModulation(mod, dest, getIntensity(), samplesToCopy); break;
+		case GlobalMode:	applyGlobalModulation(mod, dest, getIntensity(), samplesToCopy);
             break;
         default: break;
 		}
@@ -539,25 +453,114 @@ void TimeModulation::applyGainModulation(float *calculatedModulationValues, floa
 {
 	const float a = 1.0f - fixedIntensity;
 
-	for(int i = 0; i < numValues; i++)
+#if 0
+	constexpr int BlockSize = 32;
+
+	BlockDivider<BlockSize> divider;
+
+	using SSEType = dsp::SIMDRegister<float>;
+
+	jassert(SSEType::isSIMDAligned(calculatedModulationValues) == SSEType::isSIMDAligned(destinationValues));
+
+	float rampValue = *calculatedModulationValues * fixedIntensity + a;
+
+	while (numValues > 0)
 	{
-		destinationValues[i] -= zeroPosition;
-		destinationValues[i] *= (a + fixedIntensity * calculatedModulationValues[i]);
-		destinationValues[i] += zeroPosition;
+		bool calculateNew;
+		int subBlockSize = divider.cutBlock(numValues, calculateNew, calculatedModulationValues);
+
+		if (subBlockSize == 0)
+		{
+			calculatedModulationValues += BlockSize;
+			const float end = *(calculatedModulationValues-1) * fixedIntensity + a;
+			constexpr float ratio = 1.0f / (float)BlockSize;
+			const float delta1 = (end - rampValue) * ratio;
+
+			AlignedSSERamper<BlockSize> ramper(destinationValues);
+			ramper.ramp(rampValue, delta1);
+
+			rampValue = end;
+			destinationValues += BlockSize;
+		}
+		else
+		{
+			while (--subBlockSize >= 0)
+			{
+				*destinationValues++ *= *calculatedModulationValues++ * fixedIntensity + a;
+			}
+		}
 	}
+#endif
+
+	FloatVectorOperations::multiply(calculatedModulationValues, fixedIntensity, numValues);
+	FloatVectorOperations::add(calculatedModulationValues, a, numValues);
+	FloatVectorOperations::multiply(destinationValues, calculatedModulationValues, numValues);
 }
 
 void TimeModulation::applyGainModulation(float *calculatedModulationValues, float *destinationValues, float fixedIntensity, const float *intensityValues, int numValues) const noexcept
 {
-	for(int i = 0; i < numValues; i++)
+	while (--numValues >= 0)
 	{
-		const float intensityValue = fixedIntensity * intensityValues[i];
+		const float intensityValue = fixedIntensity * *intensityValues++;
 		const float a = 1.0f - intensityValue;
 
-		destinationValues[i] -= zeroPosition;
-		destinationValues[i] *= (a + intensityValue * calculatedModulationValues[i]);
-		destinationValues[i] += zeroPosition;
+		*destinationValues++ *= (a + intensityValue * *calculatedModulationValues++);
 	}
+
+
+#if 0
+	const float a = 1.0f - fixedIntensity;
+
+	constexpr int BlockSize = 32;
+
+	BlockDivider<BlockSize> divider;
+
+	using SSEType = dsp::SIMDRegister<float>;
+
+	jassert(SSEType::isSIMDAligned(calculatedModulationValues) == SSEType::isSIMDAligned(destinationValues) == SSEType::isSIMDAligned(intensityValues));
+
+	float intensityRampValue = fixedIntensity * *intensityValues;
+	float invIntensityRampValue = 1.0f - intensityRampValue;
+
+	float rampValue = *calculatedModulationValues * intensityRampValue + invIntensityRampValue;
+
+	while (numValues > 0)
+	{
+		bool calculateNew;
+		int subBlockSize = divider.cutBlock(numValues, calculateNew, calculatedModulationValues);
+
+		if (subBlockSize == 0)
+		{
+			calculatedModulationValues += BlockSize;
+			intensityValues += BlockSize;
+
+			intensityRampValue = fixedIntensity * *(intensityValues-1);
+			invIntensityRampValue = 1.0f - intensityRampValue;
+
+
+			const float end = *(calculatedModulationValues-1) * intensityRampValue + invIntensityRampValue;
+
+			constexpr float ratio = 1.0f / (float)BlockSize;
+			const float delta1 = (end - rampValue) * ratio;
+
+			AlignedSSERamper<BlockSize> ramper(destinationValues);
+			ramper.ramp(rampValue, delta1);
+
+			rampValue = end;
+			destinationValues += BlockSize;
+		}
+		else
+		{
+			while (--subBlockSize >= 0)
+			{
+				const float intensityValue = fixedIntensity * *intensityValues++;
+				const float invIntensity = 1.0f - intensityValue;
+
+				*destinationValues++ *= *calculatedModulationValues++ * intensityValue + invIntensity;
+			}
+		}
+	}
+#endif
 }
 
 void TimeModulation::applyPitchModulation(float* calculatedModulationValues, float *destinationValues, float fixedIntensity, int numValues) const noexcept
@@ -609,117 +612,95 @@ void TimeModulation::applyGlobalModulation(float * calculatedModValues, float * 
 		applyGainModulation(calculatedModValues, destinationValues, fixedIntensity, numValues);
 }
 
-void TimeModulation::applyOffsetModulation(float* calculatedModValues, float* destinationValues, float fixedIntensity,
-	float* intensityValues, int numValues) const noexcept
-{
-	// [0 ... 1]
-	auto src = calculatedModValues;
-	auto dst = destinationValues;
-
-    for(int i = 0; i < numValues; i++)
-    {
-        auto v = src[i];
-		if(isBipolar())
-		{
-			v *= 2.0f;
-			v -= 1.0f;
-		}
-		v *= fixedIntensity;
-		v *= intensityValues[i];
-		dst[i] += v;
-    }
-}
-
-void TimeModulation::applyOffsetModulation(float* calculatedModValues, float* destinationValues, float fixedIntensity,
-                                            int numValues) const noexcept
-{
-	// [0 ... 1]
-	auto src = calculatedModValues;
-	auto dst = destinationValues;
-
-    for(int i = 0; i < numValues; i++)
-	{
-		auto v = src[i];
-
-		if(isBipolar())
-		{
-			v *= 2.0f;
-			v -= 1.0f;
-		}
-
-		v *= fixedIntensity;
-
-        v += dst[i];
-		dst[i] = v;
-	}	
-}
-
-
-
 void TimeModulation::applyIntensityForGainValues(float* calculatedModulationValues, float fixedIntensity, int numValues) const
 {
 	const float a = 1.0f - fixedIntensity;
 
-	for(int i = 0; i < numValues; i++)
+	while (--numValues >= 0)
 	{
-        const float modValue = calculatedModulationValues[i] * fixedIntensity + a;
-		calculatedModulationValues[i] = modValue;
+        const float modValue = *calculatedModulationValues * fixedIntensity + a;
+        
+		*calculatedModulationValues++ = modValue;
 	}
 }
 
 
 void TimeModulation::applyIntensityForGainValues(float* calculatedModulationValues, float fixedIntensity, const float* intensityValues, int numValues) const
 {
-	for(int i = 0; i < numValues; i++)
+	while (--numValues >= 0)
 	{
-		const float intensityValue = fixedIntensity * intensityValues[i];
+		const float intensityValue = fixedIntensity * *intensityValues++;
 		const float invIntensity = 1.0f - intensityValue;
-        const float modValue = intensityValue * calculatedModulationValues[i] + invIntensity;
-		calculatedModulationValues[i] = modValue;
+        const float modValue = intensityValue * *calculatedModulationValues + invIntensity;
+		*calculatedModulationValues++ = modValue;
+        
 	}
 }
 
 void TimeModulation::applyIntensityForPitchValues(float* calculatedModulationValues, float fixedIntensity, int numValues) const
 {
 	float* modValues = calculatedModulationValues;
+	int numLoop = numValues;
+
+	if (isBipolar())
+	{
+		while (--numLoop >= 0)
+		{
+			const float bipolarModValue = *modValues * 2.0f - 1.0f;
+			*modValues++ = bipolarModValue * fixedIntensity;
+		}
+
+		//FloatVectorOperations::multiply(calculatedModulationValues, 2.0f, numValues);
+		//FloatVectorOperations::add(calculatedModulationValues, -1.0f, numValues);
+		//FloatVectorOperations::multiply(calculatedModulationValues, fixedIntensity, numValues);
+
+		// modvalues (-1 ... -intensity ... 0 ... +intensity ... 1)
+	}
+	else
+	{
+		FloatVectorOperations::multiply(calculatedModulationValues, fixedIntensity, numValues);
+
+		// modValues ( 0 ... +-intensity ... 1 )
+	}
+
 	
-    if(isBipolar())
-    {
-        for(int i = 0; i < numValues; i++)
-        {
-            const float bipolarModValue = modValues[i] * 2.0f - 1.0f;
-            modValues[i] = bipolarModValue * fixedIntensity;
-        }
-    }
-    else
-    {
-        for(int i = 0; i < numValues; i++)
-            modValues[i] *= fixedIntensity;
-    }
 }
 
 
 void TimeModulation::applyIntensityForPitchValues(float* calculatedModulationValues, float fixedIntensity, const float* intensityValues, int numValues) const
 {
 	float* modValues = calculatedModulationValues;
+	int numLoop = numValues;
+
+	// input: modValues (0 ... 1), intensity (-1 ... 1), intensityValues (0.5 ... 2.0)
+
+	if (isBipolar())
+	{
+		while (--numLoop >= 0)
+		{
+			const float intensityValue = *intensityValues++ * fixedIntensity;
+			const float bipolarModValue = 2.0f * *modValues - 1.0f;
+			*modValues++ = bipolarModValue * intensityValue;
+		}
+
+		//FloatVectorOperations::multiply(intensityValues, fixedIntensity, numValues);
+		//FloatVectorOperations::multiply(calculatedModulationValues, 2.0f, numValues);
+		//FloatVectorOperations::add(calculatedModulationValues, -1.0f, numValues);
+		//FloatVectorOperations::multiply(calculatedModulationValues, intensityValues, numValues);
+	}
+	else
+	{
+		while (--numValues >= 0)
+		{
+			const float intensityValue = *intensityValues++ * fixedIntensity;
+			*modValues++ *= intensityValue;
+		}
+
+		//FloatVectorOperations::multiply(intensityValues, fixedIntensity, numValues);
+		//FloatVectorOperations::multiply(calculatedModulationValues, intensityValues, numValues);
+	}
+
 	
-    if(isBipolar())
-    {
-        for(int i = 0; i < numValues; i++)
-        {
-			const float intensityValue = intensityValues[i] * fixedIntensity;
-            const float bipolarModValue = modValues[i] * 2.0f - 1.0f;
-            modValues[i] = bipolarModValue * intensityValue;
-        }
-    }
-    else
-    {
-        for(int i = 0; i < numValues; i++)
-        {
-	        const float intensityValue = intensityValues[i] * fixedIntensity;
-			modValues[i] *= intensityValue;
-        }
-    }
 }
 
 
@@ -729,40 +710,46 @@ void TimeModulation::applyPanModulation(float * calculatedModValues, float * des
 
 	if (isBipolar())
 	{
-        for(int i = 0; i < numValues; i++)
+		while (--numValues >= 0)
 		{
-			const float bipolarModValue = 2.0f * calculatedModValues[i] - 1.0f;
-			destinationValues[i] += bipolarModValue * fixedIntensity * intensityValues[i];
+
+			const float bipolarModValue = 2.0f * *calculatedModValues++ - 1.0f;
+			*destinationValues++ += bipolarModValue * fixedIntensity * *intensityValues++;
 		}
 	}
 	else
 	{
-		for(int i = 0; i < numValues; i++)
+		while (--numValues >= 0)
 		{
-			const float modValue = fixedIntensity * intensityValues[i] * calculatedModValues[i];
-			destinationValues[i] += modValue;
+			const float modValue = fixedIntensity * *intensityValues++ * *calculatedModValues++;
+			*destinationValues++ += modValue;
 		}
 	}
+
+	
+
 }
 
 void TimeModulation::applyPanModulation(float * calculatedModValues, float * destinationValues, float fixedIntensity, int numValues) const noexcept
 {
 	// input: modValues (0 ... 1), intensity (-1 ... 1)
 	// output: 0 -> 0.5
+
 	if (isBipolar())
 	{
-		for(int i = 0; i < numValues; i++)
+		while (--numValues >= 0)
 		{
-			const float bipolarModValue = 2.0f * calculatedModValues[i] - 1.0f;
-			destinationValues[i] += bipolarModValue * fixedIntensity;
+			
+			const float bipolarModValue = 2.0f * *calculatedModValues++ - 1.0f;
+			*destinationValues++ += bipolarModValue * fixedIntensity;
 		}
 	}
 	else
 	{
-		for(int i = 0; i < numValues; i++)
+		while (--numValues >= 0)
 		{
-			const float modValue = calculatedModValues[i] * fixedIntensity;
-			destinationValues[i] += modValue;
+			const float modValue = *calculatedModValues++ * fixedIntensity;
+			*destinationValues++ += modValue;
 		}
 	}
 }
@@ -829,8 +816,6 @@ ValueTree VoiceStartModulator::exportAsValueTree() const
 
 	v.setProperty("Intensity", getIntensity(), nullptr);
 
-	Modulation::storeMode(v, this);
-
 	if (getMode() != Modulation::GainMode)
 		v.setProperty("Bipolar", isBipolar(), nullptr);
 
@@ -841,8 +826,6 @@ ValueTree VoiceStartModulator::exportAsValueTree() const
 void VoiceStartModulator::restoreFromValueTree(const ValueTree& v)
 {
 	Processor::restoreFromValueTree(v);
-
-	Modulation::restoreMode(v, this);
 
 	if (getMode() != Modulation::GainMode)
 	{
@@ -892,7 +875,10 @@ EnvelopeModulator::EnvelopeModulator(MainController *mc, const String &id, int v
 	TimeModulation(m),
 	Modulation(m),
 	VoiceModulation(voiceAmount_, m)
-{};
+{
+	parameterNames.add("Monophonic");
+	parameterNames.add("Retrigger");
+};
 
 #pragma warning( pop )
 
@@ -947,9 +933,6 @@ Processor *EnvelopeModulatorFactoryType::createProcessor(int typeIndex, const St
 	case voiceKillEnvelope: return new ScriptnodeVoiceKiller(m, id, numVoices);
 	case globalEnvelope:	return new GlobalEnvelopeModulator(m, id, mode, numVoices);
 	case eventDataEnvelope: return new EventDataEnvelope(m, id, numVoices, mode);
-	case hardcodedEnvelope: return new HardcodedEnvelopeModulator(m, id, numVoices, mode);
-	case matrixModulator:	return new MatrixModulator(m, id, numVoices, mode);
-	case flexAhdsrModulator:return new FlexAhdsrEnvelope(m, id, numVoices, mode);
 	default: jassertfalse;	return nullptr;
 	}
 };
@@ -1013,8 +996,6 @@ ValueTree TimeVariantModulator::exportAsValueTree() const
 
 	v.setProperty("Intensity", getIntensity(), nullptr);
 
-	Modulation::storeMode(v, this);
-
 	if (getMode() != Modulation::GainMode)
 		v.setProperty("Bipolar", isBipolar(), nullptr);
 
@@ -1025,17 +1006,13 @@ void TimeVariantModulator::restoreFromValueTree(const ValueTree& v)
 {
 	Processor::restoreFromValueTree(v);
 
-
 	setIntensity(v.getProperty("Intensity", 1.0f));
-
-	Modulation::restoreMode(v, this);
 
 	if (getMode() != Modulation::GainMode)
 	{
 		auto defaultMode = true;
             
-		if(getMode() == Modulation::GlobalMode ||
-		   getMode() == Modulation::Mode::CombinedMode)
+		if(getMode() == Modulation::GlobalMode)
 			defaultMode = false;
             
 		setIsBipolar(v.getProperty("Bipolar", defaultMode));
@@ -1064,8 +1041,18 @@ float EnvelopeModulator::getAttribute(int parameterIndex) const
 {
 	switch (parameterIndex)
 	{
-	case Parameters::Monophonic: return isInMonophonicMode();
+	case Parameters::Monophonic: return isMonophonic;
 	case Parameters::Retrigger:  return shouldRetrigger;
+	default:					 jassertfalse; return 0.0f;
+	}
+}
+
+float EnvelopeModulator::getDefaultValue(int parameterIndex) const
+{
+	switch (parameterIndex)
+	{
+	case Parameters::Monophonic: return 0.0f;
+	case Parameters::Retrigger:  return 1.0f;
 	default:					 jassertfalse; return 0.0f;
 	}
 }
@@ -1074,32 +1061,9 @@ void EnvelopeModulator::setInternalAttribute(int parameterIndex, float newValue)
 {
 	switch (parameterIndex)
 	{
-	case Parameters::Monophonic:
-	{
-		auto m = newValue > 0.5f;
-
-		if(getVoiceAmount() == 1)
-			m = true;
-
-		if(isMonophonic != m)
-		{
-			isMonophonic = m;
-
-			auto f = [](Processor* p)
-			{
-				if(auto mc = dynamic_cast<ModulatorChain*>(p->getParentProcessor(false, false)))
-				{
-					dynamic_cast<ModulatorChain::ModulatorChainHandler*>(mc->getHandler())->bypassStateChanged(p, p->isBypassed());
-				}
-
-				return SafeFunctionCall::OK;
-			};
-
-			getMainController()->getKillStateHandler().killVoicesAndCall(this, f, MainController::KillStateHandler::TargetThread::SampleLoadingThread);
-		}
-
+	case Parameters::Monophonic: isMonophonic = newValue > 0.5f; 
+		sendSynchronousBypassChangeMessage();
 		break;
-	}
 	case Parameters::Retrigger:  shouldRetrigger = newValue > 0.5f; break;
 	default:
 		break;
@@ -1114,8 +1078,6 @@ ValueTree EnvelopeModulator::exportAsValueTree() const
 	{
 		saveAttribute(Monophonic, "Monophonic");
 		saveAttribute(Retrigger, "Retrigger");
-
-		Modulation::storeMode(v, this);
 
 		if (getMode() != Modulation::GainMode)
 			v.setProperty("Bipolar", isBipolar(), nullptr);
@@ -1134,8 +1096,6 @@ void EnvelopeModulator::restoreFromValueTree(const ValueTree& v)
 	{
 		loadAttribute(Monophonic, "Monophonic");
 		loadAttribute(Retrigger, "Retrigger");
-
-		Modulation::restoreMode(v, this);
 
 		if (getMode() != Modulation::GainMode)
 		{
@@ -1189,17 +1149,13 @@ void EnvelopeModulator::prepareToPlay(double sampleRate, int samplesPerBlock)
 {
 	Processor::prepareToPlay(sampleRate, samplesPerBlock);
 	TimeModulation::prepareToModulate(sampleRate, samplesPerBlock);
-
-	firstVoiceBuffer.setSize(1, samplesPerBlock);
-
+		
 	// Deactivate smoothing for envelopes
 	smoothedIntensity.reset(sampleRate, 0.0);
 }
 
 bool EnvelopeModulator::isInMonophonicMode() const
-{
-	return isMonophonic || getVoiceAmount() == 1;
-}
+{ return isMonophonic; }
 
 float EnvelopeModulator::startVoice(int)
 {
@@ -1219,32 +1175,6 @@ bool EnvelopeModulator::shouldUpdatePlotter() const
 void EnvelopeModulator::render(int voiceIndex, float* voiceBuffer, float* scratchBuffer, int startSample,
 	int numSamples)
 {
-	bool saveFirst = false;
-
-	if(isMonophonic)
-	{
-		auto ownerSynth = static_cast<ModulatorSynth*>(getParentProcessor(true));
-		auto voice = static_cast<ModulatorSynthVoice*>(ownerSynth->getVoice(voiceIndex));
-
-		if(voice == nullptr || getVoiceAmount() == 1 || voice->isFirstRenderedVoice())
-		{
-			saveFirst = true;
-		}
-		else
-		{
-			setScratchBuffer(scratchBuffer, startSample + numSamples);
-			FloatVectorOperations::copy(internalBuffer.getWritePointer(0, startSample),
-										firstVoiceBuffer.getReadPointer(0, startSample),
-									    numSamples);
-
-			applyTimeModulation(voiceBuffer, startSample, numSamples);
-			return;
-		}
-			
-	}
-
-	
-
 	polyManager.setCurrentVoice(voiceIndex);
 
 	setScratchBuffer(scratchBuffer, startSample + numSamples);
@@ -1262,14 +1192,6 @@ void EnvelopeModulator::render(int voiceIndex, float* voiceBuffer, float* scratc
 #endif
 
 	polyManager.clearCurrentVoice();
-
-	if(saveFirst)
-	{
-		FloatVectorOperations::copy(firstVoiceBuffer.getWritePointer(0, startSample),
-									internalBuffer.getReadPointer(0, startSample),
-									    numSamples);
-	}
-	
 }
 
 int EnvelopeModulator::getNumPressedKeys() const
@@ -1337,22 +1259,71 @@ void TimeVariantModulator::render(float* monoModulationValues, float* scratchBuf
 	applyTimeModulation(monoModulationValues, startSample, numSamples);
 	lastConstantValue = monoModulationValues[startSample];
 
-	
-
 #if ENABLE_ALL_PEAK_METERS
-	float displayValue = internalBuffer.getSample(0, startSample);
+	const float displayValue = internalBuffer.getSample(0, startSample);
 	pushPlotterValues(internalBuffer.getReadPointer(0), startSample, numSamples);
+
 	setOutputValue(displayValue);
 #endif
 }
 
-
-
 void Modulation::PitchConverters::normalisedRangeToPitchFactor(float* rangeValues, int numValues)
 {
-	ModBufferExpansion::normalisedRangeToPitchFactor(rangeValues, numValues);
+	if (numValues > 1)
+	{
+#if HISE_ENABLE_FULL_CONTROL_RATE_PITCH_MOD
 
-	
+		bool hasDeltaSignChange = false;
+
+		float prevValue = rangeValues[0];
+		float delta = 0.0f;
+
+		for (int i = 1; i < numValues; i++)
+		{
+			auto thisValue = rangeValues[i];
+			auto thisDelta = thisValue - prevValue;
+
+			hasDeltaSignChange |= (delta != 0.0f && (hmath::sign(thisDelta) != hmath::sign(delta)));
+			delta = thisDelta;
+			prevValue = thisValue;
+		}
+
+#else
+		auto hasDeltaSignChange = false;
+#endif
+
+		if (hasDeltaSignChange)
+		{			
+			for (int i = 0; i < numValues; i++)
+				rangeValues[i] = normalisedRangeToPitchFactor(rangeValues[i]);
+		}
+		else
+		{
+			float startValue = normalisedRangeToPitchFactor(rangeValues[0]);
+			const float endValue = normalisedRangeToPitchFactor(rangeValues[numValues - 1]);
+			float delta = (endValue - startValue);
+
+
+			if (delta < 0.0003f)
+			{
+				FloatVectorOperations::fill(rangeValues, (startValue + endValue) * 0.5f, numValues);
+			}
+			else
+			{
+				delta /= (float)numValues;
+
+				while (--numValues >= 0)
+				{
+					*rangeValues++ = startValue;
+					startValue += delta;
+				}
+			}
+		}
+	}
+	else if (numValues == 1)
+	{
+		rangeValues[0] = normalisedRangeToPitchFactor(rangeValues[0]);
+	}
 }
 
 } // namespace hise

@@ -117,38 +117,26 @@ WavetableBody::WavetableBody (ProcessorEditor *p)
 
 	addAndMakeVisible(tableSlider = new HiSlider("Table Index"));
 	tableSlider->setSliderStyle(Slider::RotaryHorizontalVerticalDrag);
+	tableSlider->setup(getProcessor(), WavetableSynth::TableIndexValue, "Table Index");
+	tableSlider->setMode(HiSlider::Mode::NormalizedPercentage);
 
     //[UserPreSize]
-
-	auto md = getProcessor()->getMetadata();
 
 	fadeTimeLabel->setFont (GLOBAL_FONT());
     voiceAmountLabel->setFont (GLOBAL_FONT());
     voiceAmountEditor->setFont (GLOBAL_FONT());
     fadeTimeEditor->setFont (GLOBAL_FONT());
 
-	md.setup(*tableSlider, getProcessor(), WavetableSynth::TableIndexValue);
-	md.setup(*hiqButton, getProcessor(), WavetableSynth::HqMode);
-	md.setup(*mipmapButton, getProcessor(), WavetableSynth::RefreshMipmap);
-	md.setup(*wavetableSelector, getProcessor(), WavetableSynth::LoadedBankIndex);
+	hiqButton->setup(getProcessor(), WavetableSynth::HqMode, "HQ");
+	mipmapButton->setup(getProcessor(), WavetableSynth::RefreshMipmap, "Refresh Mipmap");
+
+	wavetableSelector->setup(getProcessor(), WavetableSynth::LoadedBankIndex, "Loaded Wavetable");
 
 	WeakReference<Processor> owner = getProcessor();
 
 	wavetableSelector->addItemList(dynamic_cast<WavetableSynth*>(getProcessor())->getWavetableList(), 1);
 
-	auto wv = new WaterfallComponent(getProcessor(), nullptr);
-
-    wv->alphaData.peakAlphaGain = 5.0f;
-    wv->displacement = { 4.0f, -8.0f };
-    wv->alphaData.glowScale = 0.5f;
-    wv->alphaData.smoothRange = { 0.9f, 1.0f };
-    wv->alphaData.numHighlights = 8;
-    wv->alphaData.highlightColour = Colours::white.withAlpha(0.8f);
-    wv->numDisplayTables = 32;
-    wv->isometricFactor = 0.5;
-
-
-    wv->setColour(HiseColourScheme::ColourIds::ComponentFillBottomColourId, Colour(0x88545893));
+	auto wv = new WaterfallComponent(getProcessor()->getMainController(), nullptr);
 
 	wv->displayDataFunction = [owner]()
 	{

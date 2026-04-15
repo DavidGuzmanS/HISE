@@ -164,8 +164,7 @@ public:
 class FloatingTileContainer;
 class FloatingTileContent;
 
-class FloatingTile : public Component,
-					 public ProfiledComponent 
+class FloatingTile : public Component
 {
 public:
 
@@ -360,19 +359,6 @@ public:
 
 	Rectangle<int> getContentBounds();
 
-	bool isFoldedRecursive() const
-	{
-		auto folded = isFolded();
-
-		if(!folded && getParentType() != ParentType::Root)
-		{
-			if(auto pt = getParentContainer())
-				folded |= pt->getParentShell()->isFolded();
-		}
-
-		return folded;
-	}
-
 	bool isFolded() const;
 	void setFolded(bool shouldBeFolded);
 	void refreshFoldButton();
@@ -415,7 +401,6 @@ public:
 
 	void bringButtonsToFront();
 
-	paintAndProfileChildren(g);
 	void paint(Graphics& g) override;
 	void paintOverChildren(Graphics& g) override;
 

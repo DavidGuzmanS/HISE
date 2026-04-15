@@ -64,7 +64,7 @@ struct OptionalSnexSource
 
 	void setCallbackHandler(DummyCallbackHandler*) {};
 
-	virtual void initialise(ObjectWithValueTree* ) {};
+	virtual void initialise(NodeBase* ) {};
 
 	virtual String getEmptyText(const Identifier& id) const { return {}; }
 
@@ -164,13 +164,13 @@ struct snex_timer : public OptionalSnexSource
 			auto newReset = getFunctionAsObjectCallback("reset");
 			auto newPrepare = getFunctionAsObjectCallback("prepare");
 
-			auto r = newTc.validateWithArgs(Types::ID::Double, { Types::ID::Pointer });
+			auto r = newTc.validateWithArgs(Types::ID::Double, {});
 
 			if (r.wasOk())
-				r = newReset.validateWithArgs(Types::ID::Void, { Types::ID::Pointer });
+				r = newReset.validateWithArgs(Types::ID::Void, {});
 
 			if (r.wasOk())
-				r = newPrepare.validateWithArgs(Types::ID::Void, { Types::ID::Pointer, Types::ID::Pointer });
+				r = newPrepare.validateWithArgs("void", { "PrepareSpecs" });
 
 			{
 				SimpleReadWriteLock::ScopedWriteLock l(getAccessLock());
@@ -246,7 +246,7 @@ struct snex_timer : public OptionalSnexSource
 		return new Tester<TimerCallbackHandler>(*this);
 	}
 
-	void initialise(ObjectWithValueTree* n)
+	void initialise(NodeBase* n)
 	{
 		OptionalSnexSource::initialise(n);
 
@@ -257,10 +257,6 @@ struct snex_timer : public OptionalSnexSource
 	void updateMode(Identifier, var newValue)
 	{
 		currentMode = (TimerMode)getModes().indexOf(newValue.toString());
-
-		auto pn = getParentNode();
-		pn->getRootNetwork()->getExceptionHandler().removeError(pn);
-
 		reset();
 	}
 
@@ -285,18 +281,15 @@ struct snex_timer : public OptionalSnexSource
 		}
 	}
 
-	bool preprocess(String& code) override;
+	bool preprocess(String& code) override
+	{
+		OptionalSnexSource::preprocess(code);
+		return true;
+	}
 
-	/** Initialises the processing. */
+    /** Initialises the processing. */
 	void prepare(PrepareSpecs ps)
 	{
-#if HISE_INCLUDE_SNEX
-		if(currentMode == TimerMode::Custom && !checkAllowCompilation())
-			return;
-
-		rebuildCallbacksAfterChannelChange(ps.numChannels);
-#endif
-		
 		callbacks.prepare(ps);
 		toggleTimer.prepare(ps);
 		randomTimer.prepare(ps);

@@ -83,7 +83,7 @@ void sampleandhold<V>::prepare(PrepareSpecs ps)
 }
 
 template <int V>
-void sampleandhold<V>::initialise(ObjectWithValueTree*)
+void sampleandhold<V>::initialise(NodeBase*)
 {
 
 }
@@ -147,7 +147,7 @@ void bitcrush<V>::prepare(PrepareSpecs ps)
 }
 
 template <int V>
-void bitcrush<V>::initialise(ObjectWithValueTree*)
+void bitcrush<V>::initialise(NodeBase*)
 {
 
 }
@@ -162,7 +162,7 @@ phase_delay<V>::phase_delay():
 }
 
 template <int V>
-void phase_delay<V>::initialise(ObjectWithValueTree*)
+void phase_delay<V>::initialise(NodeBase*)
 {
 
 }
@@ -200,7 +200,6 @@ void phase_delay<V>::createParameters(ParameterDataList& data)
 		DEFINE_PARAMETERDATA(phase_delay, Frequency);
 		p.setRange({ 20.0, 20000.0, 0.1 });
 		p.setSkewForCentre(1000.0);
-		p.info.textConverter = parameter::pod::Frequency;
 		p.setDefaultValue(400.0);
 		data.add(std::move(p));
 	}

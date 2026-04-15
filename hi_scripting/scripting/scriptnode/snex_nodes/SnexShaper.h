@@ -146,9 +146,6 @@ struct dynamic : public SnexSource,
 
 	void prepare(PrepareSpecs ps)
 	{
-		if(!checkAllowCompilation())
-			return;
-
 		rebuildCallbacksAfterChannelChange(ps.numChannels);
 		callbacks.prepare(ps);
 	}

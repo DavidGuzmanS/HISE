@@ -46,7 +46,7 @@ class VuMeter;
 *
 */
 class ProcessorEditorHeader  : public ProcessorEditorChildComponent,
-							   public Slider::Listener,
+                               public SliderListener,
 							   public LabelListener,
 							   public Processor::BypassListener,
                                public ButtonListener,

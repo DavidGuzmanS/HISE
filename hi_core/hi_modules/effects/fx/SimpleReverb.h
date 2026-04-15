@@ -44,19 +44,17 @@ class SimpleReverbEffect: public MasterEffectProcessor
 {
 public:
 
-	SET_PROCESSOR_NAME("SimpleReverb", "Simple Reverb", "")
-
-	static ProcessorMetadata createMetadata();
+	SET_PROCESSOR_NAME("SimpleReverb", "Simple Reverb", "a algorithmic reverb based on Freeverb.");
 
 	/** The parameters */
 	enum Parameters
 	{
-		RoomSize = 0,
-		Damping,
-		WetLevel,
-		DryLevel,
-		Width,
-		FreezeMode,
+		RoomSize = 0, ///< the room size
+		Damping, ///< the damping
+		WetLevel, ///< the wet level
+		DryLevel, ///< the dry level
+		Width, ///< the stereo width
+		FreezeMode, ///< freeze mode (unused)
 		numEffectParameters
 	};
 
@@ -64,6 +62,14 @@ public:
 		MasterEffectProcessor(mc, id)
 	{
 		finaliseModChains();
+
+		parameterNames.add("RoomSize");
+		parameterNames.add("Damping");
+		parameterNames.add("WetLevel");
+		parameterNames.add("DryLevel");
+		parameterNames.add("Width");
+		parameterNames.add("FreezeMode");
+
 		updateParameterSlots();
 
 		parameters.damping = 0.6f;

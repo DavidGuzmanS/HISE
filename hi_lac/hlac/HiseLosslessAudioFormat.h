@@ -61,14 +61,7 @@ public:
 	StringArray getQualityOptions() override;
 
 	AudioFormatReader* createReaderFor(InputStream* sourceStream, bool deleteStreamIfOpeningFails) override;
-
-#if HISE_JUCE8
-	std::unique_ptr<AudioFormatWriter> createWriterFor(std::unique_ptr<OutputStream>& streamToWriteTo,
-		const AudioFormatWriterOptions& options) override;	
-#endif
-
-	AudioFormatWriter* createWriterFor(OutputStream* streamToWriteTo, double sampleRateToUse, unsigned int numberOfChannels, int /*bitsPerSample*/, const StringPairArray& metadataValues, int /*qualityOptionIndex*/);
-	
+	AudioFormatWriter* createWriterFor(OutputStream* streamToWriteTo, double sampleRateToUse, unsigned int numberOfChannels, int /*bitsPerSample*/, const StringPairArray& metadataValues, int /*qualityOptionIndex*/) override;
 
 	MemoryMappedAudioFormatReader* createMemoryMappedReader(FileInputStream* fin) override;
 

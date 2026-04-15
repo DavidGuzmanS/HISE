@@ -40,7 +40,6 @@ class ONNXLoader: public ReferenceCountedObject
 {
 	typedef void* (*loadModel_f)(const void*, size_t);
 	typedef void (*destroyModel_f)(void*);
-	typedef void (*getStatistics_f)(void*, void*);
 	typedef bool (*getError_f)(void*, char*, size_t&);
 	typedef bool (*run_f)(void*, const void*, size_t, int, bool);
 	typedef void (*getOutput_f)(void*, float*);
@@ -59,17 +58,7 @@ public:
 
 	Result getLastError() const;
 
-	var getStatistics();
-
 private:
-
-	struct Statistics
-	{
-		int numInputs = 1;
-		int numOutputs = 921;
-		bool ok;
-		int numParameters = 91020042;
-	};
 
 	void unloadModel();
 

@@ -652,9 +652,6 @@ void ProcessorEditor::showContextMenu(Component* c, Processor* p)
 		ReloadFromExternalScript,
 		DisconnectFromScriptFile,
 		SaveCurrentInterfaceState,
-		SetScale,
-		SetUnipolar,
-		SetBipolar,
 		numMenuItems
 	};
 
@@ -669,25 +666,6 @@ void ProcessorEditor::showContextMenu(Component* c, Processor* p)
 	m.addItem(Copy, "Copy " + p->getId() + " to Clipboard");
 	m.addItem(ViewXml, "Show XML data");
     m.addItem(DumpParameters, "Dump parameter ID & values");
-
-	if(auto parentModChain = dynamic_cast<ModulatorChain*>(p->getParentProcessor(false)))
-	{
-		auto isCombinedMode = parentModChain->getMode() == Modulation::Mode::CombinedMode;
-
-		if(isCombinedMode)
-		{
-			auto mod = dynamic_cast<Modulation*>(p);
-			auto isScale = (isCombinedMode ? mod->getMode() : parentModChain->getMode()) == Modulation::GainMode;
-			auto isBipolar = !isScale && mod->isBipolar();
-			auto isUnipolar = !isScale && !isBipolar;
-
-			m.addSeparator();
-			m.addItem(SetScale, "Scale Mode", true, isScale);
-			m.addItem(SetUnipolar, "Unipolar", true, isUnipolar);
-			m.addItem(SetBipolar, "Bipolar", true, isBipolar);
-			m.addSeparator();
-		}
-	}
 
 	if ((dynamic_cast<Chain*>(p) == nullptr || dynamic_cast<ModulatorSynth*>(p)) && !isMainSynthChain)
 	{
@@ -755,11 +733,14 @@ void ProcessorEditor::showContextMenu(Component* c, Processor* p)
 	}
     else if (result == DumpParameters)
     {
-		String s;
-
-		s = JSON::toString(p->getMetadata().toJSON());;
-
-
+        String s;
+        
+        s << "(" << p->getType() << ") - Parameter dump: \n";
+        
+        for(int i = 0; i < p->getNumAttributes(); i++)
+        {
+            s << "\t[" << String(i) << "]: " << p->getIdentifierForParameterIndex(i).toString().quoted() << " | " << String(p->getAttribute(i), 2) << "\n";
+        }
         
         debugToConsole(p, s);
         
@@ -814,16 +795,6 @@ void ProcessorEditor::showContextMenu(Component* c, Processor* p)
 		{
 			dynamic_cast<JavascriptProcessor*>(p)->disconnectFromFile();
 		}
-	}
-	else if (result == SetScale || result == SetUnipolar || result == SetBipolar)
-	{
-		auto parentModChain = dynamic_cast<ModulatorChain*>(p->getParentProcessor(false));
-
-		auto isScale = result == SetScale;
-		auto isBipolar = result == SetBipolar;
-		auto mode = isScale ? Modulation::Mode::GainMode : Modulation::Mode::OffsetMode;
-
-		parentModChain->changeChildModulatorMode(p, mode, isBipolar);
 	}
 	else
 	{

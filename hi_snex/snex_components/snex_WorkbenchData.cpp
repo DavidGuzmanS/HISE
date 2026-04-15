@@ -31,6 +31,7 @@
 */
 
 
+#include "hi_tools/hi_standalone_components/CodeEditorApiBase.h"
 
 namespace snex {
 using namespace juce;

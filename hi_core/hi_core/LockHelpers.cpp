@@ -34,7 +34,7 @@ namespace hise {
 using namespace juce;
 
 
-bool LockHelpers::freeToGo(const MainController* mc)
+bool LockHelpers::freeToGo(MainController* mc)
 {
 	if (mc->isBeingDeleted())
 	{
@@ -235,9 +235,7 @@ LockHelpers::SafeLock::SafeLock(const MainController* mc_, Type t, bool useRealL
 	mc(mc_),
 	type(t),
 	holdsLock(false),
-	lock(nullptr),
-	waitProfiler(mc->getProfileDataSourceForLock(t, useRealLock, true)),
-	lockProfiler(mc->getProfileDataSourceForLock(t, useRealLock, false))
+	lock(nullptr)
 {
 	if (useRealLock && t == Type::AudioLock)
 	{
@@ -260,12 +258,8 @@ LockHelpers::SafeLock::SafeLock(const MainController* mc_, Type t, bool useRealL
 				n << "waiting for " << getLockName(t);
 				TRACE_EVENT("scripting", DYNAMIC_STRING_BUILDER(n));
 #endif
-				auto session = const_cast<DebugSession*>(&mc->getDebugSession());
-				waitProfiler.startProfiling(session);
 				lock->enter();
 				mc->getKillStateHandler().setLockForCurrentThread(type, true);
-				waitProfiler.stopProfiling();
-				lockProfiler.startProfiling(session);
 				holdsLock = true;
 			}
 		}
@@ -284,7 +278,6 @@ LockHelpers::SafeLock::~SafeLock()
 		jassert(lock != nullptr);
 		mc->getKillStateHandler().setLockForCurrentThread(type, false);
 		lock->exit();
-		lockProfiler.stopProfiling();
 	}
 }
 

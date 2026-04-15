@@ -152,19 +152,89 @@ DECLARE_ID(NumQuarters);
 
 struct Helpers
 {
-	static Identifier getEnvelopeId(Modulation::Mode m);
+	static Identifier getEnvelopeId(Modulation::Mode m)
+	{
+		switch (m)
+		{
+		case Modulation::Mode::GainMode:  return SampleIds::GainTable;
+		case Modulation::Mode::PitchMode: return SampleIds::PitchTable;
+		case Modulation::Mode::PanMode:   return SampleIds::LowPassTable;
+        default:                          return {};
+		}
+	}
+	static Modulation::Mode getEnvelopeType(const Identifier& id)
+	{
+		if (id == GainTable)
+			return Modulation::Mode::GainMode;
+		if (id == PitchTable)
+			return Modulation::Mode::PitchMode;
+		if (id == LowPassTable)
+			return Modulation::Mode::PanMode;
+        
+        return Modulation::Mode::numModes;
+	}
 
-	static Modulation::Mode getEnvelopeType(const Identifier& id);
+	static const Array<Identifier>& getMapIds()
+	{
+		static const Array<Identifier> ids = { Root , HiKey, LoKey,  HiVel,  LoVel,
+			RRGroup, LowerVelocityXFade,  UpperVelocityXFade };
 
-	static const Array<Identifier>& getMapIds();
+		return ids;
+	}
 
-	static const Array<Identifier>& getAudioIds();
+	static const Array<Identifier>& getAudioIds()
+	{
+		static const Array<Identifier> ids = { SampleStart,  SampleEnd,  SampleStartMod,  
+			LoopEnabled,  LoopStart,  LoopEnd,  LoopXFade, ReleaseStart };
 
-	static bool isMapProperty(const Identifier& id);
+		return ids;
+	}
 
-	static bool isAudioProperty(const Identifier& id);
+	static bool isMapProperty(const Identifier& id)
+	{
+		return id == Root || id == HiKey || id == LoKey || id == HiVel || id == LoVel || id == RRGroup ||
+			   id == LowerVelocityXFade || id == UpperVelocityXFade;
+	}
 
-	static Array<Identifier> getAllIds();
+	static bool isAudioProperty(const Identifier& id)
+	{
+		return id == SampleStart || id == SampleEnd || id == SampleStartMod || id == LoopEnabled ||
+			id == LoopStart || id == LoopEnd || id == LoopXFade || id == ReleaseStart;
+	}
+
+	static Array<Identifier> getAllIds()
+	{
+		static const Array<Identifier> ids({
+			ID,
+			FileName,
+			Root,
+			HiKey,
+			LoKey,
+			LoVel,
+			HiVel,
+			RRGroup,
+			Volume,
+			Pan,
+			Normalized,
+			Pitch,
+			SampleStart,
+			SampleEnd,
+			SampleStartMod,
+			LoopStart,
+			LoopEnd,
+			LoopXFade,
+			LoopEnabled,
+			ReleaseStart,
+			LowerVelocityXFade,
+			UpperVelocityXFade,
+			SampleState,
+			Reversed,
+		    NumQuarters
+		});
+		
+		return ids;
+	}
+
 };
 
 const int numProperties = 25;
@@ -178,13 +248,12 @@ const int numProperties = 25;
 *	@ingroup sampler
 *
 *	It also contains methods that extend the properties of a StreamingSamplerSound. */
-class ModulatorSamplerSound : public SynthSoundWithBitmask,
+class ModulatorSamplerSound : public ModulatorSynthSound,
 							  public ControlledObject
 {
 public:
 
 	using Ptr = ReferenceCountedObjectPtr<ModulatorSamplerSound>;
-	using List = ReferenceCountedArray<ModulatorSamplerSound>;
 
 	// ====================================================================================================================
 
@@ -316,7 +385,7 @@ public:
 	*	Can also be achieved by getProperty(ID), but this is more convenient. */
 	int getId() const { return data.getParent().indexOf(data); };
 
-	Range<int> getNoteRange() const override;
+	Range<int> getNoteRange() const;
 	Range<int> getVelocityRange() const;
 
 	/** Returns the gain value of the sound.
@@ -355,12 +424,16 @@ public:
 
 	// ====================================================================================================================
 
+	void setMaxRRGroupIndex(int newGroupLimit);
+	void setRRGroup(int newGroupIndex) noexcept{ rrGroup = jmin(newGroupIndex, maxRRGroup); };
+	int getRRGroup() const;
+
 	// ====================================================================================================================
 
 	bool appliesToVelocity(int velocity) override { return velocityRange[velocity]; };
 	bool appliesToNote(int midiNoteNumber) override { return !purged && allFilesExist && midiNotes[midiNoteNumber]; };
 	bool appliesToChannel(int /*midiChannel*/) override { return true; };
-	bool appliesToRRGroup(int group) const noexcept{ return getBitmask() == group; };
+	bool appliesToRRGroup(int group) const noexcept{ return rrGroup == group; };
 
 	// ====================================================================================================================
 
@@ -424,8 +497,8 @@ public:
 
 	// ====================================================================================================================
 
-	
-	void setPurged(bool shouldBePurged) override;
+	bool isPurged() const noexcept{ return purged; };
+	void setPurged(bool shouldBePurged);
 	void checkFileReference();
 	bool isMissing() const noexcept
 	{
@@ -453,12 +526,6 @@ public:
 	void setSampleProperty(const Identifier& id, const var& newValue, bool useUndo=true);
 
 	var getSampleProperty(const Identifier& id) const;
-
-	void storeBitmask(Bitmask m, bool useUndo) override
-	{
-		SynthSoundWithBitmask::storeBitmask(m, useUndo);
-		setSampleProperty(SampleIds::RRGroup, (int64)m, useUndo);
-	}
 
 	void setDeletePending()
 	{
@@ -647,8 +714,9 @@ private:
     
 	int upperVeloXFadeValue = 0;
 	int lowerVeloXFadeValue = 0;
-	
+	int rrGroup = 1;
 	int rootNote;
+	int maxRRGroup;
 	BigInteger velocityRange;
 	BigInteger midiNotes;
 

@@ -47,18 +47,16 @@ class ControlModulator: public TimeVariantModulator,
 {
 public:
 
-	SET_PROCESSOR_NAME("MidiController", "Midi Controller", "")
-
-	static ProcessorMetadata createMetadata();
+	SET_PROCESSOR_NAME("MidiController", "Midi Controller", "Creates a modulation signal from MIDI-CC messages.");
 
 	/** Special Parameters for the ControlModulator. */
 	enum Parameters
 	{
-		Inverted = 0,
-		UseTable,
-		ControllerNumber,
-		SmoothTime,
-		DefaultValue,
+		Inverted = 0, ///< inverts the modulation.
+		UseTable, ///< use a Table object for a look up table
+		ControllerNumber, ///< the controllerNumber that this controller reacts to.
+		SmoothTime, ///< the smoothing time
+		DefaultValue, ///< the default value before a control message is received.
 		numSpecialParameters
 	};
 

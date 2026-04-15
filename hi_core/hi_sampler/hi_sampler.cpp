@@ -35,7 +35,6 @@
 #include <regex>
 
 #include "sampler/ModulatorSamplerData.cpp"
-#include "sampler/ComplexGroupManager.cpp"
 #include "sampler/ModulatorSamplerSound.cpp"
 #include "sampler/ModulatorSamplerVoice.cpp"
 #include "sampler/ModulatorSampler.cpp"
@@ -60,13 +59,6 @@
 #include "sampler/components/SamplerTable.cpp"
 #include "sampler/components/SampleEditHandler.cpp"
 #include "sampler/components/SampleEditingActions.cpp"
-
-
-
-#include "sampler/components/ComplexGroupIcons.cpp"
-#include "sampler/components/ComplexGroupManagerSubTypes.cpp"
-#include "sampler/components/ComplexGroupManagerComponent.cpp"
-
 #endif
 
 #if USE_BACKEND
@@ -78,6 +70,3 @@
 
 #include "sampler/components/SampleMapBrowser.cpp"
 
-#if HI_RUN_UNIT_TEST
-#include "sampler/ComplexGroupManagerTests.cpp"
-#endif

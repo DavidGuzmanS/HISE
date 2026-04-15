@@ -71,12 +71,6 @@ namespace BackendBinaryData
 	};
 }
 
-
-
-
-
-
-
 } // namespace hise
 
 #endif  // BACKENDBINARYDATA_H_INCLUDED

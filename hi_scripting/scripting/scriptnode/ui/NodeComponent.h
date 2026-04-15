@@ -39,23 +39,13 @@ using namespace hise;
 using namespace juce;
 
 
-#if HISE_INCLUDE_PROFILING_TOOLKIT
-struct NodeProfiler: public DebugSession::ProfileDataSource::ScopedProfiler
-{
-	NodeProfiler(NodeBase* n, int numSamples_) :
-	  ScopedProfiler(n->getRootNetwork()->getCpuProfileFlag() ? n->profileData : nullptr, dynamic_cast<ApiProviderBase::Holder*>(n->getScriptProcessor()))
-	{}
-};
-#else
-using NodeProfiler = DummyNodeProfiler;
-#endif
+
 
 
 
 class NodeComponent : public ComponentWithMiddleMouseDrag,
 					  public DspNetwork::SelectionListener,
-					  public ComponentWithDocumentation,
-					  public ParameterSourceObject
+					  public ComponentWithDocumentation
 {
 public:
 
@@ -67,7 +57,9 @@ public:
 		ExportAsTemplate,
 		CreateScreenShot,
 		EditProperties,
+		UnfreezeNode,
 		ExplodeLocalCables,
+		FreezeNode,
 		WrapIntoDspNetwork,
 		WrapIntoChain,
 		WrapIntoSplit,
@@ -131,7 +123,6 @@ public:
 		void updateColour(Identifier id, var value)
 		{
 			colour = PropertyHelpers::getColourFromVar(value);
-			parent.setColour(complex_ui_laf::NodeColourId, colour);
 			repaint();
 		}
 
@@ -177,14 +168,48 @@ public:
 		HiseShapeButton powerButton;
 		HiseShapeButton deleteButton;
 		HiseShapeButton parameterButton;
-
-		TextButton autofixButton;
-
+		HiseShapeButton freezeButton;
+		
 		bool isDragging = false;
 
 		ComponentDragger d;
 
 		bool isHoveringOverBypass = false;
+	};
+
+	struct EmbeddedNetworkBar : public Component,
+							    public ButtonListener
+	{
+		EmbeddedNetworkBar(NodeBase* n);
+
+		void paint(Graphics& g) override
+		{
+			g.setColour(Colour(0x1e000000));
+			auto b = getLocalBounds().reduced(1, 0);
+			g.fillRect(b);
+			g.setColour(Colours::white.withAlpha(0.1f));
+			g.drawHorizontalLine(getHeight(), 1.0f, (float)getWidth() - 2.0f);
+		}
+
+		void buttonClicked(Button* b) override;
+
+		void resized() override;
+
+		struct Factory : public PathFactory
+		{
+			Path createPath(const String& url) const override;
+		} f;
+
+		void updateFreezeState(const Identifier& id, const var& newValue);
+
+		HiseShapeButton gotoButton;
+		HiseShapeButton freezeButton;
+		HiseShapeButton warningButton;
+
+		valuetree::PropertyListener freezeUpdater;
+
+		WeakReference<NodeBase> parentNode;
+		WeakReference<DspNetwork> embeddedNetwork;
 	};
 
 	NodeComponent(NodeBase* b);;
@@ -194,82 +219,12 @@ public:
 	{
 		static juce::Rectangle<int> getPositionInCanvasForStandardSliders(const NodeBase* n, Point<int> topLeft);
 
-		static juce::Rectangle<int> createRectangleForParameterSliders(int numParameters, int numColumns);
-
-		static juce::Rectangle<int> withExtraBoundsApplied(const NodeBase* n, Rectangle<int> sliderBounds);
-
-		static juce::Rectangle<int> getPageBounds(int numParameters);
-
-		static void applySliderPositions(Rectangle<int>& b, const Array<Component::SafePointer<Component>>& sliders)
-		{
-			auto rowHeight = 48 + 28;
-			int numPerRow = jlimit(1, jmax(sliders.size(), 1), b.getWidth() / 100);
-			int numColumns = jmax(1, (b.getHeight() + 10) / rowHeight);
-
-			auto staticIntend = 0;
-
-			if (numColumns == 2 && numPerRow > 3)
-				numPerRow = (int)hmath::ceil((float)sliders.size() / 2.0f);
-
-			staticIntend = (b.getWidth() - numPerRow * 100) / 2;
-
-			auto intendOddRows = (sliders.size() % jmax(1, numPerRow)) != 0;
-
-			auto rowIndex = 0;
-
-			auto row = b.removeFromTop(rowHeight);
-			row.removeFromLeft(staticIntend);
-			row.removeFromRight(staticIntend);
-
-			for (auto s : sliders)
-			{
-				auto sliderBounds = row.removeFromLeft(100);
-
-				if (sliderBounds.getWidth() < 100)
-				{
-					rowIndex++;
-					row = b.removeFromTop(rowHeight);
-
-					auto intend = staticIntend;
-
-					if (intendOddRows && (rowIndex % 2 != 0))
-						intend += 50;
-
-					row.removeFromLeft(intend);
-					row.removeFromRight(staticIntend);
-
-					sliderBounds = row.removeFromLeft(100);
-				}
-
-				if (b.getHeight() > 0)
-					sliderBounds.removeFromBottom(10);
-
-				s->setBounds(sliderBounds);
-			}
-		}
+		static juce::Rectangle<int> createRectangleForParameterSliders(const NodeBase* n, int numColumns);
 	};
 
 	void paint(Graphics& g) override;
 	void paintOverChildren(Graphics& g) override;
 	void resized() override;
-
-	double getParameterValue(int index) const override
-	{
-		jassert(isPositiveAndBelow(index, node->getNumParameters()));
-		return node->getParameterFromIndex(index)->getValue();
-	}
-
-	InvertableParameterRange getParameterRange(int index) const override
-	{
-		jassert(isPositiveAndBelow(index, node->getNumParameters()));
-		return RangeHelpers::getDoubleRange(node->getParameterFromIndex(index)->data);
-	}
-
-	PrepareSpecs getLastPrepareSpecs() const override { return node->getLastPrepareSpecs(); }
-
-	ValueTree getValueTree() const override { return node->getValueTree(); }
-
-	UndoManager* getUndoManager() const override { return node->getUndoManager(); }
 
 	bool keyPressed(const KeyPress& key) override
 	{
@@ -334,6 +289,7 @@ public:
 
 	ReferenceCountedObjectPtr<NodeBase> node;
 	Header header;
+	ScopedPointer<EmbeddedNetworkBar> embeddedNetworkBar;
 
 	valuetree::PropertyListener repaintListener;
 
@@ -351,6 +307,28 @@ struct DeactivatedComponent : public NodeComponent
 	void resized() override;
 };
 
+struct simple_visualiser : public ScriptnodeExtraComponent<NodeBase>
+{
+	simple_visualiser(NodeBase*, PooledUIUpdater* u);
 
+	NodeBase* getNode();
+	double getParameter(int index);
+    
+    InvertableParameterRange getParameterRange(int index);
+    
+	Colour getNodeColour();
+
+	void timerCallback() override;
+	virtual void rebuildPath(Path& path) = 0;
+	void paint(Graphics& g) override;
+
+	Path original;
+	Path gridPath;
+	Path p;
+
+	bool stroke = true;
+	bool drawBackground = true;
+	float thickness = 1.0f;
+};
 
 }

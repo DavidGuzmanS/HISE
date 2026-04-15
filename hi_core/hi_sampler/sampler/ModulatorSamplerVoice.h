@@ -63,30 +63,10 @@ public:
 	void calculateBlock(int startSample, int numSamples) override;
 	void resetVoice() override;
 
-#if HISE_SAMPLER_ALLOW_RELEASE_START
 	virtual void jumpToRelease()
 	{
-		if(shouldJumpToRelease())
-			wrappedVoice.jumpToRelease();
+		wrappedVoice.jumpToRelease();
 	}
-
-	enum class ReleaseStartState
-	{
-		Enabled,
-		AlwaysDisabled,
-		DisabledOnce
-	};
-
-	void setAllowReleaseStart(ReleaseStartState shouldAllow)
-	{
-		allowReleaseStart = shouldAllow;
-	}
-
-	bool shouldJumpToRelease() const { return allowReleaseStart == ReleaseStartState::Enabled; }
-
-	ReleaseStartState allowReleaseStart = ReleaseStartState::Enabled;
-
-#endif
 
 	virtual void setNonRealtime(bool isNonRealtime)
 	{
@@ -109,11 +89,8 @@ public:
 	// ================================================================================================================
 
 	float getConstantCrossfadeModulationValue() const noexcept;
+
 	const float *getCrossfadeModulationValues(int startSample, int numSamples);
-
-	float getConstantGroupModulationValue() const noexcept;
-	const float *getGroupModulationValues(int startSample, int numSamples);
-
 	void setSampleStartModValue(float modValue) { sampleStartModValue = modValue; };
 	void enablePitchModulation(bool shouldBeEnabled);
 	
@@ -189,7 +166,7 @@ private:
 	friend class ModulatorSampler;
 
 	bool nonRealtime = false;
-	bool firstInVoice = true;
+	
 
 	StreamingSamplerVoice wrappedVoice;
 
@@ -237,18 +214,11 @@ public:
 			v->loader.setIsNonRealtime(isNonRealtime);
 	}
 
-#if HISE_SAMPLER_ALLOW_RELEASE_START
-
 	void jumpToRelease() override
 	{
-		if(shouldJumpToRelease())
-		{
-			for(auto v: wrappedVoices)
-				v->jumpToRelease();
-		}
+		for(auto v: wrappedVoices)
+			v->jumpToRelease();
 	}
-
-#endif
 
 	// ================================================================================================================
 

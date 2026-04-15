@@ -417,8 +417,7 @@ public:
 
     enum Parameters
     {
-        OversamplingFactor,
-		FilterType
+        OversamplingFactor
     };
     
     static String getOversampleName()
@@ -441,7 +440,6 @@ public:
     DEFINE_PARAMETERS
     {
         DEF_PARAMETER(OversamplingFactor, OversampleNode);
-		DEF_PARAMETER(FilterType, OversampleNode);
     }
 
     SN_PARAMETER_MEMBER_FUNCTION;
@@ -457,16 +455,8 @@ public:
 		if(lastSpecs)
 			prepareNodes(lastSpecs);
     }
-
-	void setFilterType(double filterType)
-    {
-	    obj.setFilterType((int)filterType);
-
-		if(lastSpecs)
-			prepareNodes(lastSpecs);
-    }
     
-    bool hasFixedParameters() const final override { return true; }
+    bool hasFixedParameters() const final override { return OversampleFactor == -1; }
     
 	Component* createLeftTabComponent() const override
 	{
@@ -480,7 +470,6 @@ public:
 	{
 		ParameterDataList data;
 
-		if(OversampleFactor == -1)
 		{
 			auto maxExponent = wrap::oversample_base::MaxOversamplingExponent;
 
@@ -502,17 +491,6 @@ public:
 			p.setParameterValueNames(sa);
 
 			p.setDefaultValue(1.0);
-			data.add(std::move(p));
-		}
-
-		{
-			parameter::data p("FilterType");
-			p.info.index = data.size();
-			p.callback = parameter::inner<OversampleNode<OversampleFactor>, (int)Parameters::FilterType>(*this);
-
-			StringArray sa("Polyphase", "FIR");
-			p.setParameterValueNames(sa);
-			
 			data.add(std::move(p));
 		}
 
@@ -651,9 +629,9 @@ public:
 			blockSizeString(PropertyIds::BlockSize, "64")
 		{};
 
-		void initialise(ObjectWithValueTree* n)
+		void initialise(NodeBase* n)
 		{
-			parent = dynamic_cast<NodeBase*>(n);
+			parent = n;
 			blockSizeString.initialise(n);
 			blockSizeString.setAdditionalCallback(BIND_MEMBER_FUNCTION_2(DynamicBlockProperty::updateBlockSize), true);
 		}

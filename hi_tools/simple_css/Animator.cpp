@@ -34,9 +34,9 @@ namespace hise
 namespace simple_css
 {
 
-Animator::ScopedComponentSetter::ScopedComponentSetter(Animator::RenderTarget c)
+Animator::ScopedComponentSetter::ScopedComponentSetter(std::pair<Component*, int> c)
 {
-	auto root = dynamic_cast<CSSRootComponent*>(c.first.getComponent());
+	auto root = dynamic_cast<CSSRootComponent*>(c.first);
 
 	if(root == nullptr && c.first != nullptr)
 		root = c.first->findParentComponentOfClass<CSSRootComponent>();
@@ -94,7 +94,14 @@ bool Animator::Item::timerCallback(double delta)
 		return false;
 	}
 
-	return target.repaint();
+	if(target.first.getComponent() != nullptr)
+		target.first->repaint();
+	else
+	{
+		return false;
+	}
+
+	return true;
 }
 
 Animator::Animator()
@@ -168,7 +175,7 @@ void StateWatcher::Item::renderShadow(Graphics& g, const Path& p,
 	}
 }
 
-void StateWatcher::checkChanges(Animator::RenderTarget c, StyleSheet::Ptr ss, int currentState)
+void StateWatcher::checkChanges(std::pair<Component*, int> c, StyleSheet::Ptr ss, int currentState)
 {
 	auto stateChanged = changed(c, currentState);
 
@@ -224,6 +231,8 @@ void StateWatcher::checkChanges(Animator::RenderTarget c, StyleSheet::Ptr ss, in
 
 				if(thisTransition)
 				{
+					
+
 					PropertyKey thisStartValue(p.name, PseudoState(stateChanged.second).withElement(t));
 					PropertyKey thisEndValue(p.name, PseudoState(currentState).withElement(t));
                     
@@ -273,7 +282,7 @@ void StateWatcher::checkChanges(Animator::RenderTarget c, StyleSheet::Ptr ss, in
 	}
 }
 
-std::pair<bool, int> StateWatcher::changed(Animator::RenderTarget c, int stateFlag)
+std::pair<bool, int> StateWatcher::changed(std::pair<Component*, int> c, int stateFlag)
 {
 	for(auto& i: items)
 	{
@@ -288,7 +297,7 @@ std::pair<bool, int> StateWatcher::changed(Animator::RenderTarget c, int stateFl
 
 void StateWatcher::registerComponentToUpdate(Component* c)
 {
-	updatedComponents.addIfNotAlreadyThere({ Animator::RenderTarget(c) });
+	updatedComponents.addIfNotAlreadyThere({ {c, -1} });
 }
 
 void StateWatcher::UpdatedComponent::update(CSSRootComponent* cssRoot, StyleSheet::Ptr ss, int currentState)

@@ -69,8 +69,6 @@ DspNodeList::ParameterItem::ParameterItem(DspNetwork* parent, int parameterIndex
 	pIndex(parameterIndex),
 	dragListener(&dragButton, [parameterIndex](DspNetworkGraph* g){ return DspNetworkListeners::MacroParameterDragListener::findSliderComponent(g, parameterIndex); })
 {
-	setUsePopupMenu(true);
-
 	pname.getTextValue().referTo(ptree.getPropertyAsValue(PropertyIds::ID, parent->getUndoManager()));
 
 	auto value = (double)ptree[PropertyIds::Value];
@@ -82,9 +80,7 @@ DspNodeList::ParameterItem::ParameterItem(DspNetwork* parent, int parameterIndex
 	addAndMakeVisible(dragButton);
 	addAndMakeVisible(pname);
 
-	valueSlider.addMouseListener(this, false);
-	pname.addMouseListener(this, false);		
-
+			
 
 	valueSlider.setSliderStyle(juce::Slider::SliderStyle::LinearHorizontal);
 	valueSlider.setTextBoxStyle(juce::Slider::TextEntryBoxPosition::NoTextBox, false, 0, 0);
@@ -154,15 +150,11 @@ DspNodeList::NodeItem::NodeItem(DspNetwork* parent, const String& id):
             
 	powerButton.setToggleModeWithColourChange(true);
 
-	idListener.setCallback(node->getValueTree(), 
-		{ PropertyIds::Name }, 
-		valuetree::AsyncMode::Asynchronously,
-		VT_BIND_PROPERTY_LISTENER(updateId));
+	idListener.setCallback(node->getValueTree(), { PropertyIds::Name }, valuetree::AsyncMode::Asynchronously,
+	                       BIND_MEMBER_FUNCTION_2(NodeItem::updateId));
 
-	bypassListener.setCallback(node->getValueTree(), 
-		{ PropertyIds::Bypassed }, 
-		valuetree::AsyncMode::Asynchronously,
-		VT_BIND_PROPERTY_LISTENER(updateBypassState));
+	bypassListener.setCallback(node->getValueTree(), { PropertyIds::Bypassed }, valuetree::AsyncMode::Asynchronously,
+	                           BIND_MEMBER_FUNCTION_2(NodeItem::updateBypassState));
 
 	auto fid = node->getValueTree()[PropertyIds::FactoryPath].toString();
 

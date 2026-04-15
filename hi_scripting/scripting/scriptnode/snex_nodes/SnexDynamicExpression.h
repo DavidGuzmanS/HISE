@@ -102,7 +102,7 @@ struct dynamic_expression : public snex::DebugHandler
 		ModulationSourceBaseComponent d;
 
 		HiseShapeButton debugButton;
-		scriptnode::complex_ui_laf laf;
+		data::ui::pimpl::complex_ui_laf laf;
 
 		int codeHeight = 24;
 		int ywidth = 0;
@@ -116,7 +116,7 @@ struct dynamic_expression : public snex::DebugHandler
 
 	bool isMathNode = false;
 
-	void initialise(ObjectWithValueTree* n);
+	void initialise(NodeBase* n);
 
 	void logMessage(int level, const juce::String& s) override;
 
@@ -177,7 +177,6 @@ private:
 	NodePropertyT<bool> debugEnabled;
 	NodePropertyT<String> code;
 	snex::JitExpression::Ptr expr;
-	WeakReference<NodeBase> node;
 
 	JUCE_DECLARE_WEAK_REFERENCEABLE(dynamic_expression);
 };

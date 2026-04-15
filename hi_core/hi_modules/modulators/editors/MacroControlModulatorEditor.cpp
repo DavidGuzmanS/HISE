@@ -52,6 +52,7 @@ MacroControlModulatorEditorBody::MacroControlModulatorEditorBody (ProcessorEdito
 
     addAndMakeVisible (smoothingSlider = new HiSlider ("Smoothing"));
     smoothingSlider->setTooltip (TRANS("Smoothing Value"));
+    smoothingSlider->setRange (0, 2000, 0);
     smoothingSlider->setSliderStyle (Slider::RotaryHorizontalVerticalDrag);
     smoothingSlider->setTextBoxStyle (Slider::TextBoxRight, false, 60, 20);
     smoothingSlider->addListener (this);
@@ -63,10 +64,7 @@ MacroControlModulatorEditorBody::MacroControlModulatorEditorBody (ProcessorEdito
     macroSelector->setTextWhenNoChoicesAvailable (TRANS("(no choices)"));
     macroSelector->addItem (TRANS("Not connected"), 1);
 
-    auto mc = p->getProcessor()->getMainController();
-	auto numMacros = HISE_GET_PREPROCESSOR(mc, HISE_NUM_MACROS);
-
-	for (int i = 0; i < numMacros; i++)
+	for (int i = 0; i < HISE_NUM_MACROS; i++)
 		macroSelector->addItem("Macro " + String(i + 1), i + 2);
 
     macroSelector->addListener (this);
@@ -78,8 +76,8 @@ MacroControlModulatorEditorBody::MacroControlModulatorEditorBody (ProcessorEdito
 	getProcessor()->getMainController()->skin(*macroSelector);
 	getProcessor()->getMainController()->skin(*useTableButton);
 
-	auto md = getProcessor()->getMetadata();
-	md.setup(*smoothingSlider, getProcessor(), MacroModulator::SmoothTime);
+	smoothingSlider->setup(getProcessor(), MacroModulator::SmoothTime, "Smoothing");
+    smoothingSlider->setMode(HiSlider::Time, 0.0, 1000.0, 100.0);
 
     ProcessorHelpers::connectTableEditor(*valueTable, getProcessor());
     

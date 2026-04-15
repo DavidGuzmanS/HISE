@@ -36,13 +36,13 @@
 namespace hise { using namespace juce;
 
 class ScriptedControlAudioParameter : public AudioProcessorParameterWithID,
-									  public HisePluginParameterBase
+									  public AsyncUpdater
 {
 public:
 
 	// ================================================================================================================
 
-	enum class ControlType
+	enum class Type
 	{
 		Slider = 0,
 		Button,
@@ -53,35 +53,15 @@ public:
 
 	ScriptedControlAudioParameter(ScriptingApi::Content::ScriptComponent *newComponent, 
 								  AudioProcessor *parentProcessor, 
-								  ScriptBaseMidiProcessor *scriptProcessor, int pIndex,
-								  int attributeIndex);
-
-	void cleanup() override
-	{
-		if(scriptProcessor != nullptr)
-		{
-			scriptProcessor->removeAttributeListener(&attributeListener);
-		}
-
-		HisePluginParameterBase::cleanup();
-	}
+								  ScriptBaseMidiProcessor *scriptProcessor, 
+								  int index);
 
 	void setControlledScriptComponent(ScriptingApi::Content::ScriptComponent *newComponent);
 
-#if 0
 	void handleAsyncUpdate() override
 	{
 		setParameterNotifyingHostInternal(indexForHost, valueForHost);
 	}
-#endif
-
-	HisePluginParameterBase::Type getType() const override { return HisePluginParameterBase::Type::ScriptControl; }
-	NormalisableRange<float> getNormalisableRange() const override { return range; }
-	int getSlotIndex() const override { return attributeIndex; }
-	ValueToTextConverter getValueToTextConverter() const override { return vtc; }
-	String getHisePluginParameterName() const override { return getName(10000); }
-	float getHisePluginParameterNormalisedValue() const override { return getValue(); }
-	String getHisePluginParameterGroupName() const override { return groupName; }
 
 	// ================================================================================================================
 
@@ -95,13 +75,13 @@ public:
 	float getValueForText(const String &text) const override;
 	int getNumSteps() const override;
 
-	//void setParameterNotifyingHost(int index, float newValue);
+	void setParameterNotifyingHost(int index, float newValue);
 	bool isAutomatable() const override { return true; };
 
     
     bool isMetaParameter() const override;
     
-	static ControlType getControlType(ScriptingApi::Content::ScriptComponent *component);
+	static Type getType(ScriptingApi::Content::ScriptComponent *component);
 
 	static String getNameForComponent(ScriptingApi::Content::ScriptComponent *component)
 	{
@@ -113,20 +93,11 @@ public:
 
 	Identifier getId() const { return id; }
 
-	void onParameterUpdate(dispatch::library::Processor*, uint16 )
-	{
-		if(scriptProcessor != nullptr)
-		{
-			auto v = scriptProcessor->getAttribute(attributeIndex);
-			onUpdate(-1, v);
-		}
-	}
+	void deactivateUpdateForNextSetValue() { deactivated = true; }
 
 private:
 
-	//void setParameterNotifyingHostInternal(int index, float newValue);
-
-	dispatch::library::Processor::AttributeListener attributeListener;
+	void setParameterNotifyingHostInternal(int index, float newValue);
 
 	float valueForHost = 0.0f;
 	int indexForHost = -1;
@@ -138,20 +109,16 @@ private:
 	bool deactivated;
 	const Identifier id;
 	NormalisableRange<float> range;
-	ControlType type;
+	Type type;
 	AudioProcessor *parentProcessor;
 	WeakReference<Processor> scriptProcessor;
+	int componentIndex;
 	String suffix;
 	StringArray itemList;
     bool isMeta = false;
-
-	// the index of the attribute for this component
-	int attributeIndex = -1;
-
+    
 	float lastValue = -1.0f;
 	bool lastValueInitialised = false;
-	String groupName;
-	
 
 	JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ScriptedControlAudioParameter);
 
@@ -322,8 +289,6 @@ public:
 	/** Don't forget to deregister the listener here. */
 	virtual ~ScriptCreatedComponentWrapper();;
 
-	virtual void postInit();
-
 	/** Overwrite this method and update the component. */
 	virtual void updateComponent() = 0;
 
@@ -342,12 +307,6 @@ public:
 	Component *getComponent() { return component; }
 
 	const Component *getComponent() const { return component; }
-
-	void clearQueue() override
-	{
-		auto sp = getScriptComponent()->profile(getScriptComponent()->pOnProperty);
-		AsyncValueTreePropertyListener::clearQueue();
-	}
 
 	virtual void asyncValueTreePropertyChanged(ValueTree& v, const Identifier& id);
 
@@ -497,7 +456,7 @@ class ScriptCreatedComponentWrappers
 public:
 
 	class SliderWrapper: public ScriptCreatedComponentWrapper,
-						 public Slider::Listener
+						 public SliderListener
 	{
 	public:
 		SliderWrapper(ScriptContentComponent *content, ScriptingApi::Content::ScriptSlider *scriptSlider, int index);
@@ -982,8 +941,6 @@ public:
 
 		WebViewWrapper(ScriptContentComponent *content, ScriptingApi::Content::ScriptWebView *wv, int index);
 
-		void postInit() override;
-
 		~WebViewWrapper();
 
 		void updateComponent() override {}
@@ -1010,43 +967,6 @@ public:
         void updateLookAndFeel();
         
 		JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(FloatingTileWrapper)
-	};
-
-	class DynamicComponentWrapper : public ScriptCreatedComponentWrapper
-	{
-	public:
-
-		DynamicComponentWrapper(ScriptContentComponent* content,
-		                        ScriptingApi::Content::ScriptDynamicContainer* container, int index);
-
-		void updateComponent() override {}
-
-	private:
-
-		struct WrapperComponent: public Component
-		{
-			static void onChange(WrapperComponent& c, dyncomp::Data::Ptr d)
-			{
-				if(d != nullptr)
-					c.addAndMakeVisible(c.root = new dyncomp::Root(d));
-				else
-					c.root = nullptr;
-
-				c.resized();
-				
-			}
-
-			void resized() override
-			{
-				if(root != nullptr)
-					root->setBounds(getLocalBounds());
-			}
-
-			ScopedPointer<dyncomp::Root> root;
-			JUCE_DECLARE_WEAK_REFERENCEABLE(WrapperComponent);
-		};
-
-		JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(DynamicComponentWrapper);
 	};
 
 	class MultipageDialogWrapper : public ScriptCreatedComponentWrapper

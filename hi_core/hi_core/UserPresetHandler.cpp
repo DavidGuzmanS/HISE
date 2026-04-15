@@ -172,14 +172,10 @@ MainController::UserPresetHandler::CustomAutomationData::CustomAutomationData(Cu
 	static const Identifier max("max");
 	static const Identifier midPos("middlePosition");
 	static const Identifier step("stepSize");
-	static const Identifier defaultValue("defaultValue");
 	static const Identifier isMidi("allowMidiAutomation");
 	static const Identifier isHost("allowHostAutomation");
-	static const Identifier pluginParameterGroup("pluginParameterGroup");
 	static const Identifier connections("connections");
-	static const Identifier mode("mode");
-	static const Identifier suffix("suffix");
-	static const Identifier options("options");
+	
 
 	id = d[id_].toString();
 
@@ -193,39 +189,6 @@ MainController::UserPresetHandler::CustomAutomationData::CustomAutomationData(Cu
 		range.setSkewForCentre((float)d[midPos]);
 
 	range.interval = (float)d.getProperty(step, 0.0f);
-
-	groupName = d.getProperty(pluginParameterGroup, "").toString();
-
-	if(d.hasProperty(mode))
-	{
-		vtc = ValueToTextConverter::createForMode(d[mode].toString());
-	}
-	else if(d.hasProperty(options) && d[options].isArray())
-	{
-		StringArray op;
-
-		auto list = d[options];
-
-		for(auto& s: *list.getArray())
-			op.add(s.toString());
-
-		vtc = ValueToTextConverter::createForOptions(op);
-	}
-	else
-	{
-		vtc.active = true;
-		vtc.stepSize = range.interval;
-		vtc.suffix = d[suffix].toString();
-	}
-
-	if(d.hasProperty(defaultValue))
-	{
-		defaultParameterValue = (float)d[defaultValue];
-		FloatSanitizers::sanitizeFloatNumber(defaultParameterValue);
-		defaultParameterValue = jlimit<float>(range.start, range.end, defaultParameterValue);
-	}
-	else
-		defaultParameterValue = range.start;
 
 	auto cArray = d[connections];
 
@@ -250,12 +213,6 @@ MainController::UserPresetHandler::CustomAutomationData::CustomAutomationData(Cu
 	else
 	{
 		r = Result::fail("No connections");
-	}
-
-	if(!connectionList.isEmpty())
-	{
-		auto newValue = connectionList.getFirst()->getLastValue();
-		lastValue = FloatSanitizers::sanitizeFloatNumber(newValue);
 	}
 
 	args[0] = index;
@@ -467,13 +424,8 @@ float MainController::UserPresetHandler::CustomAutomationData::ProcessorConnecti
 
 
 MainController::UserPresetHandler::UserPresetHandler(MainController* mc_) :
-	mc(mc_),
-	userPresetSource(new DebugSession::ProfileDataSource()) 
+	mc(mc_)
 {
-	PROFILE_ONLY(userPresetSource->name = "Load user preset");
-	PROFILE_ONLY(userPresetSource->colour = Colour(0xFF555555));
-	PROFILE_ONLY(userPresetSource->sourceType = DebugSession::ProfileDataSource::SourceType::BackgroundTask);
-
 	timeOfLastPresetLoad = Time::getMillisecondCounter();
 }
 
@@ -586,7 +538,6 @@ void MainController::UserPresetHandler::saveUserPresetInternal(const String& nam
 
 void MainController::UserPresetHandler::loadUserPresetInternal()
 {
-	DebugSession::ProfileDataSource::ScopedProfiler sp(userPresetSource, &mc->getDebugSession());
 	ScopedValueSetter<void*> svs(currentThreadThatIsLoadingPreset, LockHelpers::getCurrentThreadHandleOrMessageManager());
 
 	{

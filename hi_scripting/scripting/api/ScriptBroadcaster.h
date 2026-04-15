@@ -105,8 +105,6 @@ struct ScriptBroadcaster :  public ConstScriptingObject,
 
 	bool isRealtimeSafe() const override;
 
-	int getNumArguments() const override { return argumentIds.size(); }
-
 	bool allowRefCount() const override;;
         
 	void timerCallback() override;
@@ -253,8 +251,6 @@ struct ScriptBroadcaster :  public ConstScriptingObject,
 
 private:
 
-	ProfileCollection broadcasterProfile;
-
 	void sendMessageInternal(var args, bool isSync);
 
 	bool forceSync = false;
@@ -335,7 +331,6 @@ private:
 		virtual void registerSpecialBodyItems(ComponentWithPreferredSize::BodyFactory& factory);
 		virtual Array<var> createChildArray() const = 0;
 
-		int profileIndex = 0;
 		Metadata metadata;
 	};
 
@@ -350,12 +345,6 @@ private:
 		virtual ~TargetBase();;
 
 		virtual Result callSync(const Array<var>& args) = 0;
-
-		Result callSyncWithProfile(ScriptBroadcaster& sb, const Array<var>& args)
-		{
-			auto p = sb.broadcasterProfile.profile(profileIndex);
-			return callSync(args);
-		}
 
 		bool operator==(const TargetBase& other) const;
 
@@ -515,13 +504,7 @@ private:
 		virtual Array<var> getInitialArgs(int callIndex) const;;// = 0;
 
         virtual ~ListenerBase();;
-
-		Result callItemWithProfile(ScriptBroadcaster& b, TargetBase* n)
-		{
-			auto p = b.broadcasterProfile.profile(profileIndex);
-			return callItem(n);
-		}
-
+     
 		virtual Result callItem(TargetBase* n) = 0;
 
 		JUCE_DECLARE_WEAK_REFERENCEABLE(ListenerBase);
@@ -575,7 +558,7 @@ private:
 		struct InternalListener;
 		Identifier getItemId() const override;
 
-		EqListener(ScriptBroadcaster* b, const ReferenceCountedArray<ProcessorFilterStatistics>& eqs, const StringArray& eventList, const var& metadata);
+		EqListener(ScriptBroadcaster* b, const Array<WeakReference<CurveEq>>& eqs, const StringArray& eventList, const var& metadata);
 
 		int getNumInitialCalls() const override;
 		Array<var> getInitialArgs(int callIndex) const override;
@@ -931,7 +914,6 @@ private:
 		int currentIndex = -1;
 
 		const int radioGroup;
-		ScriptBroadcaster& parent;
 		OwnedArray<InternalListener> items;
 	};
 	

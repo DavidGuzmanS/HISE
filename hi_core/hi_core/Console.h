@@ -85,6 +85,8 @@ public:
 
 	static void updateFontSize(Console& c, float newSize);
 
+private:
+
 	class ConsoleTokeniser : public CodeTokeniser
 	{
 	public:
@@ -94,8 +96,6 @@ public:
 		int readNextToken(CodeDocument::Iterator& source);
 
 		CodeEditorComponent::ColourScheme getDefaultColourScheme() override;
-
-		bool errorIsWholeLine = false;
 
 	private:
 

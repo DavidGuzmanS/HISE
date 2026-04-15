@@ -38,7 +38,6 @@ namespace hise { using namespace juce;
 
 
 class BackendProcessor;
-class InteractionTester;
 
 struct AnalyserInfo: public ReferenceCountedObject
 {
@@ -61,126 +60,6 @@ struct AnalyserInfo: public ReferenceCountedObject
 	int lastNoteNumber = -1;
 	double duration = 0.0;
 	SimpleRingBuffer::Ptr ringBuffer[2];
-};
-
-class AutoSaver : private Timer,
-				  public ControlledObject,
-				  public ProjectHandler::Listener
-{
-public:
-
-	~AutoSaver() override
-	{
-		getMainController()->getSampleManager().getProjectHandler().removeListener(this);
-	}
-
-	AutoSaver(MainController* mc) :
-	  ControlledObject(mc),
-	  currentAutoSaveIndex(0)
-	{
-		
-	}
-
-	void updateAutosaving()
-	{
-		if (isAutoSaving())
-			enableAutoSaving();
-		else
-			disableAutoSaving();
-	}
-
-	void initialise()
-	{
-		getMainController()->getSampleManager().getProjectHandler().addListener(this);
-		projectChanged(File());
-	}
-
-private:
-
-	int getIntervalInMinutes() const
-	{
-		auto value = (int)dynamic_cast<const GlobalSettingManager*>(getMainController())->getSettingsObject().getSetting(HiseSettings::Other::AutosaveInterval);
-
-		if (value >= 1 && value <= 30)
-			return value;
-
-		return 5;
-	}
-
-	void enableAutoSaving()
-	{
-		IF_NOT_HEADLESS(startTimer(1000 * 60 * getIntervalInMinutes())); // autosave all 5 minutes
-	}
-
-	void disableAutoSaving()
-	{
-		stopTimer();
-	}
-
-	bool isAutoSaving() const
-	{
-		return dynamic_cast<const GlobalSettingManager*>(getMainController())->getSettingsObject().getSetting(HiseSettings::Other::EnableAutosave);
-	}
-
-	void projectChanged(const File&) override
-	{
-		currentAutoSaveIndex = 0;
-		fileList.clear();
-		updateAutosaving();
-	}
-
-	
-
-	void timerCallback() override
-	{
-		Processor* mainSynthChain = getMainController()->getMainSynthChain();
-
-		File backupFile = getAutoSaveFile();
-
-		ValueTree v = mainSynthChain->exportAsValueTree();
-
-		v.setProperty("BuildVersion", BUILD_SUB_VERSION, nullptr);
-		FileOutputStream fos(backupFile);
-		v.writeToStream(fos);
-
-		debugToConsole(mainSynthChain, "Autosaving as " + backupFile.getFileName());
-	}
-
-	File getAutoSaveFile()
-	{
-		File presetDirectory = getPresetFolder();
-
-		if (presetDirectory.isDirectory())
-		{
-			if (fileList.size() == 0)
-			{
-				fileList.add(presetDirectory.getChildFile("Autosave_1.hip"));
-				fileList.add(presetDirectory.getChildFile("Autosave_2.hip"));
-				fileList.add(presetDirectory.getChildFile("Autosave_3.hip"));
-				fileList.add(presetDirectory.getChildFile("Autosave_4.hip"));
-				fileList.add(presetDirectory.getChildFile("Autosave_5.hip"));
-			}
-
-			File toReturn = fileList[currentAutoSaveIndex];
-
-			if (toReturn.existsAsFile()) toReturn.deleteFile();
-
-			currentAutoSaveIndex = (currentAutoSaveIndex + 1) % 5;
-
-			return toReturn;
-		}
-
-		return File();
-	}
-
-	File getPresetFolder() const 
-	{
-		return getMainController()->getSampleManager().getProjectHandler().getSubDirectory(FileHandlerBase::Presets);
-	}
-
-	Array<File> fileList;
-
-	int currentAutoSaveIndex;
 };
 
 struct ExampleAssetManager: public ReferenceCountedObject,
@@ -214,150 +93,6 @@ struct ExampleAssetManager: public ReferenceCountedObject,
 	using Ptr = ReferenceCountedObjectPtr<ExampleAssetManager>;
 };
 
-struct PluginParameterSimulatorInfo
-{
-	enum class SourceThread
-	{
-		UI,
-		Custom,
-		Audio,
-		numSourceThreads
-	};
-
-	enum class EventType
-	{
-		Undefined,
-		BeginGesture,
-		ValueChange,
-		EndGesture
-	};
-
-	operator bool() const { return currentParameter != nullptr && eventType != EventType::Undefined; }
-
-	void performChange()
-	{
-		jassert(currentValue >= 0.0f && currentValue <= 1.0f);
-
-		if(eventType == EventType::ValueChange)
-			currentParameter->asJuceParameter()->setValueNotifyingHost(currentValue);
-	}
-
-	void performGesture()
-	{
-		if(eventType == EventType::BeginGesture)
-			currentParameter->asJuceParameter()->beginChangeGesture();
-		else if (eventType == EventType::EndGesture)
-			currentParameter->asJuceParameter()->endChangeGesture();
-	}
-
-	bool isActiveGesture() const
-	{
-		return eventType == EventType::BeginGesture || eventType == EventType::ValueChange;
-	}
-
-	bool isGestureEvent() const
-	{
-		return eventType == EventType::BeginGesture || eventType == EventType::EndGesture;
-	}
-
-	SourceThread sourceThread = SourceThread::UI;
-	bool useRamp = false;
-	int bufferSize = -1;
-	WeakReference<HisePluginParameterBase> currentParameter;
-	float currentValue = 0.0f;
-	EventType eventType = EventType::Undefined;
-};
-
-struct PluginParameterRamp: public PooledUIUpdater::SimpleTimer,
-						    public ControlledObject,
-							public Thread
-{
-	PluginParameterRamp(MainController* mc):
-	  SimpleTimer(mc->getGlobalUIUpdater(), false),
-	  ControlledObject(mc),
-	  Thread("Custom Automation Thread")
-	{}
-
-	~PluginParameterRamp()
-	{
-		stopThread(1000);
-	}
-
-	void run() override
-	{
-		while(!threadShouldExit())
-		{
-			PluginParameterSimulatorInfo thisInfo;
-
-			{
-				SimpleReadWriteLock::ScopedReadLock sl(lock);
-				thisInfo = currentInfo;
-			}
-
-			if(gestureAtNextCallback)
-			{
-				gestureInfo.performGesture();
-				gestureAtNextCallback = false;
-
-				if(gestureInfo.eventType == PluginParameterSimulatorInfo::EventType::EndGesture)
-				{
-					currentInfo = {};
-					thisInfo = {};
-					gestureInfo = {};
-				}
-			}
-
-			if(thisInfo && thisInfo.sourceThread == PluginParameterSimulatorInfo::SourceThread::Custom)
-			{
-				if(currentInfo.useRamp)
-					performTimer(thisInfo);
-				else
-				{
-					thisInfo.performChange();
-					currentInfo = {};
-				}
-			}
-				
-			sleep(5);
-		}
-	}
-
-	void performTimer(PluginParameterSimulatorInfo& infoToUse)
-	{
-		auto thisTime = Time::getMillisecondCounterHiRes();
-		auto delta = jlimit(3.0, 60.0, thisTime - lastTimer);
-		lastTimer = thisTime;
-		hise::SimpleReadWriteLock::ScopedReadLock sl(lock);
-		bump(infoToUse, delta);
-		currentInfo.currentValue = infoToUse.currentValue;
-	}
-
-	void timerCallback() override
-	{
-		performTimer(currentInfo);
-	}
-
-	using ProcessCallback = std::function<void(float**, AudioSampleBuffer&, MidiBuffer&, int, int)>;
-
-	bool processBlock(AudioSampleBuffer& buffer, MidiBuffer& midiMessages, const ProcessCallback& f);
-
-	void setCurrentInfo(const PluginParameterSimulatorInfo& newInfo);
-
-	void bump(PluginParameterSimulatorInfo& info, double milliSeconds);
-
-private:
-
-	double lastTimer = 0.0f;
-
-	bool gestureAtNextCallback = false;
-	bool sign = true;
-
-	hise::SimpleReadWriteLock lock;
-
-	PluginParameterSimulatorInfo gestureInfo;
-	PluginParameterSimulatorInfo currentInfo;
-};
-
 /** This is the main audio processor for the backend application. 
 *
 *	It connects to a BackendProcessorEditor and has extensive development features.
@@ -365,14 +100,13 @@ private:
 *	It is a wrapper for all plugin types and provides 8 parameters for the macro controls.
 *	It also acts as global MainController to allow every child object to get / set certain global information
 */
-class BackendProcessor: public AudioProcessorDriver,
-					    public PluginParameterAudioProcessor,
+class BackendProcessor: public PluginParameterAudioProcessor,
+					    public AudioProcessorDriver,
 						public MainController,
 						public ProjectHandler::Listener,
 						public MarkdownDatabaseHolder,
 						public ExpansionHandler::Listener,
-						public SimpleRingBuffer::WriterBase,
-						public RestServer::Listener
+						public SimpleRingBuffer::WriterBase
 {
 public:
 	BackendProcessor(AudioDeviceManager *deviceManager_=nullptr, AudioProcessorPlayer *callback_=nullptr);
@@ -386,16 +120,22 @@ public:
 	void handleEditorData(bool save);
 
 	void prepareToPlay (double sampleRate, int samplesPerBlock);
-	void releaseResources();
-
-	void checkLatency();;
+	void releaseResources() 
+	{
+		
+	};
 
 	void getStateInformation	(MemoryBlock &destData) override;;
 
-	void handleLatencyCheck(AudioSampleBuffer& buffer);
-	void handlePostLatencyCheck(AudioSampleBuffer& buffer);
-
-	void logMessage(const String& message, bool isCritical) override;
+	void logMessage(const String& message, bool isCritical) override
+	{
+		if (isCritical)
+		{
+			debugError(getMainSynthChain(), message);
+		}
+		else
+			debugToConsole(getMainSynthChain(), message);
+	}
 
 	void setStateInformation(const void *data,int sizeInBytes) override;
 
@@ -411,14 +151,6 @@ public:
 	bool acceptsMidi() const {return true;};
 	bool producesMidi() const {return false;};
 	
-	RestServer::Response onAsyncRequest(RestServer::AsyncRequest::Ptr req);
-
-	// RestServer::Listener callbacks
-	void serverStarted(int port) override;
-	void serverStopped() override;
-	void requestReceived(const String& method, const String& path) override;
-	void serverError(const String& message) override;
-
 	double getTailLengthSeconds() const {return 0.0;};
 
 	ModulatorSynthChain *getMainSynthChain() override {return synthChain; };
@@ -446,9 +178,6 @@ public:
 
 	Component* getRootComponent() override;
 
-	static void setUseCommandLineServerMode(int port) { commandLineServerPort = port; }
-	static bool isUsingCommandLineServerMode() { return commandLineServerPort != 0; }
-
 	bool databaseDirectoryInitialised() const override
 	{
 		auto path = getSettingsObject().getSetting(HiseSettings::Documentation::DocRepository).toString();
@@ -463,14 +192,6 @@ public:
 	{
 		return 8;
 	}
-
-	AutoSaver& getAutoSaver() { return autosaver; }
-	
-	/** Returns the InteractionTester for UI interaction testing via REST API. */
-	InteractionTester* getInteractionTester();
-	
-	/** Shows the Interaction Test Window, creating the tester if needed. */
-	void showInteractionTestWindow();
 
 	/// @brief returns the PluginParameter value of the indexed PluginParameter.
     float getParameter (int index) override
@@ -502,35 +223,7 @@ public:
 		return String(synthChain->getMacroControlData(index)->getDisplayValue(), 1);
 	}
 
-	void rebuildPluginParameters() override
-	{
-		if(deletePendingFlag)
-			return;
-
-#if IS_STANDALONE_APP
-		auto& oldParameters = getParameterTree();
-		auto fl = oldParameters.getParameters(true);
-
-		for(auto p: fl)
-		{
-			if(auto t = dynamic_cast<HisePluginParameterBase*>(p))
-				t->cleanup();
-		}
-
-		setParameterTree({});
-
-		juce::AudioProcessorParameterGroup list;
-		createScriptedParameters(list);
-
-		//processParameterList(list);
-
-		setParameterTree(std::move(list));
-
-		pluginParameterRefreshBroadcaster.sendMessage(sendNotificationAsync, true);
-#endif
-	}
-
-	JavascriptProcessor* createInterface(int width, int height, bool compile=true);;
+	JavascriptProcessor* createInterface(int width, int height);;
 
 	void setEditorData(var editorState);
 
@@ -538,17 +231,6 @@ public:
 	{
 		return &scriptUnlocker;
 	}
-
-	/** Creates or returns the build undo manager f. */
-	ControlledObject* getOrCreateRestServerBuildUndoManager();
-	
-	RestServer& getRestServer() { return restServer; }
-
-	ReplServer& getReplServer() { return replServer; }
-
-	simple_css::Animator& getCssParseAnimator() { return restServerAnimator; }
-
-	LambdaBroadcaster<bool> pluginParameterRefreshBroadcaster;
 
 	ScriptUnlocker scriptUnlocker;
 
@@ -599,29 +281,9 @@ public:
 
 	File customDocCacheFolder;
 
-	PluginParameterRamp pluginParameterRamp;
-
 private:
 
-#if HISE_INCLUDE_PROFILING_TOOLKIT
-	int numPressedKeys = 0;
-#endif
-
 	bool isSnippet = false;
-
-	enum class LatencyCheckState
-	{
-		Idle,
-		WaitingForKillCounter,
-		WaitingForProcessBlock,
-		WaitingForImpulse,
-		Done,
-		numLatencyCheckStates,
-	};
-
-	LatencyCheckState latencyCheckState = LatencyCheckState::Idle;
-	double reportedLatency = 0.0;
-	int killCounter = 0;
 
 	int currentNoteNumber = -1;
 
@@ -644,21 +306,6 @@ private:
 	ScopedPointer<BackendProcessor> docProcessor;
 	BackendRootWindow* docWindow;
 
-	AutoSaver autosaver;
-
-	ScopedPointer<ControlledObject> buildUndoManager;
-
-	RestServer restServer;
-	ReplServer replServer;
-	simple_css::Animator restServerAnimator;
-	
-	std::unique_ptr<InteractionTester> interactionTester;
-
-	hise::ProcessorMetadataRegistry processorDatabase;
-
-	static int commandLineServerPort;
-
-	JUCE_DECLARE_WEAK_REFERENCEABLE(BackendProcessor);
 	JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(BackendProcessor)
 };
 

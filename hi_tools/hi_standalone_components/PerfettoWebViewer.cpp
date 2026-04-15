@@ -109,10 +109,8 @@ PerfettoWebviewer::PerfettoWebviewer(BackendRootWindow* unused):
 	browser->goToURL("https://ui.perfetto.dev");
 #elif (JUCE_MAC && USE_BACKEND) || JUCE_LINUX
     
-#if !HISE_JUCE8
     addAndMakeVisible(browser = new WebBrowserComponent(true));
     browser->goToURL("https://ui.perfetto.dev");
-#endif
     
 #else
     data = new hise::WebViewData(File());

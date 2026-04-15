@@ -74,11 +74,6 @@ public:
 
 	void setLinkMode(LinkMode , String);
 
-	void setRootTitle(const String& currentRoot)
-	{
-		currentRootTitle = currentRoot;
-	}
-
 private:
 
 	void updateLinks();
@@ -86,7 +81,6 @@ private:
 	LinkMode mode;
 	String linkBase;
 
-	String currentRootTitle;
 	String headerContent;
 	String footerContent;
 

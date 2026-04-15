@@ -41,10 +41,7 @@ void MacroComponent::addSynthChainToPopup(ModulatorSynthChain *parent, PopupMenu
 		{
 			PopupMenu sub;
 
-			auto mc = msc->getMainController();
-			auto numMacros = HISE_GET_PREPROCESSOR(mc, HISE_NUM_MACROS);
-
-			for(int j = 0; j < numMacros; j++)
+			for(int j = 0; j < HISE_NUM_MACROS; j++)
 			{
 				if(msc->hasActiveParameters(j))
 				{
@@ -77,9 +74,7 @@ MacroComponent::MacroComponent(BackendRootWindow* rootWindow_) :
 	
 	mlaf = new MacroKnobLookAndFeel();
 
-	auto numMacros = HISE_GET_PREPROCESSOR(processor, HISE_NUM_MACROS);
-
-	for (int i = 0; i < numMacros; i++)
+	for (int i = 0; i < HISE_NUM_MACROS; i++)
 	{
 		Slider *s = new Slider();
 		s->setSliderStyle(Slider::RotaryHorizontalVerticalDrag);
@@ -359,7 +354,6 @@ multipage::EncodedDialogBase::EncodedDialogBase(BackendRootWindow* bpe_, bool ad
 	ControlledObject(bpe_->getBackendProcessor()),
 	rootWindow(bpe_),
 	closeButton("close", nullptr, factory),
-	minimizeButton("minimize", nullptr, factory),
 	addBorder(addBorder_)
 {
 	addAndMakeVisible(closeButton);
@@ -370,15 +364,6 @@ multipage::EncodedDialogBase::EncodedDialogBase(BackendRootWindow* bpe_, bool ad
 		{
 			dialog->cancel();
 		}
-	};
-
-	addChildComponent(minimizeButton);
-
-    minimizeButton.setTooltip("Minimize this task to the status bar");
-    
-	minimizeButton.onClick = [this]()
-	{
-		findParentComponentOfClass<BackendRootWindow>()->minimizeModalComponent(true, state.get());
 	};
 
 	closeButton.setVisible(addBorder);

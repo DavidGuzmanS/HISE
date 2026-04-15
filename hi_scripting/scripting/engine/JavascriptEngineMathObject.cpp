@@ -37,7 +37,7 @@ namespace hise { using namespace juce;
 struct HiseJavascriptEngine::RootObject::MathClass : public ApiClass
 {
 	MathClass() :
-	ApiClass(8)
+	ApiClass(2)
 	{
 		ADD_INLINEABLE_API_METHOD_1(abs);
 		ADD_INLINEABLE_API_METHOD_1(round);
@@ -79,9 +79,6 @@ struct HiseJavascriptEngine::RootObject::MathClass : public ApiClass
 		ADD_INLINEABLE_API_METHOD_1(isinf);
 		ADD_INLINEABLE_API_METHOD_1(isnan);
 		ADD_INLINEABLE_API_METHOD_1(sanitize);
-
-		ADD_INLINEABLE_API_METHOD_3(clamp);
-		ADD_INLINEABLE_API_METHOD_1(trunc);
 
 		addConstant("PI", double_Pi);
 		addConstant("E", exp(1.0));
@@ -137,9 +134,6 @@ struct HiseJavascriptEngine::RootObject::MathClass : public ApiClass
 		API_METHOD_WRAPPER_1(MathClass, isinf);
 		API_METHOD_WRAPPER_1(MathClass, isnan);
 		API_METHOD_WRAPPER_1(MathClass, sanitize);
-
-		API_METHOD_WRAPPER_3(MathClass, clamp);
-		API_METHOD_WRAPPER_1(MathClass, trunc);
 	};
 
 	/** Returns a random number between 0.0 and 1.0. */
@@ -187,18 +181,6 @@ struct HiseJavascriptEngine::RootObject::MathClass : public ApiClass
 		return var(hmath::sanitize(v));
 	}
 
-	/** Limits the value to the given range (JS-compatible alias for Math.range). */
-	var clamp(var value, var lowerLimit, var upperLimit)
-	{
-		return range(value, lowerLimit, upperLimit);
-	}
-
-	/** Truncates the value toward zero (removes the decimal part). */
-	var trunc(var value)
-	{
-		return var((int)(double)value);
-	}
-
 	/** Returns the sign of the value. */
 	var sign(var value)
 	{
@@ -227,10 +209,10 @@ struct HiseJavascriptEngine::RootObject::MathClass : public ApiClass
 			var(jmax((double)first, (double)second));
 	}
 
-	/** Converts radian (0...2*PI) to degree (0...360ï¿½). */
+	/** Converts radian (0...2*PI) to degree (0...360°). */
 	var toDegrees(var value) { return radiansToDegrees((double)value); }
 
-	/** Converts degree  (0...360ï¿½) to radian (0...2*PI). */
+	/** Converts degree  (0...360°) to radian (0...2*PI). */
 	var toRadians(var value) { return degreesToRadians((double)value); }
 
 	/** Calculates the sine value (radian based). */

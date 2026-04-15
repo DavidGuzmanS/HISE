@@ -35,47 +35,7 @@
 
 namespace hise { using namespace juce;
 
-hise::ProcessorMetadata EventDataModulator::createMetadata()
-{
-	return ProcessorMetadata(getClassType())
-		.withPrettyName("Event Data Modulator")
-		.withDescription("Creates a modulation value based on event data written through the global routing manager, allowing external control data to modulate voices.")
-		.withType<hise::VoiceStartModulator>()
-		.withParameter(ProcessorMetadata::ParameterMetadata(SlotIndex)
-			.withId("SlotIndex")
-			.withDescription("The event data slot index to read from (0-15)")
-			.withSliderMode(HiSlider::Discrete, scriptnode::InvertableParameterRange(0.0, (double)AdditionalEventStorage::NumDataSlots, 1.0))
-			.withDefault(0.0f))
-		.withParameter(ProcessorMetadata::ParameterMetadata(DefaultValue)
-			.withId("DefaultValue")
-			.withDescription("The value to use when the event data slot hasn't been written")
-			.withSliderMode(HiSlider::NormalizedPercentage, {})
-			.withDefault(0.0f));
-}
 
-hise::ProcessorMetadata EventDataEnvelope::createMetadata()
-{
-	return EnvelopeModulator::createBaseMetadata()
-		.withId(getClassType())
-		.withPrettyName("EventData Envelope")
-		.withDescription("An envelope modulator for time-varying event data slots, with smoothing for continuous modulation changes.")
-		.withType<hise::EnvelopeModulator>()
-		.withParameter(ProcessorMetadata::ParameterMetadata(SlotIndex)
-			.withId("SlotIndex")
-			.withDescription("The event data slot index to read from (0-15)")
-			.withSliderMode(HiSlider::Discrete, scriptnode::InvertableParameterRange(0.0, (double)AdditionalEventStorage::NumDataSlots, 1.0))
-			.withDefault(0.0f))
-		.withParameter(ProcessorMetadata::ParameterMetadata(DefaultValue)
-			.withId("DefaultValue")
-			.withDescription("The value to use when the event data slot hasn't been written")
-			.withSliderMode(HiSlider::NormalizedPercentage, {})
-			.withDefault(0.0f))
-		.withParameter(ProcessorMetadata::ParameterMetadata(SmoothingTime)
-			.withId("SmoothingTime")
-			.withDescription("Smoothing time for value changes in milliseconds")
-			.withSliderMode(HiSlider::Time, scriptnode::InvertableParameterRange(0.0, 2000.0, 0.0).withCentreSkew(100.0))
-			.withDefault(0.0f));
-}
 
 EventDataModulator::EventDataModulator(MainController* mc, const String& id, int numVoices, Modulation::Mode m):
 	VoiceStartModulator(mc, id, numVoices, m),
@@ -83,6 +43,9 @@ EventDataModulator::EventDataModulator(MainController* mc, const String& id, int
 {
 	auto rm = scriptnode::routing::GlobalRoutingManager::Helpers::getOrCreate(mc);
 	additionalEventStorage = &rm->additionalEventStorage;
+
+	parameterNames.add(Identifier("SlotIndex"));
+	parameterNames.add(Identifier("DefaultValue")); 
 	
 	updateParameterSlots();
 }
@@ -96,8 +59,6 @@ struct EventDataEditor: public ProcessorEditorBody
 	  dataSlot("SlotIndex")
 	{
 		auto isEnvelope = dynamic_cast<EventDataEnvelope*>(getProcessor()) != nullptr;
-
-		auto md = getProcessor()->getMetadata();
 
 		addAndMakeVisible(defaultValue);
 		defaultValue.setup(getProcessor(), isEnvelope ?
@@ -115,7 +76,7 @@ struct EventDataEditor: public ProcessorEditorBody
 		dataSlot.setup(getProcessor(), isEnvelope ? 
 			(int)EventDataEnvelope::Parameter::SlotIndex :
 			(int)EventDataModulator::Parameter::SlotIndex, "SlotIndex");
-		dataSlot.setMode(HiSlider::Discrete, {0.0, (double)AdditionalEventStorage::NumDataSlots, 1.0});
+		dataSlot.setMode(HiSlider::Discrete, 0.0, (double)AdditionalEventStorage::NumDataSlots, DBL_MAX,  1.0);
 
 		dataSlot.setTooltip (TRANS("Set the Slot index for the event data"));
 	    dataSlot.setSliderStyle (Slider::RotaryHorizontalVerticalDrag);
@@ -126,7 +87,8 @@ struct EventDataEditor: public ProcessorEditorBody
 		if(isEnvelope)
 		{
 			addAndMakeVisible(smoothingSlider = new HiSlider("SmoothingTime"));
-			md.setup(*smoothingSlider, getProcessor(), EventDataEnvelope::Parameter::SmoothingTime);
+			smoothingSlider->setup(getProcessor(), EventDataEnvelope::Parameter::SmoothingTime, "SmoothingTime");
+			smoothingSlider->setMode(HiSlider::Time, 0.0, 2000.0, 100.0);
 			smoothingSlider->setTooltip (TRANS("The value if the event data hasn't been written"));
 		    smoothingSlider->setSliderStyle (Slider::RotaryHorizontalVerticalDrag);
 		    smoothingSlider->setTextBoxStyle (Slider::TextBoxRight, true, 80, 20);
@@ -208,11 +170,16 @@ float EventDataModulator::calculateVoiceStartValue(const HiseEvent& e)
 
 EventDataEnvelope::EventDataEnvelope(MainController *mc, const String &id, int voiceAmount, Modulation::Mode m):
 		EnvelopeModulator(mc, id, voiceAmount, m),
-		Modulation(m),
-		metadataInitialised(updateParameterSlots())
+		Modulation(m)
 {
 	auto rm = scriptnode::routing::GlobalRoutingManager::Helpers::getOrCreate(mc);
 	additionalEventStorage = &rm->additionalEventStorage;
+
+	parameterNames.add("SlotIndex");
+	parameterNames.add("DefaultValue");
+	parameterNames.add("SmoothingTime");
+
+	updateParameterSlots();
 
 	for(int i = 0; i < polyManager.getVoiceAmount(); i++) states.add(createSubclassedState(i));
 
@@ -222,12 +189,6 @@ EventDataEnvelope::EventDataEnvelope(MainController *mc, const String &id, int v
 
 void EventDataEnvelope::setInternalAttribute(int parameterIndex, float newValue)
 {
-	if(parameterIndex < EnvelopeModulator::Parameters::numParameters)
-	{
-		EnvelopeModulator::setInternalAttribute(parameterIndex, newValue);
-		return;
-	}
-
 	FloatSanitizers::sanitizeFloatNumber(newValue);
 
 	switch(parameterIndex)
@@ -247,9 +208,6 @@ void EventDataEnvelope::setInternalAttribute(int parameterIndex, float newValue)
 
 float EventDataEnvelope::getAttribute(int parameterIndex) const
 {
-	if(parameterIndex < EnvelopeModulator::Parameters::numParameters)
-		return EnvelopeModulator::getAttribute(parameterIndex);
-
 	switch(parameterIndex)
 	{
 	case Parameter::SlotIndex:		  return (float)dataSlot;

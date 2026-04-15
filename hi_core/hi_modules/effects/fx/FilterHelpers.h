@@ -82,14 +82,13 @@ public:
 	void renderPoly(FilterHelpers::RenderData& r);
 	void renderMono(FilterHelpers::RenderData& r);
 
-    void setDisplayModValues(int voiceIndex, float freqModValue_, float gainModValue_, float qModValue_)
+    void setDisplayModValues(int voiceIndex, float freqModValue_, float gainModValue_)
     {
         if(voiceIndex != displayVoiceIndex)
             return;
         
         freqModValue = freqModValue_;
         gainModValue = gainModValue_;
-		qModValue = qModValue_;
     }
     
     void setDisplayVoiceIndex(int v) const
@@ -230,6 +229,11 @@ private:
 			filters[r.voiceIndex].render(r);
 		}
 
+		void processFrame(float* frameData, int numChannels)
+		{
+			filters[this->r.voiceIndex].processFrame(frameData, numChannels);
+		}
+
 		void setSampleRate(double sampleRate) override
 		{
 			for (auto &filter : filters)
@@ -302,7 +306,6 @@ private:
 	
     float freqModValue = 1.0f;
     float gainModValue = 1.0f;
-	float qModValue = 1.0f;
     mutable int displayVoiceIndex = -1;
     
 	double sampleRate = 44100.0;
@@ -465,13 +468,9 @@ public:
 	}
 };
 
-class FilterEffect: public ProcessorWithSingleStaticExternalData
+class FilterEffect
 {
 public:
-
-	FilterEffect(MainController* mc):
-	  ProcessorWithSingleStaticExternalData(mc, ExternalData::DataType::FilterCoefficients, 1)
-	{}
 
 	static FilterDataObject::CoefficientData getDisplayCoefficients(FilterBank::FilterMode m, double frequency, double q, float gain, double samplerate);
 	static String getTableValueAsGain(float input);
@@ -483,16 +482,11 @@ public:
 
 	virtual ~FilterEffect() {};
 
-	FilterDataObject::CoefficientData getCoefficients()
-	{
-		return getFilterData(0)->getCoefficients(0);
-	}
-
-	//virtual FilterDataObject::CoefficientData getCurrentCoefficients() const = 0;
+	virtual FilterDataObject::CoefficientData getCurrentCoefficients() const = 0;
 
 protected:
 
-	int quality = HISE_MAX_PROCESSING_BLOCKSIZE;
+	int quality;
 
 };
 

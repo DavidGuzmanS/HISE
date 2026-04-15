@@ -39,8 +39,6 @@ ModulatorSynthChain::ModulatorSynthChain(MainController *mc, const String &id, i
 	handler(this),
 	vuValue(0.0f)
 {
-	PROFILE_ONLY(addProfileDataSource("render children")->colour = Colour(0xFF888888));
-
 	finaliseModChains();
 
 	FactoryType *t = new ModulatorSynthChainFactoryType(numVoices, this);
@@ -146,6 +144,10 @@ void ModulatorSynthChain::setActiveChannels(const HiseEvent::ChannelFilterData& 
 HiseEvent::ChannelFilterData* ModulatorSynthChain::getActiveChannelData()
 { return &activeChannels; }
 
+bool ModulatorSynthChain::isUniformVoiceHandlerRoot() const
+{ return ownedUniformVoiceHandler != nullptr; };
+
+
 Processor * ModulatorSynthChain::getChildProcessor(int processorIndex)
 {
 
@@ -167,6 +169,9 @@ void ModulatorSynthChain::prepareToPlay(double newSampleRate, int samplesPerBloc
 
 	for (auto s: synths)
 		s->prepareToPlay(newSampleRate, samplesPerBlock);
+
+	if (ownedUniformVoiceHandler != nullptr)
+        ownedUniformVoiceHandler->rebuildChildSynthList();
 }
 
 void ModulatorSynthChain::numSourceChannelsChanged()
@@ -238,9 +243,8 @@ void ModulatorSynthChain::compileAllScripts()
             
         while(auto m = rti.getNextProcessor())
         {
-			auto as_p = dynamic_cast<Processor*>(m);
-			m->disconnectRuntimeTargets(as_p);
-	        m->connectRuntimeTargets(as_p);
+			m->disconnectRuntimeTargets(getMainController());
+	        m->connectRuntimeTargets(getMainController());
         }
             
 	}
@@ -253,8 +257,6 @@ void ModulatorSynthChain::renderNextBlockWithModulators(AudioSampleBuffer &buffe
 	if (isSoftBypassed()) return;
 
 	ADD_GLITCH_DETECTOR(this, DebugLogger::Location::SynthChainRendering);
-
-	Profiler p(*this, 0);
 
     auto isRoot = getMainController()->getMainSynthChain() == this;
     
@@ -307,10 +309,11 @@ void ModulatorSynthChain::renderNextBlockWithModulators(AudioSampleBuffer &buffe
 
 #else
 
-	{
-		Profiler mp(*this, (int)ProfileEnumIds::ProcessMidi);
-		processHiseEventBuffer(inputMidiBuffer, numSamples);
-	}
+	processHiseEventBuffer(inputMidiBuffer, numSamples);
+
+	if (ownedUniformVoiceHandler != nullptr)
+        ownedUniformVoiceHandler->processEventBuffer(inputMidiBuffer);
+		
 
 	// Shrink the internal buffer to the output buffer size 
 	internalBuffer.setSize(getMatrix().getNumSourceChannels(), numSamples, true, false, true);
@@ -333,20 +336,14 @@ void ModulatorSynthChain::renderNextBlockWithModulators(AudioSampleBuffer &buffe
 
 	ScopedAnalyser sa(getMainController(), this, internalBuffer, buffer.getNumSamples());
 
-	{
-		Profiler cp(*this, (int)ProfileEnumIds::RenderChildSynths);
+	// Process the Synths and add store their output in the internal buffer
+	for (int i = 0; i < synths.size(); i++)
+    {
+		ScopedAnalyser sa(getMainController(), synths[i], internalBuffer, internalBuffer.getNumSamples());
 
-		// Process the Synths and add store their output in the internal buffer
-		for (int i = 0; i < synths.size(); i++)
-	    {
-			ScopedAnalyser sa(getMainController(), synths[i], internalBuffer, internalBuffer.getNumSamples());
-
-	        if (!synths[i]->isSoftBypassed())
-	            synths[i]->renderNextBlockWithModulators(internalBuffer, eventBuffer);
-	    }
-	}
-
-	
+        if (!synths[i]->isSoftBypassed())
+            synths[i]->renderNextBlockWithModulators(internalBuffer, eventBuffer);
+    }
 
 	HiseEventBuffer::Iterator eventIterator(eventBuffer);
 
@@ -364,10 +361,7 @@ void ModulatorSynthChain::renderNextBlockWithModulators(AudioSampleBuffer &buffe
 
 	postVoiceRendering(0, numSamples);
 
-	{
-		Profiler fxp(*this, (int)ProfileEnumIds::RenderFX);
-		effectChain->renderMasterEffects(internalBuffer);
-	}
+	effectChain->renderMasterEffects(internalBuffer);
 
 	if (internalBuffer.getNumChannels() != 2 || 
 		getMatrix().getConnectionForSourceChannel(0) != 0 ||
@@ -398,6 +392,9 @@ void ModulatorSynthChain::renderNextBlockWithModulators(AudioSampleBuffer &buffe
 	handlePeakDisplay(numSamples);
 
 #endif
+
+	if (ownedUniformVoiceHandler != nullptr)
+        ownedUniformVoiceHandler->cleanupAfterProcessing();
 }
 
 
@@ -425,21 +422,18 @@ void ModulatorSynthChain::restoreFromValueTree(const ValueTree &v)
 
 void ModulatorSynthChain::reset()
 {
+
 	Processor::Iterator<Processor> iter(this, false);
 
-	if(getMainController()->isBeingDeleted())
+#if 0
 	{
 		sendDeleteMessage();
 
 		while (auto p = iter.getNextProcessor())
 			p->sendDeleteMessage();
 	}
-
-	Processor::Iterator<HardcodedSwappableEffect> fxiter(this, false);
-
-	while(auto fx = fxiter.getNextProcessor())
-		fx->shutdown();
-
+#endif
+	
     midiProcessorChain->getHandler()->clearAsync(midiProcessorChain);
     gainChain->getHandler()->clearAsync(gainChain);
     effectChain->getHandler()->clearAsync(effectChain);
@@ -450,20 +444,30 @@ void ModulatorSynthChain::reset()
 
 	setIconColour(Colours::transparentBlack);
 
+    setUseUniformVoiceHandler(false, nullptr);
+
 #if USE_BACKEND
 	setId("Master Chain");
 #endif
 
+
 	for (int i = 0; i < getNumInternalChains(); i++)
+	{
 		getChildProcessor(i)->setEditorState(getEditorStateForIndex(Processor::Visible), false, sendNotification);
+	}
 
 	for (int i = 0; i < ModulatorSynth::numModulatorSynthParameters; i++)
+	{
 		setAttribute(i, getDefaultValue(i), dontSendNotification);
+	}
     
     clearAllMacroControls();
     
-    for(int i = 0; i < getNumParameters(); i++)
+    
+    for(int i = 0; i < parameterNames.size(); i++)
+    {
         setAttribute(i, getDefaultValue(i), dontSendNotification);
+    }
     
     sendOtherChangeMessage(dispatch::library::ProcessorChangeEvent::Preset);
 }
@@ -506,26 +510,6 @@ bool ModulatorSynthChain::areVoicesActive() const
 	}
 		
 	return effectChain->hasTailingMasterEffects();
-}
-
-void ModulatorSynthChain::onProfileEnableChange()
-{
-#if HISE_INCLUDE_PROFILING_TOOLKIT
-	if(getMainController()->getMainSynthChain() == this)
-	{
-		Processor::Iterator<ProfiledProcessor> iter(this);
-		auto& session = getMainController()->getDebugSession();
-		int index = 0;
-
-		while(auto p = iter.getNextProcessor())
-		{
-			if(p == this)
-				continue;
-
-			p->setEnableProfiling(isProfiling(), &session, index++);
-		}
-	}
-#endif
 }
 
 
@@ -576,6 +560,48 @@ void ModulatorSynthChain::restoreInterfaceValues(const ValueTree &v)
 	}
 }
 
+void ModulatorSynthChain::setUseUniformVoiceHandler(bool shouldUseVoiceHandler, UniformVoiceHandler* externalVoiceHandler)
+{
+    if(externalVoiceHandler == nullptr)
+    {
+        ScopedPointer<UniformVoiceHandler> newHandler;
+
+        if(shouldUseVoiceHandler)
+            newHandler = new UniformVoiceHandler(this);
+
+        {
+            LockHelpers::SafeLock sl(getMainController(), LockHelpers::Type::AudioLock);
+            newHandler.swapWith(ownedUniformVoiceHandler);
+        }
+
+        externalVoiceHandler = ownedUniformVoiceHandler.get();
+        getMainController()->allNotesOff();
+    }
+    else
+    {
+        if(shouldUseVoiceHandler && ownedUniformVoiceHandler != nullptr)
+        {
+            debugError(this, "Can't use more than one uniform voice handler!");
+        }
+    }
+    
+    ModulatorSynth::setUseUniformVoiceHandler(shouldUseVoiceHandler, externalVoiceHandler);
+    
+    for(int i = 0; i < getHandler()->getNumProcessors(); i++)
+    {
+        auto cs = dynamic_cast<ModulatorSynth*>(getHandler()->getProcessor(i));
+        cs->setUseUniformVoiceHandler(shouldUseVoiceHandler, externalVoiceHandler);
+    }
+
+#if USE_OLD_PROCESSOR_DISPATCH
+    getMainController()->getProcessorChangeHandler().sendProcessorChangeMessage(this, MainController::ProcessorChangeHandler::EventType::ProcessorColourChange, false);
+#endif
+#if USE_NEW_PROCESSOR_DISPATCH
+	dispatcher.setColour(Colours::black);
+#endif
+}
+
+
 bool ModulatorSynthChain::hasDefinedFrontInterface() const
 {   
     for (int i = 0; i < midiProcessorChain->getNumChildProcessors(); i++)
@@ -595,27 +621,21 @@ bool ModulatorSynthChain::hasDefinedFrontInterface() const
 
 NoMidiInputConstrainer::NoMidiInputConstrainer()
 {
-	TimeVariantModulatorFactoryType tv(Modulation::Mode::GainMode, nullptr);
+	Array<FactoryType::ProcessorEntry> typeNames;
 
-	for (auto& pn : tv.getAllowedTypes())
-		allowedModulators.add(pn.type);
-}
+    ADD_NAME_TO_TYPELIST(HarmonicFilter);
+    ADD_NAME_TO_TYPELIST(StereoEffect);
+    ADD_NAME_TO_TYPELIST(PolyshapeFX);
 
-hise::ProcessorMetadata::WildcardFilterList NoMidiInputConstrainer::getWildcard()
-{
+	forbiddenModulators.addArray(typeNames);
 
-	return {
-		{
-			ProcessorMetadataIds::Modulator,
-			ProcessorMetadataIds::TimeVariantModulator.toString()
-		},
-		{
-			ProcessorMetadataIds::Effect,
-			ProcessorMetadataIds::MasterEffect.toString() + "|" +
-			ProcessorMetadataIds::MonophonicEffect.toString() + "|" +
-			PolyFilterEffect::getClassType().toString()
-		}
-	};
+	EnvelopeModulatorFactoryType envelopes(0, Modulation::Mode::GainMode, nullptr);
+
+	forbiddenModulators.addArray(envelopes.getAllowedTypes());
+
+	VoiceStartModulatorFactoryType voiceStart(0, Modulation::Mode::GainMode, nullptr);
+
+	forbiddenModulators.addArray(voiceStart.getAllowedTypes());
 }
 
 String NoMidiInputConstrainer::getDescription() const
@@ -623,15 +643,27 @@ String NoMidiInputConstrainer::getDescription() const
 
 bool NoMidiInputConstrainer::allowType(const Identifier& typeName)
 {
-	if (noVoiceFX.allowType(typeName))
-		return true;
+	for(int i = 0; i < forbiddenModulators.size(); i++)
+	{
+		if(forbiddenModulators[i].type == typeName) return false;
+	}
 
-	// special rule: allow filter as only polyphonic fx - it can be 
-	// used monophonically
-	if (typeName == PolyFilterEffect::getClassType())
-		return true;
+	return true;
+}
 
-	return allowedModulators.contains(typeName);
+SynthGroupFXConstrainer::SynthGroupFXConstrainer() = default;
+
+String SynthGroupFXConstrainer::getDescription() const
+{ return "Only Polyphonic FX"; }
+
+bool SynthGroupFXConstrainer::allowType(const Identifier& typeName)
+{
+	auto isPoly = typeName.toString().toLowerCase().contains("poly");
+        
+	// just trying to get through the day...
+	isPoly |= (typeName == Identifier("StereoFX"));
+        
+	return isPoly;
 }
 
 SynthGroupConstrainer::SynthGroupConstrainer()
@@ -641,23 +673,8 @@ SynthGroupConstrainer::SynthGroupConstrainer()
 	ADD_NAME_TO_TYPELIST(ModulatorSynthChain);
 	ADD_NAME_TO_TYPELIST(GlobalModulatorContainer);
 	ADD_NAME_TO_TYPELIST(ModulatorSynthGroup);
-	ADD_NAME_TO_TYPELIST(MacroModulationSource);
 
 	forbiddenModulators.addArray(typeNames);
-}
-
-
-hise::ProcessorMetadata::WildcardFilterList SynthGroupConstrainer::getWildcard()
-{
-	return {
-		{
-			ProcessorMetadataIds::SoundGenerator,
-			makeNegativeFilterWildcard<ModulatorSynthChain, 
-									   GlobalModulatorContainer, 
-									   ModulatorSynthGroup, 
-									   MacroModulationSource>()
-		}
-	};
 }
 
 String SynthGroupConstrainer::getDescription() const

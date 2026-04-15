@@ -66,9 +66,6 @@ namespace choc::messageloop
     /// target function, which lets you safely nullify it.
     void postMessage (std::function<void()>&&);
 
-    /// Returns true if the current thread is the message thread.
-    bool callerIsOnMessageThread();
-
     //==============================================================================
     /// Manages a periodic timer whose callbacks happen on the message loop.
     ///
@@ -98,7 +95,7 @@ namespace choc::messageloop
 
         /// Stops and clears the timer. (You can also clear a Timer
         /// by assigning an empty Timer to it).
-        void clear();
+        void clear()                    { pimpl.reset(); }
 
         /// Returns true if the Timer has been initialised with
         /// a callback, or false if it's just an empty object.
@@ -108,16 +105,6 @@ namespace choc::messageloop
         struct Pimpl;
         std::unique_ptr<Pimpl> pimpl;
     };
-
-    //==============================================================================
-    /// Triggers a one-shot timer callback of a given lambda function after a given
-    /// interval.
-    /// This uses the Timer class, but saves you needing to keep a Timer object alive,
-    /// if you just need a fire-and-forget event.
-    /// The callback function should just be a void lambda.
-    template <typename Callback>
-    void setTimeout (uint32_t intervalMillisecs, Callback&& callbackFunction);
-
 }
 
 
@@ -132,11 +119,8 @@ namespace choc::messageloop
 //
 //==============================================================================
 
-
-
 #if CHOC_LINUX
 
-#include <thread>
 #include "../platform/choc_DisableAllWarnings.h"
 #include <gtk/gtk.h>
 #include "../platform/choc_ReenableAllWarnings.h"
@@ -144,27 +128,9 @@ namespace choc::messageloop
 namespace choc::messageloop
 {
 
-inline std::thread::id& getMainThreadIDRef()
-{
-    static std::thread::id i;
-    return i;
-}
-
-inline void initialise()
-{
-    getMainThreadIDRef() = std::this_thread::get_id();
-}
-
-inline void run()
-{
-    initialise();
-    gtk_main();
-}
-
-inline void stop()
-{
-    gtk_main_quit();
-}
+inline void initialise() {}
+inline void run()   { gtk_main(); }
+inline void stop()  { gtk_main_quit(); }
 
 inline void postMessage (std::function<void()>&& fn)
 {
@@ -176,11 +142,6 @@ inline void postMessage (std::function<void()>&& fn)
                      }),
                      new std::function<void()> (std::move (fn)),
                      [] (void* f) { delete static_cast<std::function<void()>*>(f); });
-}
-
-inline bool callerIsOnMessageThread()
-{
-    return getMainThreadIDRef() == std::this_thread::get_id();
 }
 
 struct Timer::Pimpl
@@ -195,8 +156,8 @@ struct Timer::Pimpl
     ~Pimpl()
     {
         if (sharedState->isInCallback)
-            sharedState->isRunning = false;
-        else if (sharedState->isRunning)
+            sharedState->isRemoved = true;
+        else
             g_source_remove (handle);
     }
 
@@ -209,18 +170,14 @@ struct Timer::Pimpl
     struct SharedState  : public std::enable_shared_from_this<SharedState>
     {
         Callback callback;
-        bool isInCallback = false, isRunning = true;
+        bool isInCallback = false, isRemoved = false;
 
         bool handleCallback()
         {
             isInCallback = true;
             bool result = callback();
             isInCallback = false;
-
-            if (! result)
-                isRunning = false;
-
-            return isRunning;
+            return result && ! isRemoved;
         }
     };
 
@@ -231,52 +188,91 @@ struct Timer::Pimpl
 //==============================================================================
 #elif CHOC_APPLE
 
-#include <thread>
 #include <unordered_set>
+#include <objc/runtime.h>
+#include <objc/message.h>
 #include <dispatch/dispatch.h>
+
 #include <type_traits>
-#include "../platform/choc_ObjectiveCHelpers.h"
+
+namespace choc::objc
+{
+    static inline id getClass (const char* s)              { return (id) objc_getClass (s); }
+
+    template <typename ReturnType, typename... Args>
+    static ReturnType call (id target, const char* selector, Args... args)
+    {
+        constexpr const auto msgSend = ([]
+        {
+          #if defined (__x86_64__)
+            if constexpr (std::is_void_v<ReturnType>)
+                return objc_msgSend;
+            else if constexpr (sizeof (ReturnType) > 16)
+                return objc_msgSend_stret;
+            else
+                return objc_msgSend;
+          #elif defined (__arm64__)
+            return objc_msgSend;
+          #else
+            #error "Unknown or unsupported architecture!"
+          #endif
+        })();
+
+        return reinterpret_cast<ReturnType(*)(id, SEL, Args...)> (msgSend) (target, sel_registerName (selector), args...);
+    }
+
+    static inline std::string getString (id nsString)      { return std::string (call<const char*> (nsString, "UTF8String")); }
+    static inline id getNSString (const char* s)           { return call<id> (getClass ("NSString"), "stringWithUTF8String:", s); }
+    static inline id getNSString (const std::string& s)    { return getNSString (s.c_str()); }
+    static inline id getNSNumberBool (bool b)              { return call<id> (getClass ("NSNumber"), "numberWithBool:", (BOOL) b); }
+    static inline id getSharedNSApplication()              { return call<id> (getClass ("NSApplication"), "sharedApplication"); }
+
+    static inline Class createDelegateClass (const char* baseClass, const char* root)
+    {
+        auto time = std::chrono::high_resolution_clock::now().time_since_epoch();
+        auto micros = std::chrono::duration_cast<std::chrono::microseconds> (time).count();
+        auto uniqueDelegateName = root + std::to_string (static_cast<uint32_t> (micros));
+
+        auto c = objc_allocateClassPair (objc_getClass (baseClass), uniqueDelegateName.c_str(), 0);
+        CHOC_ASSERT (c);
+        return c;
+    }
+
+    struct AutoReleasePool
+    {
+        AutoReleasePool()  { pool = call<id> (getClass ("NSAutoreleasePool"), "new"); }
+        ~AutoReleasePool() { call<void> (pool, "release"); }
+
+        id pool;
+    };
+}
 
 namespace choc::messageloop
 {
 
-inline std::thread::id& getMainThreadIDRef()
-{
-    static std::thread::id i;
-    return i;
-}
-
-inline void initialise()
-{
-    getMainThreadIDRef() = std::this_thread::get_id();
-}
+inline void initialise() {}
 
 inline void run()
 {
-    CHOC_AUTORELEASE_BEGIN
-    initialise();
+    objc::AutoReleasePool autoreleasePool;
     objc::call<void> (objc::getSharedNSApplication(), "run");
-    CHOC_AUTORELEASE_END
 }
 
 inline void stop()
 {
-    postMessage ([]
-    {
-        using namespace choc::objc;
-        static constexpr long NSEventTypeApplicationDefined = 15;
+    using namespace choc::objc;
+    static constexpr long NSEventTypeApplicationDefined = 15;
 
-        CHOC_AUTORELEASE_BEGIN
-        call<void> (getSharedNSApplication(), "stop:", (id) nullptr);
+    AutoReleasePool autoreleasePool;
 
-        // After sending the stop message, we need to post a dummy event to
-        // kick the message loop, otherwise it can just sit there and hang
-        struct NSPoint { double x = 0, y = 0; };
-        id dummyEvent = callClass<id> ("NSEvent", "otherEventWithType:location:modifierFlags:timestamp:windowNumber:context:subtype:data1:data2:",
-                                       NSEventTypeApplicationDefined, NSPoint(), 0, 0, 0, nullptr, (short) 0, 0, 0);
-        call<void> (getSharedNSApplication(), "postEvent:atStart:", dummyEvent, YES);
-        CHOC_AUTORELEASE_END
-    });
+    call<void> (getSharedNSApplication(), "stop:", (id) nullptr);
+
+    // After sending the stop message, we need to post a dummy event to
+    // kick the message loop, otherwise it can just sit there and hang
+    struct NSPoint { double x = 0, y = 0; };
+    id dummyEvent = call<id> (getClass ("NSEvent"), "otherEventWithType:location:modifierFlags:timestamp:windowNumber:context:subtype:data1:data2:",
+                              NSEventTypeApplicationDefined, NSPoint(), 0, 0, 0, nullptr, (short) 0, 0, 0);
+    call<void> (getSharedNSApplication(), "postEvent:atStart:", dummyEvent, YES);
 }
 
 inline void postMessage (std::function<void()>&& fn)
@@ -285,16 +281,10 @@ inline void postMessage (std::function<void()>&& fn)
                       new std::function<void()> (std::move (fn)),
                       (dispatch_function_t) (+[](void* arg)
                       {
-                          CHOC_AUTORELEASE_BEGIN
+                          objc::AutoReleasePool autoReleasePool;
                           std::unique_ptr<std::function<void()>> f (static_cast<std::function<void()>*> (arg));
                           (*f)();
-                          CHOC_AUTORELEASE_END
                       }));
-}
-
-inline bool callerIsOnMessageThread()
-{
-    return getMainThreadIDRef() == std::this_thread::get_id();
 }
 
 struct Timer::Pimpl
@@ -314,9 +304,8 @@ struct Timer::Pimpl
     {
         if (getList().invokeIfStillAlive (static_cast<Pimpl*> (context)))
         {
-            CHOC_AUTORELEASE_BEGIN
+            objc::AutoReleasePool autoReleasePool;
             static_cast<Pimpl*> (context)->dispatch();
-            CHOC_AUTORELEASE_END
         }
     }
 
@@ -336,7 +325,7 @@ struct Timer::Pimpl
 
         bool invokeIfStillAlive (Pimpl* p)
         {
-            std::scoped_lock l (lock);
+            std::lock_guard<decltype(lock)> l (lock);
 
             // must check before AND after the call because the Pimpl
             // may be deleted during the callback
@@ -347,13 +336,13 @@ struct Timer::Pimpl
 
         void add (Pimpl* p)
         {
-            std::scoped_lock l (lock);
+            std::lock_guard<decltype(lock)> l (lock);
             timers.insert (p);
         }
 
         void remove (Pimpl* p)
         {
-            std::scoped_lock l (lock);
+            std::lock_guard<decltype(lock)> l (lock);
             timers.erase (p);
         }
     };
@@ -423,11 +412,11 @@ struct MessageWindow
 
 struct LockedMessageWindow
 {
-    MessageWindow& window;
+    HWND hwnd;
     std::unique_lock<std::mutex> lock;
 };
 
-inline LockedMessageWindow getSharedMessageWindow (bool recreateIfWrongThread = false)
+static LockedMessageWindow getSharedMessageWindow (bool recreateIfWrongThread = false)
 {
     static std::unique_ptr<MessageWindow> window;
     static std::mutex lock;
@@ -437,7 +426,7 @@ inline LockedMessageWindow getSharedMessageWindow (bool recreateIfWrongThread = 
     if (window == nullptr || (recreateIfWrongThread && window->threadID != GetCurrentThreadId()))
         window = std::make_unique<MessageWindow>();
 
-    return LockedMessageWindow { *window, std::move (l) };
+    return LockedMessageWindow { window->hwnd, std::move (l) };
 }
 
 inline void initialise()
@@ -469,18 +458,13 @@ inline void run()
 
 inline void stop()
 {
-    postMessage ([] { PostQuitMessage (0); });
+    PostQuitMessage (0);
 }
 
 inline void postMessage (std::function<void()>&& fn)
 {
-    PostMessageA (getSharedMessageWindow().window.hwnd, WM_APP, MessageWindow::magicWParam,
+    PostMessageA (getSharedMessageWindow().hwnd, WM_APP, MessageWindow::magicWParam,
                   (LPARAM) new std::function<void()> (std::move (fn)));
-}
-
-inline bool callerIsOnMessageThread()
-{
-    return getSharedMessageWindow().window.threadID == GetCurrentThreadId();
 }
 
 struct Timer::Pimpl
@@ -490,7 +474,7 @@ struct Timer::Pimpl
         sharedState = std::make_shared<SharedState>();
         sharedState->callback = std::move (c);
 
-        sharedState->timerID = SetTimer (getSharedMessageWindow().window.hwnd, reinterpret_cast<UINT_PTR> (this),
+        sharedState->timerID = SetTimer (getSharedMessageWindow().hwnd, reinterpret_cast<UINT_PTR> (this),
                                          interval, (TIMERPROC) staticCallback);
     }
 
@@ -511,7 +495,7 @@ struct Timer::Pimpl
         {
             if (timerID != 0)
             {
-                KillTimer (getSharedMessageWindow().window.hwnd, timerID);
+                KillTimer (getSharedMessageWindow().hwnd, timerID);
                 timerID = 0;
             }
         }
@@ -538,21 +522,6 @@ inline Timer::Timer (uint32_t interval, Callback&& cb)
     CHOC_ASSERT (cb != nullptr); // The callback must be a valid function!
     pimpl = std::make_unique<Pimpl> (std::move (cb), interval);
 }
-
-template <typename Callback>
-void setTimeout (uint32_t intervalMillisecs, Callback&& callback)
-{
-    auto t = new Timer();
-
-    *t = Timer (intervalMillisecs, [t, c = std::move (callback)]
-    {
-        c();
-        postMessage ([t] { delete t; });
-        return false;
-    });
-}
-
-inline void Timer::clear()   { pimpl.reset(); }
 
 } // namespace choc::messageloop
 

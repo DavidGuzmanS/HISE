@@ -46,14 +46,14 @@ struct ParseError  : public std::runtime_error
 
 /// Parses some JSON text into a choc::value::Value object, using the given pool.
 /// Any errors will result in a ParseError exception being thrown.
-[[nodiscard]] value::Value parse (text::UTF8Pointer);
+value::Value parse (text::UTF8Pointer);
 
 /// Parses some JSON text into a choc::value::Value object, using the given pool.
 /// Any errors will result in a ParseError exception being thrown.
-[[nodiscard]] value::Value parse (std::string_view);
+value::Value parse (std::string_view);
 
 /// Attempts to parse a bare JSON value such as a number, string, object etc
-[[nodiscard]] value::Value parseValue (std::string_view);
+value::Value parseValue (std::string_view);
 
 /// A helper function to create a JSON-friendly Value object with a set of properties.
 /// The argument list must be contain pairs of names and values, e.g.
@@ -65,13 +65,13 @@ struct ParseError  : public std::runtime_error
 /// Essentially, this is a shorthand for calling choc::value::createObject()
 /// and passing it an empty type name.
 template <typename... Properties>
-[[nodiscard]] value::Value create (Properties&&... propertyNamesAndValues);
+value::Value create (Properties&&... propertyNamesAndValues);
 
 //==============================================================================
 /// Formats a value as a JSON string.
 /// If useLineBreaks is true, it'll be formatted as multi-line JSON, if false it'll
 /// just be returned as a single line.
-[[nodiscard]] std::string toString (const value::ValueView&, bool useLineBreaks = false);
+std::string toString (const value::ValueView&, bool useLineBreaks = false);
 
 /// Writes a version of a string to an output stream, with any illegal or non-ascii
 /// written as their equivalent JSON escape sequences.
@@ -80,15 +80,15 @@ void writeWithEscapeCharacters (OutputStreamType&, text::UTF8Pointer sourceStrin
 
 /// Returns a version of a string with illegal or non-ascii converted into the
 /// equivalent JSON escape sequences.
-[[nodiscard]] std::string addEscapeCharacters (text::UTF8Pointer sourceString);
+std::string addEscapeCharacters (text::UTF8Pointer sourceString);
 
 /// Returns a version of a string with illegal or non-ascii converted into the
 /// equivalent JSON escape sequences.
-[[nodiscard]] std::string addEscapeCharacters (std::string_view sourceString);
+std::string addEscapeCharacters (std::string_view sourceString);
 
 /// Returns a version of a string with illegal or non-ascii converted into the
 /// equivalent JSON escape sequences.
-[[nodiscard]] std::string getEscapedQuotedString (std::string_view sourceString);
+std::string getEscapedQuotedString (std::string_view sourceString);
 
 /// Converts a double to a JSON-format string representation.
 std::string doubleToString (double value);
@@ -158,7 +158,7 @@ void writeWithEscapeCharacters (OutputStreamType& out, text::UTF8Pointer source)
 
 inline std::string addEscapeCharacters (text::UTF8Pointer source)
 {
-    std::ostringstream result (std::ios::binary);
+    std::ostringstream result;
     writeWithEscapeCharacters (result, source);
     return result.str();
 }
@@ -170,7 +170,7 @@ inline std::string addEscapeCharacters (std::string_view source)
 
 inline std::string getEscapedQuotedString (std::string_view s)
 {
-    std::ostringstream result (std::ios::binary);
+    std::ostringstream result;
     result << '"';
     writeWithEscapeCharacters (result, text::UTF8Pointer (std::string (s).c_str()));
     result << '"';
@@ -285,7 +285,7 @@ void writeAsJSON (Stream& output, const value::ValueView& value, bool useMultipl
 
 inline std::string toString (const value::ValueView& v, bool useLineBreaks)
 {
-    std::ostringstream out (std::ios::binary);
+    std::ostringstream out;
     writeAsJSON (out, v, useLineBreaks);
     return out.str();
 }
@@ -456,7 +456,7 @@ inline value::Value parse (text::UTF8Pointer text, bool parseBareValue)
 
         std::string parseString()
         {
-            std::ostringstream s (std::ios::binary);
+            std::ostringstream s;
 
             for (;;)
             {

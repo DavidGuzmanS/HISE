@@ -117,14 +117,10 @@ void MainController::GlobalAsyncModuleHandler::addPendingUIJob(Processor* p, Wha
 			p->sendDeleteMessage();
 
 #if USE_BACKEND
+			Processor::Iterator<Processor> iter(p, false);
 
-			if(p->getParentProcessor(false, false) != nullptr)
-			{
-				Processor::Iterator<Processor> iter(p, false);
-
-				while(auto cp = iter.getNextProcessor())
-					cp->sendDeleteMessage();
-			}
+			while(auto cp = iter.getNextProcessor())
+				cp->sendDeleteMessage();
 #endif
 
 			auto parent = p->getParentProcessor(false, false);

@@ -462,10 +462,7 @@ bool ExpansionHandler::installFromResourceFile(const File& resourceFile, const F
 			auto headerFile = samplesDir.getChildFile("header.dat");
 			jassert(headerFile.existsAsFile());
 
-			auto createHxp = !(bool)HISE_GET_PREPROCESSOR(getMainController(), HISE_USE_UNLOCKER_FOR_EXPANSIONS);
-			createHxp &= getCredentials().isObject();
-
-			if (createHxp)
+			if (getCredentials().isObject())
 				ScriptEncryptedExpansion::encryptIntermediateFile(getMainController(), headerFile, expRoot);
 			else
 			{
@@ -601,26 +598,6 @@ void ExpansionHandler::resetAfterProjectSwitch()
 	notifier.sendNotification(Notifier::EventType::ExpansionCreated, notification);
 }
 
-#if USE_BACKEND
-Identifier ExpansionHandler::addEncryptionKeyForExpansionToBeEncoded(Expansion* e, const String& expansionSpecificKey)
-{
-	if (HISE_GET_PREPROCESSOR(getMainController(), HISE_USE_UNLOCKER_FOR_EXPANSIONS))
-	{
-		if (credentials.getDynamicObject() == nullptr)
-			credentials = var(new DynamicObject());
-
-		auto expansionId = Expansion::Helpers::getExpansionSlug(e->data->name.get());
-
-		auto obj = credentials.getDynamicObject();
-		obj->setProperty(expansionId, var(expansionSpecificKey));
-
-		return expansionId;
-	}
-
-	return {};
-}
-#endif
-
 void ExpansionHandler::logStatusMessage(const String& message)
 {
 	getMainController()->getSampleManager().setCurrentPreloadMessage(message);
@@ -679,7 +656,7 @@ void ExpansionHandler::checkAllowedExpansions(Result& r, Expansion* e)
 	if (!r.wasOk())
 		return;
 
-	if (!getAllowedExpansionTypes().contains(e->getExpansionType()))
+	if (!allowedExpansions.contains(e->getExpansionType()))
 	{
 		String s;
 		s << "Trying to load a " << Expansion::Helpers::getExpansionTypeName(e->getExpansionType()) << " expansion";
@@ -803,14 +780,6 @@ juce::ValueTree Expansion::getPropertyValueTree()
 {
 	if (data != nullptr)
 		return data->v;
-
-	return {};
-}
-
-juce::Identifier Expansion::getEncryptionKeyId() const
-{
-	if (HISE_GET_PREPROCESSOR(getMainController(), HISE_USE_UNLOCKER_FOR_EXPANSIONS))
-		return Helpers::getExpansionSlug(data->name.get());
 
 	return {};
 }
@@ -1094,34 +1063,20 @@ bool ExpansionHandler::getInstallFullDynamics() const
 double ExpansionHandler::getTotalProgress() const
 { return totalProgress; }
 
-String ExpansionHandler::getEncryptionKey(const Identifier& expansionName) const
-{ 
-	if(expansionName.isNull())
-		return keyCode;
-	else
-		return credentials[expansionName].toString();
-}
+String ExpansionHandler::getEncryptionKey() const
+{ return keyCode; }
 
 bool ExpansionHandler::isEnabled() const noexcept
 { return enabled; }
 
 Array<Expansion::ExpansionType> ExpansionHandler::getAllowedExpansionTypes() const
-{ 
-#if HISE_USE_UNLOCKER_FOR_EXPANSIONS && USE_FRONTEND
-	return { Expansion::ExpansionType::Intermediate };
-#endif
-
-	return allowedExpansions; 
-}
+{ return allowedExpansions; }
 
 void ExpansionHandler::setAllowedExpansions(const Array<Expansion::ExpansionType>& newAllowedExpansions)
 {
-	if(!HISE_GET_PREPROCESSOR(getMainController(), HISE_USE_UNLOCKER_FOR_EXPANSIONS))
-	{
-		allowedExpansions.clear();
-		allowedExpansions.addArray(newAllowedExpansions);
-		forceReinitialisation();
-	}
+	allowedExpansions.clear();
+	allowedExpansions.addArray(newAllowedExpansions);
+	forceReinitialisation();
 }
 
 
@@ -1234,77 +1189,6 @@ String Expansion::Helpers::getExpansionTypeName(ExpansionType e)
 	}
 }
 
-String Expansion::Helpers::getExpansionSpecificKey(MainController* mc, const File& expansionFolder)
-{
-	if(FullInstrumentExpansion::isEnabled(mc))
-	{
-		String key;
-
-		auto projectInfo = expansionFolder.getChildFile("project_info.xml");
-		
-		if(auto xml = XmlDocument::parse(projectInfo))
-		{
-			if(auto ec = xml->getChildByName("EncryptionKey"))
-				key = ec->getStringAttribute("value", "");
-		}
-			
-
-		return key;
-	}
-
-	Random r;
-
-	const int numBytes = r.nextInt({ 53, 72 });
-
-	std::vector<char> printable;
-	printable.reserve(128);
-
-	for (char i = 48; i < 58; i++)
-		printable.push_back(i);
-	for (char i = 65; i < 91; i++)
-		printable.push_back(i);
-	for (char i = 97; i < 124; i++)
-		printable.push_back(i);
-
-	String s;
-	s.preallocateBytes(numBytes);
-
-	for (int i = 0; i < numBytes; i++)
-		s << printable[r.nextInt((int)printable.size())];
-
-	return s;
-}
-
-Identifier Expansion::Helpers::getExpansionSlug(const String& expansionName)
-{
-	auto slug = expansionName.toLowerCase();
-
-	// Replace underscores and spaces with hyphens
-	slug = slug.replaceCharacter('_', '-');
-	slug = slug.replaceCharacter(' ', '-');
-
-	// Remove all non-alphanumeric characters except hyphen
-	juce::String cleaned;
-	for (auto c : slug)
-	{
-		if (juce::CharacterFunctions::isLetterOrDigit(c) || c == '-')
-			cleaned << c;
-	}
-
-	// Collapse multiple hyphens
-	while (cleaned.contains("--"))
-		cleaned = cleaned.replace("--", "-");
-
-	// Trim hyphens from start and end
-	while (cleaned.startsWithChar('-'))
-		cleaned = cleaned.substring(1);
-
-	while (cleaned.endsWithChar('-'))
-		cleaned = cleaned.dropLastCharacters(1);
-
-	return Identifier(cleaned);
-}
-
 Expansion::Data::Data(const File& root, ValueTree expansionInfo, MainController* mc) :
 	v(expansionInfo),
 	name(v, "Name", nullptr, root.getFileNameWithoutExtension()),
@@ -1313,19 +1197,6 @@ Expansion::Data::Data(const File& root, ValueTree expansionInfo, MainController*
 	tags(v, "Tags", nullptr, ""),
 	version(v, "Version", nullptr, "1.0.0")
 {
-	if(HISE_GET_PREPROCESSOR(mc, HISE_USE_UNLOCKER_FOR_EXPANSIONS))
-	{
-		// Create a expansion specific key if it doesn't exist yet...
-		if(v[ExpansionIds::Key].toString().isEmpty())
-		{
-			auto key = Helpers::getExpansionSpecificKey(mc, root);
-
-			if(key.isNotEmpty())
-				v.setProperty(ExpansionIds::Key, key, nullptr);
-		}
-			
-	}
-
 	Helpers::initCachedValue(v, name);
 	Helpers::initCachedValue(v, version);
 	Helpers::initCachedValue(v, projectName);

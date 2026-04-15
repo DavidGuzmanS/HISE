@@ -95,9 +95,7 @@ public:
 	void loadFromValueTree(const ValueTree &v);
 
     void connectIfPending();
-
-	virtual int getParameterOffset() const { return 0; }
-
+    
 protected:
 
 	GlobalModulator(MainController *mc);
@@ -118,8 +116,27 @@ private:
 	Array<WeakReference<GlobalModulatorContainer>> watchedContainers;
 };
 
+/** Deactivates Globals (this is used in Global Containers. */
+class NoGlobalsConstrainer : public FactoryType::Constrainer
+{
+	String getDescription() const override { return "No global modulators"; }
 
+	bool allowType(const Identifier &typeName) override
+	{
+        return true;//!typeName.toString().startsWith("Global");
+	}
+};
 
+/** Deactivates Global Envelopes (this is used in Global Containers. */
+class NoGlobalEnvelopeConstrainer : public FactoryType::Constrainer
+{
+	bool allowType(const Identifier &typeName) override
+	{
+		return !typeName.toString().startsWith("GlobalEnvelope");
+	}
+
+	String getDescription() const override { return "No global modulators"; }
+};
 
 /** A modulator that connects to a global VoiceStartModulator (eg. Velocity).
 	@ingroup modulatorTypes	
@@ -129,9 +146,7 @@ class GlobalVoiceStartModulator : public VoiceStartModulator,
 {
 public:
 
-	SET_PROCESSOR_NAME("GlobalVoiceStartModulator", "Global Voice Start Modulator", "")
-
-	static ProcessorMetadata createMetadata();
+	SET_PROCESSOR_NAME("GlobalVoiceStartModulator", "Global Voice Start Modulator", "A modulator that connects to a global VoiceStartModulator (eg. Velocity).");
 
 	GlobalModulator::ModulatorType getModulatorType() const override { return GlobalModulator::VoiceStart; };
 
@@ -170,9 +185,7 @@ class GlobalStaticTimeVariantModulator : public VoiceStartModulator,
 {
 public:
 
-	SET_PROCESSOR_NAME("GlobalStaticTimeVariantModulator", "Global Static Time Variant Modulator", "")
-
-	static ProcessorMetadata createMetadata();
+	SET_PROCESSOR_NAME("GlobalStaticTimeVariantModulator", "Global Static Time Variant Modulator", "A voice start modulator that connects to a global TimeVariantModulator (eg. LFO).");
 
 	GlobalModulator::ModulatorType getModulatorType() const override { return GlobalModulator::StaticTimeVariant; };
 
@@ -208,9 +221,7 @@ class GlobalTimeVariantModulator : public TimeVariantModulator,
 {
 public:
 
-	SET_PROCESSOR_NAME("GlobalTimeVariantModulator", "Global Time Variant Modulator", "")
-
-	static ProcessorMetadata createMetadata();
+	SET_PROCESSOR_NAME("GlobalTimeVariantModulator", "Global Time Variant Modulator", "A modulator that connects to a global TimeVariantModulator (eg. LFO).");
 
 	GlobalModulator::ModulatorType getModulatorType() const override { return GlobalModulator::TimeVariant; };
 
@@ -260,9 +271,7 @@ class GlobalEnvelopeModulator : public EnvelopeModulator,
 {
 public:
 
-	SET_PROCESSOR_NAME("GlobalEnvelopeModulator", "Global Envelope Modulator", "")
-
-	static ProcessorMetadata createMetadata();
+	SET_PROCESSOR_NAME("GlobalEnvelopeModulator", "Global Envelope Modulator", "A modulator that connects to a global EnvelopeModulator (eg. AHDSR).");
 
 	GlobalModulator::ModulatorType getModulatorType() const override { return GlobalModulator::Envelope; };
 
@@ -282,8 +291,6 @@ public:
 
 	void stopVoice(int voiceIndex) override;
 
-	int getParameterOffset() const override { return EnvelopeModulator::Parameters::numParameters; }
-
 	virtual Processor *getChildProcessor(int /*processorIndex*/) override final { return nullptr; };
 
 	virtual const Processor *getChildProcessor(int /*processorIndex*/) const override final { return nullptr; };
@@ -299,32 +306,6 @@ public:
 	void calculateBlock(int startSample, int numSamples) override;
 
 	uint8 active[NUM_POLYPHONIC_VOICES];
-	HiseEvent currentEvents[NUM_POLYPHONIC_VOICES];
-
-	int envelopeIndex = -1;
-};
-
-/** Deactivates Globals (this is used in Global Containers. */
-class NoGlobalsConstrainer : public FactoryType::Constrainer
-{
-public:
-
-	NoGlobalsConstrainer();
-
-	static ProcessorMetadata::WildcardFilterList getWildcard();
-
-	ProcessorMetadata::WildcardFilterList getWildcardFromObject() const override { return getWildcard(); }
-
-	String getDescription() const override { return "No global modulators"; }
-
-	// Runtime filtering disabled - the wildcard metadata (!Global*Modulator) is the operative filter.
-	// This allowType override is kept for API compatibility until the Constrainer system is fully retired.
-	bool allowType(const Identifier& typeName) override
-	{
-		return !illegalTypes.contains(typeName);
-	}
-
-	Array<Identifier> illegalTypes;
 };
 
 

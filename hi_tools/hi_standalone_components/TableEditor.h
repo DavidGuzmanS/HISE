@@ -84,12 +84,10 @@ class TableEditor : public Component,
 	public SettableTooltipClient,
 	public CopyPasteTarget,
 	public Table::Listener,
-	public ProfiledComponent,
 	public ComplexDataUIBase::EditorBase
 {
 public:
 
-	using ComplexDataType = hise::Table;
 	struct LookAndFeelMethods
 	{
         virtual ~LookAndFeelMethods();;
@@ -99,7 +97,6 @@ public:
         virtual void drawTableBackground(Graphics& g, TableEditor& te, Rectangle<float> area, double rulerPosition);
 		virtual void drawTablePath(Graphics& g, TableEditor& te, Path& p, Rectangle<float> area, float lineThickness);
 		virtual void drawTablePoint(Graphics& g, TableEditor& te, Rectangle<float> tablePoint, bool isEdge, bool isHover, bool isDragged);
-		virtual void drawTableMidPoint(Graphics& g, TableEditor& te, Rectangle<float> midPoint, bool isHover, bool isDragged);
 		virtual void drawTableRuler(Graphics& g, TableEditor& te, Rectangle<float> area, float lineThickness, double rulerPosition);
 
 		virtual void drawTableValueLabel(Graphics& g, TableEditor& te, Font f, const String& text, Rectangle<int> textBox);
@@ -182,41 +179,7 @@ public:
 
 	void graphHasChanged(int point) override;
 
-	String getObjectTypeName() override;
-
-	struct MouseDragProperties
-	{
-		void fromVar(const var& obj)
-		{
-			syncStartEnd = obj.getProperty("syncStartEnd", syncStartEnd);
-			allowSwap = obj.getProperty("allowSwap", allowSwap);
-			fixLeftEdge = obj.getProperty("fixLeftEdge", fixLeftEdge);
-			fixRightEdge = obj.getProperty("fixRightEdge", fixRightEdge);
-			snapWidth = obj.getProperty("snapWidth", snapWidth);
-			numSteps = obj.getProperty("numSteps", numSteps);
-			midPointSize = obj.getProperty("midPointSize", midPointSize);
-			dragPointSize = obj.getProperty("dragPointSize", dragPointSize);
-			endPointSize = obj.getProperty("endPointSize", endPointSize);
-			useMouseWheelForCurve = obj.getProperty("useMouseWheelForCurve", useMouseWheelForCurve);
-			margin = obj.getProperty("margin", margin);
-			closePath = obj.getProperty("closePath", closePath);
-		}
-
-		bool useMouseWheelForCurve = HISE_USE_MOUSE_WHEEL_FOR_TABLE_CURVE;
-		float snapWidth = 10.0f;
-		bool syncStartEnd = false;
-		bool allowSwap = false;
-		float fixLeftEdge = -1.0f;
-		float fixRightEdge = -1.0f;
-		int numSteps = -1;
-		int midPointSize = 0;
-		int dragPointSize = 14;
-		int endPointSize = 20;
-		float margin = 0.0f;
-		bool closePath = true;
-	};
-
-	void setMouseDragProperties(const var& obj);;
+	String getObjectTypeName() override;;
 
     void setDrawTableValueLabel(bool shouldBeDisplayed);
 
@@ -228,6 +191,12 @@ public:
 
 	/** Set the display of the domain value to the desired type. If you want a scaled value to be displayed, pass a Range<int> object */
 	void setDomain(DomainType newDomainType, Range<int> newRange=Range<int>());
+
+	/** Sets the edges to read only.
+	*
+	*	If you pass anything else than -1.0f here, the edge will be read only, so it can't be dragged around.
+	*/
+	void setReadOnlyEdge(float constantLeftEdge, float constantRightEdge);;
 
 	void setMargin(float newMargin);
 
@@ -303,14 +272,10 @@ public:
 
 	LookAndFeelMethods* getTableLookAndFeel();
 
-	paintAndProfileChildren(g);
-
 private:
 
-	int getDraggedMidPointIndex(const MouseEvent& e) const;
-
-	MouseDragProperties dragProperties;
-
+	float margin = 0.0f;
+    
     bool displayPopup = true;
 
 	HiseTableLookAndFeel defaultLaf;
@@ -351,7 +316,13 @@ private:
 	public:
 
 		/** Initializes a new DragPoint. The curve is linear */
-		DragPoint(TableEditor& parent, bool isStart, bool isEnd);
+		DragPoint(bool isStart, bool isEnd);
+
+		/** This makes a read only point which can't be dragged around anymore. It only makes sense for start or end points.
+		*	
+			@param newConstantValue the new constant value. If you want to make it variable again, pass -1.
+		*/
+		void setConstantValue(float newConstantValue);
 
 		~DragPoint();
 
@@ -370,9 +341,9 @@ private:
 		/** Sets up the position of the DragPoint in the TableEditor. It doesn't check if a point is start or end, so be careful!
 		*
 		*/
-		void setPosPixel(Point<int> newPosition);;
+		void setPos(Point<int> newPosition);;
 
-		void setPosNormalized(Point<float> normalizedPoint);
+		void setPos(Point<float> normalizedPoint);
 
 		/* sets the curve */
 		void updateCurve(float newCurveValue);;
@@ -382,7 +353,7 @@ private:
 		float getCurve() const;
 
 		/** Saves the TableEditor size for scaling. Call this method whenever you resize the TableEditor */
-		void setTableEditorSize(Rectangle<float> tableEditorBounds);
+		void setTableEditorSize(int width, int height);
 
 		void mouseEnter(const MouseEvent &);;
 
@@ -393,15 +364,13 @@ private:
 		/** Returns the reference to the internal graph point. This is const, so you can't change it */
 		const Table::GraphPoint &getGraphPoint() const;
 
-		bool canBeModified(const MouseDragProperties& properties) const;
-
 	private:
 		JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (DragPoint)
 	
 		WeakReference<DragPoint>::Master masterReference;
 		friend class WeakReference<DragPoint>;
 
-		Rectangle<float> dragPlotSize;
+		Rectangle<int> dragPlotSize;
 
 		bool over;
 
@@ -421,6 +390,8 @@ private:
 
 		static int compareElements(DragPoint *dp1, DragPoint *dp2);;
 	};
+
+	
 
 	// Returns the DragPoint at the position x,y
 	TableEditor::DragPoint * getPointUnder(int x, int y);;
@@ -496,7 +467,7 @@ private:
 
 	class TouchOverlay : public Component,
 						 public ButtonListener,
-						 public Slider::Listener
+						 public SliderListener
 	{
 	public:
 
@@ -522,10 +493,6 @@ private:
 
 	Path dragPath;
 	
-	std::vector<std::pair<int, Rectangle<float>>> mid_points;
-	int hoveredMidPointIndex = -1;
-	int draggedMidPointIndex = -1;
-
 	OwnedArray<DragPoint> drag_points;
 
 	WeakReference<DragPoint> currently_dragged_point;

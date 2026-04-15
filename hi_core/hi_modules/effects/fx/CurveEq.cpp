@@ -32,14 +32,6 @@
 
 namespace hise { using namespace juce;
 
-hise::ProcessorMetadata CurveEq::createMetadata()
-{
-	return ProcessorMetadata()
-		.withStandardMetadata<CurveEq>()
-		.withDescription("A parametric equalizer with unlimited filter bands and an FFT spectrum display for visual feedback.")
-		.withComplexDataInterface(ExternalData::DataType::DisplayBuffer);
-}
-
 CurveEq::CurveEq(MainController *mc, const String &id) :
 	MasterEffectProcessor(mc, id),
     ProcessorWithStaticExternalData(mc, 0, 0, 0, 1)
@@ -59,7 +51,23 @@ CurveEq::CurveEq(MainController *mc, const String &id) :
     
     fftBuffer->setActive(false);
 
-	updateParameterSlots();
+	parameterNames.add("Gain");
+	parameterDescriptions.add("The gain in decibels if supported from the filter type.");
+
+	parameterNames.add("Freq");
+	parameterDescriptions.add("The frequency in Hz.");
+
+	parameterNames.add("Q");
+	parameterDescriptions.add("The bandwidth of the filter if supported.");
+
+	parameterNames.add("Enabled");
+	parameterDescriptions.add("the state of the filter band.");
+
+	parameterNames.add("Type");
+	parameterDescriptions.add("the filter type of the filter band.");
+
+	parameterNames.add("BandOffset");
+	parameterDescriptions.add("the offset that can be used to get the desired formula.");
 }
 
 float CurveEq::getAttribute(int index) const
@@ -67,7 +75,7 @@ float CurveEq::getAttribute(int index) const
 	if(index == -1) return 0.0f;
 
 	const int filterIndex = index / BandParameter::numBandParameters;
-	const BandParameter parameter = (BandParameter)(index % BandParameter::numBandParameters);
+	const BandParameter parameter = (BandParameter)(index % numBandParameters);
 
 	hise::SimpleReadWriteLock::ScopedReadLock sl(bandLock);
 
@@ -80,7 +88,7 @@ float CurveEq::getAttribute(int index) const
 		case BandParameter::Q:		 return (float)filter->getQ();
 		case BandParameter::Type:	 return (float)filter->getType();
 		case BandParameter::Enabled: return filter->isEnabled() ? 1.0f : 0.0f;
-		case BandParameter::numBandParameters:
+		case numBandParameters:
 		default:                     return 0.0f;
 		}
 	}
@@ -101,7 +109,7 @@ void CurveEq::setInternalAttribute(int index, float newValue)
 	if (index == -1) return;
 
 	const int filterIndex = index / BandParameter::numBandParameters;
-	const BandParameter parameter = (BandParameter)(index % BandParameter::numBandParameters);
+	const BandParameter parameter = (BandParameter)(index % numBandParameters);
 
 	hise::SimpleReadWriteLock::ScopedReadLock sl(bandLock);
 
@@ -118,7 +126,7 @@ void CurveEq::setInternalAttribute(int index, float newValue)
 		case BandParameter::Q:		filter->setQ(newValue); break;
 		case BandParameter::Type:	filter->setType((int)newValue); break;
 		case BandParameter::Enabled:filter->setEnabled(newValue >= 0.5f); break;
-		case BandParameter::numBandParameters:
+		case numBandParameters:
 		default:                    break;
 		}
 	}
@@ -133,7 +141,7 @@ void CurveEq::setInternalAttribute(int index, float newValue)
 
 void CurveEq::sendBroadcasterMessage(const String& type, const var& value, NotificationType n /*= sendNotificationAsync*/)
 {
-	getOrCreateProcessorFilterStatistics()->sendBroadcasterMessage(type, value, n);
+eqBroadcaster.sendMessage(n, type, value);
 }
 
 ProcessorEditorBody *CurveEq::createEditor(ProcessorEditor *parentEditor)

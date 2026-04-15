@@ -61,7 +61,7 @@ VelocityEditorBody::VelocityEditorBody (ProcessorEditor *p)
 
     //[UserPreSize]
 
-    
+
 
     
 	vm = static_cast<VelocityModulator*>(getProcessor());
@@ -73,8 +73,7 @@ VelocityEditorBody::VelocityEditorBody (ProcessorEditor *p)
 
     ProcessorHelpers::connectTableEditor(*midiTable, getProcessor());
     
-    auto md = getProcessor()->getMetadata();
-    md.setup(*decibelButton, getProcessor(), VelocityModulator::DecibelMode);
+    decibelButton->setup(getProcessor(), VelocityModulator::DecibelMode, "Decibel Mode");
     
     //[/UserPreSize]
 

@@ -30,8 +30,6 @@
 *   ===========================================================================
 */
 
-#include "ProcessorMetadata.cpp"
-#include "ProcessorMetadataRegistry.cpp"
 #include "Processor.cpp"
 #include "ProcessorInterfaces.cpp"
 
@@ -51,7 +49,6 @@
 
 #endif
 
-#include "modules/ModulationMatrixTools.cpp"
 #include "modules/Modulators.cpp"
 #include "modules/ModulatorChain.cpp"
 #include "modules/MidiProcessor.cpp"

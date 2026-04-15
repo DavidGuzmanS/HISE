@@ -44,15 +44,13 @@ class VelocityModulator: public VoiceStartModulator,
 {
 public:
 
-	SET_PROCESSOR_NAME("Velocity", "Velocity Modulator", "")
-
-	static ProcessorMetadata createMetadata();
+	SET_PROCESSOR_NAME("Velocity", "Velocity Modulator", "Creates a modulation value from the velocity of a incoming message.")
 
 	/// Additional parameters
 	enum SpecialParameters
 	{
-		Inverted = 0,
-		UseTable,
+		Inverted = 0, ///< On, **Off** | if `true`, then the modulator works inverted, so that high velocity values are damped.
+		UseTable, ///< On, **Off** | if `true` then a look up table is used to calculate the value
         DecibelMode,
 		numTotalParameters
 	};
@@ -66,6 +64,10 @@ public:
         decibelMode(false)
 	{ 
         referenceShared(ExternalData::DataType::Table, 0);
+
+		parameterNames.add("Inverted");
+		parameterNames.add("UseTable");
+        parameterNames.add("DecibelMode");
 
 		updateParameterSlots();
 	};

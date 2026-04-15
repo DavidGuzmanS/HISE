@@ -152,13 +152,6 @@ public:
 
 		data.setProperty("ID", sampleMapId.toString(), nullptr);
     }
-
-	void setStoreComplexLayers(bool shouldStoreInSampleMap)
-	{
-		storeComplexLayers = shouldStoreInSampleMap;
-	}
-
-	bool storeComplexLayers = false;
     
 	void updateCrossfades(Identifier id, var newValue);
 	
@@ -297,20 +290,20 @@ private:
 
 		ValueTree d;
 
-		void valueTreePropertyChanged(ValueTree& v,
+		void valueTreePropertyChanged(ValueTree& /*treeWhosePropertyHasChanged*/,
 			const Identifier& /*property*/)
 		{
 			changed = true;
 		}
 
 		void valueTreeChildAdded(ValueTree& /*parentTree*/,
-			ValueTree& v) override
+			ValueTree& /*childWhichHasBeenAdded*/) override
 		{
 			changed = true;
 		}
 
 		void valueTreeChildRemoved(ValueTree& /*parentTree*/,
-			ValueTree& v,
+			ValueTree& /*childWhichHasBeenRemoved*/,
 			int /*indexFromWhichChildWasRemoved*/) override
 		{
 			changed = true;
@@ -437,8 +430,6 @@ private:
 	};
 
 	ScopedPointer<ChangeWatcher> changeWatcher;
-
-	DebugSession::ProfileDataSource::Ptr sampleMapSource;
 
 	Notifier notifier;
 

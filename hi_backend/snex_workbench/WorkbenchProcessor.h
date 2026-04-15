@@ -107,7 +107,7 @@ public:
 		UninitialisedProperties
 	};
 
-	DspNetworkCompileExporter(Component* editor, BackendProcessor* bp, bool skipCompilation_=false);
+	DspNetworkCompileExporter(Component* editor, BackendProcessor* bp);
 
 	void run() override;
 
@@ -115,22 +115,7 @@ public:
 
 	File getBuildFolder() const override;
 
-	ChildProcessManager* managerToUse = nullptr;
-
-	ErrorCodes getErrorCode() const { return ok; }
-
-	StringArray nodesToCompile;
-	StringArray cppFilesToCompile;
-
-	bool skipCompilation = false;
-
-	DspNetwork* getNetwork();
-
-	Result getCompilationResult() const { return getErrorCode() == ErrorCodes::OK ? Result::ok() : Result::fail(errorMessage); }
-
 private:
-
-	
 
 	enum CppFileLocationType
 	{
@@ -145,7 +130,7 @@ private:
 
 	CppFileLocationType getLocationType(const File& f) const;
 
-	
+	DspNetwork* getNetwork();
 
 	static Array<File> getIncludedNetworkFiles(const File& networkFile);
 	
@@ -161,14 +146,6 @@ private:
 	}
 
 	static bool isInterpretedDataFile(const File& f);
-
-	void logMessage(const String& m)
-	{
-		if(managerToUse != nullptr)
-			managerToUse->logMessage("> " + m + "\n");
-		else
-			showStatusMessage(m);
-	}
 
 	void createIncludeFile(const File& sourceDir);
 

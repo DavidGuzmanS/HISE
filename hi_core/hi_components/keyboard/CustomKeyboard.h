@@ -55,7 +55,26 @@ public:
 };
 
 
-using CustomKeyboardLookAndFeelBase = hise::CustomKeyboardState::LookAndFeelBase;
+class CustomKeyboardLookAndFeelBase
+{
+public:
+
+	CustomKeyboardLookAndFeelBase();
+
+	virtual ~CustomKeyboardLookAndFeelBase() {}
+	
+	virtual void drawKeyboardBackground(Graphics &g, Component* c, int width, int height);
+
+	virtual void drawWhiteNote(CustomKeyboardState* state, Component* c, int midiNoteNumber, Graphics &g, int x, int y, int w, int h, bool isDown, bool isOver, const Colour &lineColour, const Colour &textColour);
+	virtual void drawBlackNote(CustomKeyboardState* state, Component* c, int midiNoteNumber, Graphics &g, int x, int y, int w, int h, bool isDown, bool isOver, const Colour &noteFillColour);
+
+	bool useFlatStyle = false;
+
+	Colour bgColour;
+	Colour topLineColour;
+	Colour overlayColour;
+	Colour activityColour;
+};
 
 class CustomKeyboardLookAndFeel: public CustomKeyboardLookAndFeelBase,
 							     public LookAndFeel_V3
@@ -118,7 +137,6 @@ public:
     void mouseDown(const MouseEvent& e) override;
 	void mouseUp(const MouseEvent& e) override;
 	void mouseDrag(const MouseEvent& e) override;
-	bool keyPressed(const KeyPress& key) override;
 	bool isMPEKeyboard() const override { return false; }
 	bool isUsingCustomGraphics() const noexcept override { return useCustomGraphics; };
 	void setUseCustomGraphics(bool shouldUseCustomGraphics) override;
@@ -199,8 +217,6 @@ private:
 	bool displayOctaveNumber = false;
 
 	bool toggleMode = false;
-
-	int currentKeyboardOctave = 5;
 
     //==============================================================================
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (CustomKeyboard)

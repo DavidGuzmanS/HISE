@@ -97,7 +97,7 @@ class HiButtonLookAndFeel: public LookAndFeel_V3
 */
 class TableEnvelopeEditorBody  : public ProcessorEditorBody,
                                  public Timer,
-                                 public Slider::Listener
+                                 public SliderListener
 {
 public:
     //==============================================================================

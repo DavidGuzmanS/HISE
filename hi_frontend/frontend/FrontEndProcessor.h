@@ -81,9 +81,7 @@ private:
 #endif
 
 
-#if !HISE_INCLUDE_NKS_SDK
-struct NKSVST3Interface {};
-#endif
+
 
 /** This class lets you take your exported HISE presets and wrap them into a hardcoded plugin (VST / AU, x86/x64, Win / OSX)
 *
@@ -92,7 +90,6 @@ struct NKSVST3Interface {};
 */
 class FrontendProcessor: public PluginParameterAudioProcessor,
 						 public AudioProcessorDriver,
-					     public NKSVST3Interface,
 						 public MainController
 {
 public:

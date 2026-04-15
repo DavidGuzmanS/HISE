@@ -38,16 +38,7 @@ namespace hise { using namespace juce;
 	GlobalServer::GlobalServer(MainController* mc):
 		ControlledObject(mc),
 		internalThread(*this)
-	{
-		webProfile.setPrefix("Server.");
-		webProfile.setHolder(&mc->getDebugSession(), true);
-		webProfile.setSourceType(DebugSession::ProfileDataSource::SourceType::Server);
-
-		pCallGET = webProfile.add("callWithGET()");
-		pCallPOST = webProfile.add("callWithPOST()");
-		pResponse = webProfile.add("doRequest()");
-		pDownload = webProfile.add("download()");
-	}
+	{}
 
 	void GlobalServer::setBaseURL(String url)
 	{
@@ -186,10 +177,9 @@ namespace hise { using namespace juce;
 	}
 
 	GlobalServer::WebThread::WebThread(GlobalServer& p):
-	  Thread("Server Thread"),
-	  ProfiledRecordingSession(p.getMainController()->getDebugSession(), DebugSession::ThreadIdentifier::Type::ServerThread),
-	  parent(p),
-	  timeoutMessage("{}")
+		Thread("Server Thread"),
+		parent(p),
+		timeoutMessage("{}")
 	{}
 
 GlobalServer::~GlobalServer()
@@ -265,21 +255,8 @@ juce::URL GlobalServer::getWithParameters(String subURL, var parameters)
 
 	if (auto d = parameters.getDynamicObject())
 	{
-		bool isComplexObject = false;
-
-		for(const auto& v: d->getProperties())
-			isComplexObject |= v.value.isArray() || v.value.getDynamicObject() != nullptr;
-
-		if(isComplexObject)
-		{
-			extraHeader = "Content-Type: application/json";
-			url = url.withPOSTData(JSON::toString(parameters, true));
-		}
-		else
-		{
-			for (auto& p : d->getProperties())
-				url = url.withParameter(p.name.toString(), p.value.toString());
-		}
+		for (auto& p : d->getProperties())
+			url = url.withParameter(p.name.toString(), p.value.toString());
 	}
     else if (parameters.isString())
     {
@@ -293,9 +270,6 @@ void GlobalServer::WebThread::run()
 {
 	while (!threadShouldExit())
 	{
-		PROFILE_ONLY(initIfEmpty(DebugSession::ThreadIdentifier::getCurrent()));
-		PROFILE_ONLY(checkRecording());
-
 		if (parent.initialised)
 		{
 			{
@@ -376,8 +350,6 @@ void GlobalServer::WebThread::run()
 
 					ScopedPointer<WebInputStream> wis;
 
-					auto sp = parent.webProfile.profile(parent.pResponse);
-
 					job->requestTimeMs = Time::getMillisecondCounter();
 
 					wis = dynamic_cast<WebInputStream*>(job->url.createInputStream(job->isPost, nullptr, nullptr, job->extraHeader, HISE_SCRIPT_SERVER_TIMEOUT, nullptr, &job->status).release());
@@ -410,26 +382,6 @@ void GlobalServer::WebThread::run()
                     job->responseObj = args[1];
 
 					job->f.call(args);
-
-#if HISE_INCLUDE_PROFILING_TOOLKIT
-					if(sp)
-					{
-						auto& dh = parent.getMainController()->getDebugSession();
-
-						dh.closeTrackEvent(job->profileTrackId);
-						auto ni = new DebugSession::DataItem();
-						ni->label = "server response";
-						ni->idx = job->status;
-
-						auto no = new DynamicObject();
-						no->setProperty("URL", job->url.toString(false));
-						no->setProperty("status", args[0]);
-						no->setProperty("response", args[1].clone());
-
-						ni->data = var(no);
-						dh.addDataItem(ni);
-					}
-#endif
 
 					shouldFireServerCallback = true;
 

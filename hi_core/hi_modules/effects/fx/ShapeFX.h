@@ -86,8 +86,6 @@ class ShapeFX : public MasterEffectProcessor,
 {
 public:
 
-	static ProcessorMetadata createMetadata();
-
 	using Oversampler = juce::dsp::Oversampling<float>;
     
 	using ShapeFunction = std::function<float(float)>;
@@ -171,17 +169,15 @@ public:
 		numParameters
 	};
 
-	SET_PROCESSOR_NAME("ShapeFX", "Shape FX", "");
+	SET_PROCESSOR_NAME("ShapeFX", "Shape FX", "A general purpose waveshaper effect. ");
 
 	ShapeFX(MainController *mc, const String &uid);;
 
 	~ShapeFX();;
 
-	const bool metadataInitialised;
-
 	void setInternalAttribute(int parameterIndex, float newValue) override;
 	float getAttribute(int parameterIndex) const override;
-	ModulationDisplayValue::QueryFunction::Ptr getModulationQueryFunction(int parameterIndex) const override;
+	float getDefaultValue(int parameterIndex) const override;
 
 #if HI_USE_SHAPE_FX_SCRIPTING
 	int getNumScriptParameters() const override { return numParameters; }
@@ -201,6 +197,12 @@ public:
 
 	ValueTree exportAsValueTree() const override;
 	void restoreFromValueTree(const ValueTree &v) override;
+
+	Identifier getIdentifierForParameterIndex(int parameterIndex) const override
+	{
+		// Don't use the content controls for the parameters here...
+		return Processor::getIdentifierForParameterIndex(parameterIndex);
+	}
 
 	bool hasTail() const override { return false; };
 
@@ -358,9 +360,7 @@ public:
 	class PolytableShaper;
 	class PolytableAsymetricalShaper;
 
-	SET_PROCESSOR_NAME("PolyshapeFX", "Polyshape FX", "");
-
-	static ProcessorMetadata createMetadata();
+	SET_PROCESSOR_NAME("PolyshapeFX", "Polyshape FX", "A polyphonic wave shaper.");
 
 	enum InternalChains
 	{
@@ -368,6 +368,7 @@ public:
 		numInternalChains
 	};
 
+	/** The parameters */
 	enum SpecialParameters
 	{
 		Drive = VoiceEffectProcessor::numParameters,
@@ -389,6 +390,7 @@ public:
 
 	float getAttribute(int parameterIndex) const override;
 	void setInternalAttribute(int parameterIndex, float newValue) override;;
+	float getDefaultValue(int parameterIndex) const override;;
 
 	void restoreFromValueTree(const ValueTree &v) override;;
 	ValueTree exportAsValueTree() const override;
@@ -417,14 +419,6 @@ public:
 	void recalculateDisplayTable();
 
 	void startVoice(int voiceIndex, const HiseEvent& e) override;
-
-	ModulationDisplayValue::QueryFunction::Ptr getModulationQueryFunction(int parameterIndex) const override
-	{
-		if(parameterIndex == SpecialParameters::Drive)
-			return new ModulatorChain::GetModulationOutput<(int)PolyshapeFX::InternalChains::DriveModulation>();
-
-		return VoiceEffectProcessor::getModulationQueryFunction(parameterIndex);
-	}
 
 private:
 

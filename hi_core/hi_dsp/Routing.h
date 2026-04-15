@@ -133,11 +133,6 @@ public:
 
         void loadPreset(Presets newPreset);
 
-		void setForcePeakMeters(bool shouldForcePeakMeters)
-		{
-			forcePeakMeters = shouldForcePeakMeters;
-		}
-
 	protected:
 
 		int numAllowedConnections;
@@ -146,7 +141,6 @@ public:
 
 	private:
 
-		bool forcePeakMeters = false;
 		bool anyActive = false;
 
         float upDecayFactor = 1.0f;

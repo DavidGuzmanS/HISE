@@ -51,7 +51,7 @@ class AhdsrEnvelopeEditor;
 */
 class AhdsrEnvelopeEditor  : public ProcessorEditorBody,
                              public Timer,
-                             public Slider::Listener
+                             public SliderListener
 {
 public:
     //==============================================================================
@@ -81,9 +81,13 @@ public:
 
 	void timerCallback() override
 	{
-		
+		using namespace scriptnode::envelope::pimpl;
 
-		
+		attackLevelSlider->setDisplayValue(getProcessor()->getChildProcessor(ahdsr_base::InternalChains::AttackLevelChain)->getOutputValue());
+		attackSlider->setDisplayValue(getProcessor()->getChildProcessor		(ahdsr_base::InternalChains::AttackTimeChain)->getOutputValue());
+		decaySlider->setDisplayValue(getProcessor()->getChildProcessor		(ahdsr_base::InternalChains::DecayTimeChain)->getOutputValue());
+		sustainSlider->setDisplayValue(getProcessor()->getChildProcessor	(ahdsr_base::InternalChains::SustainLevelChain)->getOutputValue());
+		releaseSlider->setDisplayValue(getProcessor()->getChildProcessor	(ahdsr_base::InternalChains::ReleaseTimeChain)->getOutputValue());
 
 
 	}

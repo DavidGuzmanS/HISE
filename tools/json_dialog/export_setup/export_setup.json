@@ -1,7 +1,7 @@
 {
   "StyleData": {
     "Font": "Lato Regular",
-    "BoldFont": "Lato Regular",
+    "BoldFont": "<Sans-Serif>",
     "FontSize": 18.0,
     "bgColour": 4281545523,
     "codeBgColour": 864585864,
@@ -30,12 +30,13 @@
     "StyleSheet": "Dark",
     "Style": "",
     "UseViewport": true,
-    "ConfirmClose": true,
-    "CloseMessage": "Do you want to close this popup?",
     "DialogWidth": 800,
     "DialogHeight": 600
   },
   "GlobalState": {
+    "HisePath": "D:\\Development\\HISE 3",
+    "UseIPP": "0",
+    "downloadHise": false,
     "WINDOWS": true,
     "MAC_OS": false,
     "LINUX": false,
@@ -43,8 +44,7 @@
     "NOT_MAC_OS": true,
     "NOT_LINUX": true,
     "OS": 1,
-    "OS_String": "WIN",
-    "LINK_FILENAME": "LinkWindows"
+    "OS_String": "WIN"
   },
   "Children": [
     {
@@ -55,7 +55,10 @@
           "Text": "\nThis dialog will take you through the process of setting up the compiler toolchain so that you can export projects with HISE.\n\n> For more information, please take a look at [this guide](https://docs.hise.dev/introduction/installation.html#setting-up-vsti/plugin-compilation) in the HISE docs  \n\nPlease click next in order to download and setup the HISE source code.\n  "
         }
       ],
-      "Text": ""
+      "ID": "",
+      "Text": "",
+      "Foldable": false,
+      "Folded": false
     },
     {
       "Type": "List",
@@ -65,7 +68,10 @@
           "Filename": "compilerSettings",
           "UseChildState": "1",
           "ID": "CompilerSettings",
-          "Items": "HisePath:\nUseIPP:Yes"
+          "Items": "HisePath:\nUseIPP:Yes",
+          "Text": "LabelText",
+          "UseProject": false,
+          "ParseJSON": false
         },
         {
           "Type": "MarkdownText",
@@ -74,7 +80,9 @@
         {
           "Type": "JavascriptFunction",
           "ID": "JavascriptFunctionId",
-          "Code": "// Enter the code here...\n\nstate.downloadHise = state.HisePath.length == 0;\n\nvar fs = document.getElementById(\"HisePath\");\nfs.setAttribute(\"disabled\", !state.downloadHise);\n\n\n"
+          "EventTrigger": "OnPageLoad",
+          "Code": "// Enter the code here...\n\nstate.downloadHise = state.HisePath.length == 0;\n\nvar fs = document.getElementById(\"HisePath\");\nfs.setAttribute(\"disabled\", !state.downloadHise);\n\n\n",
+          "Text": "LabelText"
         },
         {
           "Type": "FileSelector",
@@ -84,16 +92,18 @@
           "Directory": "1",
           "SaveFile": "1",
           "Enabled": false,
-          "UseInitValue": ""
+          "Code": ""
         },
         {
           "Type": "Button",
           "ID": "downloadHise",
           "Style": "margin-top:10px;",
+          "Enabled": "1",
           "InitValue": "1",
           "UseInitValue": "1",
           "Help": "If you're already downloaded HISE, you can omit this step.",
-          "Text": "Download the HISE source code"
+          "Text": "Download the HISE source code",
+          "Code": ""
         },
         {
           "Type": "Column",
@@ -123,13 +133,23 @@
               "Text": "Extract SDK",
               "ID": "downloadHise",
               "EventTrigger": "OnSubmit",
+              "Class": "",
+              "Style": "",
               "Source": "$HisePath/tools/SDK/sdk.zip",
-              "Target": "$HisePath/tools/SDK/"
+              "Target": "$HisePath/tools/SDK/",
+              "SkipFirstFolder": false,
+              "Overwrite": false,
+              "Cleanup": false,
+              "SkipIfNoSource": false
             }
-          ]
+          ],
+          "ID": ""
         }
       ],
+      "ID": "",
       "Text": "",
+      "Foldable": false,
+      "Folded": false,
       "style": "padding:30px;",
       "Style": "padding:0px;"
     },
@@ -141,15 +161,18 @@
           "Text": "\nNow we'll check whether the IDE build tools are available and can be installed from the command line. Press next in order to perform the checks on your computer.\n      "
         },
         {
-          "Type": "OperatingSystem"
+          "Type": "OperatingSystem",
+          "Text": "LabelText"
         },
         {
           "Type": "Branch",
           "ID": "OS",
+          "Text": "LabelText",
           "Children": [
             {
               "Type": "List",
               "ID": "macIDE",
+              "Text": "LabelText",
               "Children": []
             },
             {
@@ -161,22 +184,30 @@
                   "ID": "CommandLineTaskId",
                   "EventTrigger": "OnSubmit",
                   "Code": "msbuild /version",
-                  "Text": "Test MSBuild"
+                  "Text": "Test MSBuild",
+                  "Class": "",
+                  "Style": ""
                 },
                 {
                   "Type": "MarkdownText",
-                  "Text": "\n\nIf this fails with \"command not found\", you will need to download Visual Studio 2026 from [here](https://visualstudio.microsoft.com/de/thank-you-downloading-visual-studio/?sku=Community&channel=Stable&version=VS18&source=VSLandingPage&passive=false&cid=2500).  Please read the [installation](soon) section in the HISE docs for more information about this step."
+                  "ID": "",
+                  "Text": "\n\nIf this fails with \"command not found\", you will need to download Visual Studio 2022 from [here](https://visualstudio.microsoft.com/de/thank-you-downloading-visual-studio/?sku=Community&channel=Release&version=VS2022&source=VSLandingPage&cid=2030&passive=false).  Please read the [installation](soon) section in the HISE docs for more information about this step.",
+                  "Class": "",
+                  "Style": ""
                 }
-              ],
-              "Text": ""
+              ]
             },
             {
-              "Type": "List"
+              "Type": "List",
+              "Text": "LabelText"
             }
           ]
         }
       ],
-      "Text": ""
+      "ID": "",
+      "Text": "",
+      "Foldable": false,
+      "Folded": false
     },
     {
       "Type": "List",
@@ -186,42 +217,69 @@
           "Filename": "compilerSettings",
           "UseChildState": "1",
           "ID": "CompilerSettings",
-          "Items": "HisePath:\nUseIPP:Yes"
+          "Items": "HisePath:\nUseIPP:Yes",
+          "Text": "LabelText",
+          "UseProject": false,
+          "ParseJSON": false
         },
         {
           "Type": "Branch",
           "ID": "OS",
+          "Text": "LabelText",
           "Children": [
             {
-              "Type": "List"
+              "Type": "List",
+              "Text": "LabelText"
             },
             {
               "Type": "List",
               "Children": [
                 {
                   "Type": "MarkdownText",
-                  "Text": "\nDo you want to install the IPP library? If yes, then tick this box"
+                  "Text": "\nDo you want to install the IPP library? If yes, then tick this box",
+                  "ID": ""
                 },
                 {
                   "Type": "MarkdownText",
-                  "Text": "> If you haven't installed IPP, please download the installer from the [Intel website](https://registrationcenter-download.intel.com/akdlm/IRC_NAS/b4adec02-353b-4144-aa21-f2087040f316/w_ipp_oneapi_p_2021.11.0.533.exe)\n\n"
+                  "Text": "> If you haven't installed IPP, please download the installer from the [Intel website](https://registrationcenter-download.intel.com/akdlm/IRC_NAS/b4adec02-353b-4144-aa21-f2087040f316/w_ipp_oneapi_p_2021.11.0.533.exe)\n\n",
+                  "ID": "",
+                  "Class": "",
+                  "Style": ""
                 },
                 {
                   "Type": "Button",
                   "Text": "Use IPP",
                   "ID": "UseIPP",
-                  "Help": "The IPP library increases the performance of a few functions in HISE (eg. the convolution reverb) and is highly recommended on Windows systems."
+                  "Enabled": true,
+                  "Code": "",
+                  "InitValue": "",
+                  "UseInitValue": false,
+                  "Class": "",
+                  "Style": "",
+                  "NoLabel": false,
+                  "Required": false,
+                  "Trigger": false,
+                  "Help": "The IPP library increases the performance of a few functions in HISE (eg. the convolution reverb) and is highly recommended on Windows systems.",
+                  "Tooltip": "",
+                  "ButtonType": ""
                 }
               ],
-              "Text": ""
+              "ID": "",
+              "Text": "",
+              "Foldable": false,
+              "Folded": false
             },
             {
-              "Type": "List"
+              "Type": "List",
+              "Text": "LabelText"
             }
           ]
         }
       ],
-      "Text": ""
+      "ID": "",
+      "Text": "",
+      "Foldable": false,
+      "Folded": false
     },
     {
       "Type": "List",

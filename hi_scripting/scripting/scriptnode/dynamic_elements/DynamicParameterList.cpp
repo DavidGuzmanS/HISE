@@ -140,8 +140,7 @@ void dynamic::editor::timerCallback()
 	{
 		if (auto nc = findParentComponentOfClass<NodeComponent>())
 		{
-			auto pn = nc->node.get();
-			mode.initModes(duplilogic::dynamic::getSpreadModes(), pn);
+			mode.initModes(duplilogic::dynamic::getSpreadModes(), nc->node.get());
 			initialised = true;
 		}
 	}
@@ -219,10 +218,12 @@ namespace parameter
 		return list;
 	}
 
-	void clone_holder::setParameter(ObjectWithValueTree* o, dynamic_base::Ptr b)
+	void clone_holder::setParameter(NodeBase* n, dynamic_base::Ptr b)
 	{
-		auto n = dynamic_cast<NodeBase*>(o);
 		base = b;
+
+        
+        
         
 		if (auto cn = dynamic_cast<CloneNode*>(connectedCloneContainer.get()))
 		{
@@ -331,7 +332,7 @@ dynamic_list::MultiOutputSlot::MultiOutputSlot(NodeBase* n, ValueTree switchTarg
 
 juce::ValueTree dynamic_list::MultiOutputSlot::getConnectionTree(NodeBase* n, ValueTree st)
 {
-	return st.getOrCreateChildWithName(PropertyIds::Connections, n->getUndoManager());
+	return st.getOrCreateChildWithName(PropertyIds::Connections, n->getUndoManager(true));
 }
 
 void dynamic_list::MultiOutputSlot::rebuildCallback()
@@ -340,9 +341,9 @@ void dynamic_list::MultiOutputSlot::rebuildCallback()
 	p.setParameter(nullptr, dc);
 }
 
-void dynamic_list::initialise(ObjectWithValueTree* n)
+void dynamic_list::initialise(NodeBase* n)
 {
-	parentNode = dynamic_cast<NodeBase*>(n);
+	parentNode = n;
 
 	switchTree = n->getValueTree().getOrCreateChildWithName(PropertyIds::SwitchTargets, n->getUndoManager());
 
@@ -350,8 +351,9 @@ void dynamic_list::initialise(ObjectWithValueTree* n)
 
 	if(modTree.isValid())
 	{
-		modTree.getParent().removeChild(modTree, n->getUndoManager());
+		modTree.getParent().removeChild(modTree, n->getUndoManager(true));
 	}
+
 
 	connectionUpdater.setCallback(switchTree, valuetree::AsyncMode::Synchronously, BIND_MEMBER_FUNCTION_2(dynamic_list::updateConnections));
 
@@ -362,7 +364,7 @@ void dynamic_list::initialise(ObjectWithValueTree* n)
 	{
 		WeakReference<dynamic_list> safeThis(this);
 
-		parentNode->getRootNetwork()->addPostInitFunction([safeThis]()
+		n->getRootNetwork()->addPostInitFunction([safeThis]()
 		{
 			if (safeThis.get() != nullptr)
 			{
@@ -449,9 +451,9 @@ juce::Path ui::Factory::createPath(const String& url) const
 	Path p;
 	LOAD_EPATH_IF_URL("add", HiBinaryData::ProcessorEditorHeaderIcons::addIcon);
 	LOAD_EPATH_IF_URL("delete", SampleMapIcons::deleteSamples);
-	LOAD_EPATH_IF_URL("local", ColumnIcons::localIcon);
-	LOAD_EPATH_IF_URL("drag", ColumnIcons::targetIcon);
-	LOAD_EPATH_IF_URL("edit", ColumnIcons::moveIcon);
+	LOAD_PATH_IF_URL("local", ColumnIcons::localIcon);
+	LOAD_PATH_IF_URL("drag", ColumnIcons::targetIcon);
+	LOAD_PATH_IF_URL("edit", ColumnIcons::moveIcon);
 
 	return p;
 }

@@ -108,7 +108,7 @@
 namespace snex {
 using namespace juce;
 
-using SnexFloatType = float;
+using FloatType = float;
 
 #define SNEX_ENABLE_DEBUG_TYPENAMES 0
 
@@ -328,7 +328,6 @@ struct sdouble : public pimpl::_ramp<double>
 {};
 
 
-
 /** A small helper class for usage within a wrap::mod node.
  \ingroup snex_helpers
 */
@@ -402,23 +401,12 @@ struct VoiceResetter
 	JUCE_DECLARE_WEAK_REFERENCEABLE(VoiceResetter);
 };
 
-struct DllBoundaryUUIDManager
-{
-	virtual ~DllBoundaryUUIDManager() {};
-
-	/** Override this method, make sure that the initialId is unique and update the char buffer and length accordingly. */
-	virtual void registerUUID(void* obj, char* initialId, int& len) = 0;
-
-	/** Override this method and remove the UUID for the given object. */
-	virtual bool deregisterUUID(void* obj) = 0;
-	
-	/** Removes all UUIDs. */
-	virtual void clearUUIDs() = 0;
-};
-
 struct DllBoundaryTempoSyncer: public hise::TempoListener
 {
-	DllBoundaryTempoSyncer() = default;
+	DllBoundaryTempoSyncer()
+	{
+		
+	}
 	~DllBoundaryTempoSyncer() = default;
 	
 	/** Register an item that has a tempoChangedStatic class. */
@@ -502,17 +490,7 @@ struct DllBoundaryTempoSyncer: public hise::TempoListener
 	double bpm = 120.0;
     bool isPlaying = false;
     double ppqPosition = 0.0;
-
-	double getCurrentPPQPosition(int timestamp) const
-	{
-		if(ppqFunction)
-			return ppqFunction(timestamp);
-
-		return ppqPosition;
-	}
-
-	std::function<double(int)> ppqFunction;
-
+	
 	hise::SimpleReadWriteLock listenerLock;
 
 	hise::UnorderedStack<WeakReference<hise::TempoListener>, 256> tempoListeners;
@@ -522,37 +500,6 @@ struct DllBoundaryTempoSyncer: public hise::TempoListener
 
 	// And now we don't even care anymore about tucking stuff in here...
 	hise::AdditionalEventStorage* additionalEventStorage = nullptr;
-
-	DllBoundaryUUIDManager* uuidManager = nullptr;
-
-	/** use a function that returns a HISE wide UUID for the given element. */
-	std::function<bool(char*, int&)> uuidRequestFunction;
-
-	String requestUUID(void* obj, const String& suffix) const
-	{
-		char bf[128];
-		memset(bf, 0, 128);
-		int numBytes = suffix.length();
-		memcpy(bf, suffix.getCharPointer().getAddress(), numBytes);
-
-		if (uuidRequestFunction && uuidRequestFunction(bf, numBytes))
-		{
-			if(uuidManager != nullptr)
-				uuidManager->registerUUID(obj, bf, numBytes);
-
-			return String(bf, numBytes);
-		}
-
-		return String();
-	}
-
-	bool deregisterUUID(void* obj)
-	{
-		if(uuidManager != nullptr)
-			return uuidManager->deregisterUUID(obj);
-        
-        return false;
-	}
 
 	/** @internal This can be used to temporarily change the pointer to the mod value.
 		The OpaqueNetworkHolder uses this abomination of a class in the prepare
@@ -629,7 +576,8 @@ struct PolyHandler
 	};
 
 	/** @internal Create an instance of this class with the given voice index and it will return this voice
-	    index for each call that happens on this thread as long as this object exists. */
+	    index for each call that happens on this thread as long as this object exists.
+	*/
 	struct ScopedVoiceSetter
 	{
 		ScopedVoiceSetter(PolyHandler& p_, int voiceIndex) :
@@ -645,13 +593,12 @@ struct PolyHandler
 		~ScopedVoiceSetter()
 		{
 			if (p.enabled != 0)
-			{
 				p.voiceIndex = -1;
-			}
 		}
 
 	private:
 
+		void* previousThread = nullptr;
 		PolyHandler& p;
 	};
 
@@ -683,20 +630,11 @@ struct PolyHandler
 		(or if the voice index has not been set). */
 	int getVoiceIndex() const
 	{
-		if (currentAllThread != nullptr)
-		{
-			if (Thread::getCurrentThreadId() == currentAllThread)
-				return -1 * enabled;
-			else
-			{
-				// performance hit on hot path here...
-				//jassertfalse;
-			}
-		}
-		
+		if (currentAllThread != nullptr && Thread::getCurrentThreadId() == currentAllThread)
+			return -1 * enabled;
+
 		return voiceIndex.load() * enabled;
 	}
-	bool isAllThread() const { return enabled && currentAllThread != nullptr && Thread::getCurrentThreadId() == currentAllThread; };
 
 	bool isEnabled() const { return enabled; }
 
@@ -864,8 +802,6 @@ struct VoiceDataStack
 			}
 		}
 	}
-
-	int getNumActiveVoices() const { return voiceNoteOns.size(); }
 
 	template <typename T> void startVoice(T& n, PolyHandler& ph, int voiceIndex, const HiseEvent& e)
 	{
@@ -1048,7 +984,7 @@ template <typename T, int NumVoices> struct PolyData
 {
 	PolyData(T initValue)
 	{
-		setAll(initValue);
+		setAll(std::move(initValue));
 	}
 
 	PolyData& operator=(const PolyData& other)
@@ -1092,60 +1028,28 @@ template <typename T, int NumVoices> struct PolyData
 		voicePtr = sp.voiceIndex;
 	}
 
-	void setAll(const T& value)
+	void setAll(T&& value)
 	{
-		if (!isPolyphonic())
+		if (!isPolyphonic() || voicePtr == nullptr)
 		{
-			data[0] = value;
-		}
-		else if (voicePtr == nullptr)
-		{
-			// Before prepare() - initialize all slots
-			for (int i = 0; i < NumVoices; i++)
-				data[i] = value;
+			*data = std::move(value);
 		}
 		else
 		{
-			// After prepare() - set based on current voice context
 			for (auto& d : *this)
-				d = value;
+				d = std::move(value);
 		}
 	}
 
-	/** Returns a reference to the current voice's data.
-	 *
-	 *  Uses begin() which calls getVoiceIndex(). The fast-path in getVoiceIndex()
-	 *  skips the Thread::getCurrentThreadId() check when no ScopedAllVoiceSetter
-	 *  is active (99.9% of the time on the audio thread), costing only a single
-	 *  atomic load (~1-3 cycles on x86).
-	 */
+	
+	/** If you know that you're inside a rendering context, you can
+	    use this function instead of the for-loop syntax. Be aware that
+		the performance will be the same, it's just a bit less to type. 
+	*/
 	T& get() const
 	{
-		if constexpr (isPolyphonic())
-			return *begin();
-		else
-			return *const_cast<T*>(data);
-	}
-
-	/** A lightweight range that always covers all voices, ignoring the current voice context.
-	 *  Use for operations that must affect all voices unconditionally
-	 *  (e.g., clearing filter state, resetting all voice data).
-	 *
-	 *  Usage: for(auto& d : polyData.all()) d.clear();
-	 */
-	struct AllVoiceRange
-	{
-		AllVoiceRange(T* d, int n) : ptr(d), num(n) {}
-		T* begin() const { return ptr; }
-		T* end() const { return ptr + num; }
-		T* ptr;
-		int num;
-	};
-
-	/** Returns an iterator that always covers all voices, ignoring the current voice context. */
-	AllVoiceRange all() const
-	{
-		return AllVoiceRange(const_cast<T*>(data), NumVoices);
+		jassert(isMonophonicOrInsideVoiceRendering());
+		return *begin();
 	}
 
 	/** Allows range-based for loops to work inside the voice context. */
@@ -1193,8 +1097,8 @@ template <typename T, int NumVoices> struct PolyData
 	{
 		if constexpr (!isPolyphonic())
 			return true;
-		else
-			return begin() == &getFirst();
+
+		return begin() == getFirst();
 	}
 
 	/** Returns a reference to the first data. This can be used for UI purposes. */
@@ -1218,32 +1122,19 @@ template <typename T, int NumVoices> struct PolyData
 		return isVoiceRenderingActive();
 	}
 
-	T& getWithIndex(int index)
-	{
-		return *(data + getVoiceIndex(index));
-	}
+private:
 
-	const T& getWithIndex(int index) const
-	{
-		return *(data + getVoiceIndex(index));
-	}
+	
+	
+	static constexpr bool isPolyphonic() { return NumVoices > 1; }
 
-	bool isPolyHandlerEnabled() const
-	{
-		return NumVoices > 1 && voicePtr != nullptr && voicePtr->isEnabled();
-	}
+	
 
 	bool isVoiceRenderingActive() const
 	{
 		return isPolyphonic() &&
 			voicePtr != nullptr && voicePtr->getVoiceIndex() != -1;
 	}
-
-private:
-
-	static constexpr bool isPolyphonic() { return NumVoices > 1; }
-
-	
 
 	int getCurrentVoiceIndex() const
 	{
@@ -1257,7 +1148,18 @@ private:
 		auto rv = index & (NumVoices - 1);
 		return rv;
 	}
-	
+
+
+	T& getWithIndex(int index)
+	{
+		return *(data + getVoiceIndex(index));
+	}
+
+	const T& getWithIndex(int index) const
+	{
+		return *(data + getVoiceIndex(index));
+	}
+
 private:
 
 	PolyHandler* voicePtr = nullptr;
@@ -1265,7 +1167,6 @@ private:
 	int unused = 0;
 
 	T data[NumVoices];
-
 };
 
 }

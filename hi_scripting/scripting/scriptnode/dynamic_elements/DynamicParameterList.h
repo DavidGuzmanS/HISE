@@ -39,84 +39,75 @@ using namespace hise;
 namespace parameter
 {
 	
-struct dynamic_list
-{
-	static constexpr int size = 2;
-	static constexpr bool isStaticList() { return false; }
-
-	dynamic_list() :
-		numParameters(PropertyIds::NumParameters, 0)
-	{};
-
-	virtual ~dynamic_list() {};
-
-	struct MultiOutputSlot: public ConnectionSourceManager
+	struct dynamic_list
 	{
-        MultiOutputSlot(NodeBase* n, ValueTree switchTarget);
+		static constexpr int size = 2;
+		static constexpr bool isStaticList() { return false; }
 
-		static ValueTree getConnectionTree(NodeBase* n, ValueTree switchTarget);
+		dynamic_list() :
+			numParameters(PropertyIds::NumParameters, 0)
+		{};
 
-		void rebuildCallback() override;
+		virtual ~dynamic_list() {};
 
-		bool isInitialised() const
+		struct MultiOutputSlot: public ConnectionSourceManager
 		{
-			return p.base != nullptr || getConnectionTree(parentNode, switchTarget).getNumChildren() == 0;
-		}
+            MultiOutputSlot(NodeBase* n, ValueTree switchTarget);
 
-		ValueTree switchTarget;
-		NodeBase::Ptr parentNode;
-		parameter::dynamic_base_holder p;
+			static ValueTree getConnectionTree(NodeBase* n, ValueTree switchTarget);
+
+			void rebuildCallback() override;
+
+			bool isInitialised() const
+			{
+				return p.base != nullptr || getConnectionTree(parentNode, switchTarget).getNumChildren() == 0;
+			}
+
+			ValueTree switchTarget;
+			NodeBase::Ptr parentNode;
+			parameter::dynamic_base_holder p;
             
-		JUCE_DECLARE_WEAK_REFERENCEABLE(MultiOutputSlot);
-	};
+			JUCE_DECLARE_WEAK_REFERENCEABLE(MultiOutputSlot);
+		};
 
-	valuetree::ChildListener connectionUpdater;
+		valuetree::ChildListener connectionUpdater;
 
-	NodePropertyT<int> numParameters;
+		NodePropertyT<int> numParameters;
 
-	void initialise(ObjectWithValueTree* n);
+		void initialise(NodeBase* n);
 
-	bool rebuildMultiOutputSlots();
+		bool rebuildMultiOutputSlots();
 
-	int getNumParameters() const;
+		int getNumParameters() const;
 
-	void updateConnections(ValueTree v, bool wasAdded);
+		void updateConnections(ValueTree v, bool wasAdded);
 
-	void updateParameterAmount(Identifier id, var newValue);
+		void updateParameterAmount(Identifier id, var newValue);
 
-	template <int P> dynamic_base_holder& getParameter()
-	{
-		jassert(isPositiveAndBelow(P, getNumParameters()));
-		return targets[P]->p;
-	}
-
-	template <int P> void call(double v)
-	{
-		lastValues.set(P, v);
-		jassert(isPositiveAndBelow(P, getNumParameters()));
-		targets[P]->p.call(v);
-	}
-
-	void callWithRuntimeIndex(int index, double v)
-	{
-		if(isPositiveAndBelow(index, getNumParameters()))
+		template <int P> dynamic_base_holder& getParameter()
 		{
-			lastValues.set(index, v);
-			targets[index]->p.call(v);
+			jassert(isPositiveAndBelow(P, getNumParameters()));
+			return targets[P]->p;
 		}
-	}
 
-	bool deferUpdate = false;
+		template <int P> void call(double v)
+		{
+			lastValues.set(P, v);
+			jassert(isPositiveAndBelow(P, getNumParameters()));
+			targets[P]->p.call(v);
+		}
 
-	ValueTree switchTree;
-	NodeBase* parentNode;
+		bool deferUpdate = false;
 
-	String missingNodes;
+		ValueTree switchTree;
+		NodeBase* parentNode;
 
-	Array<double> lastValues;
-	OwnedArray<MultiOutputSlot> targets;
+		String missingNodes;
 
-	JUCE_DECLARE_WEAK_REFERENCEABLE(dynamic_list);
+		Array<double> lastValues;
+		OwnedArray<MultiOutputSlot> targets;
+
+		JUCE_DECLARE_WEAK_REFERENCEABLE(dynamic_list);
 };
 
 namespace ui
@@ -135,8 +126,6 @@ namespace ui
 		Path createPath(const String& url) const override;
 	};
 
-
-#if HISE_INCLUDE_SCRIPTNODE_UI
 struct dynamic_list_editor : public ScriptnodeExtraComponent<parameter::dynamic_list>,
 	public ButtonListener
 {
@@ -220,51 +209,6 @@ struct dynamic_list_editor : public ScriptnodeExtraComponent<parameter::dynamic_
 	HiseShapeButton editButton;
 	OwnedArray<DragComponent> dragSources;
 };
-
-template <class NodeType, class UIClass> struct multi_output_wrapper : public ScriptnodeExtraComponent<NodeType>
-{
-	multi_output_wrapper(NodeType* v, PooledUIUpdater* updater_):
-	ScriptnodeExtraComponent<NodeType>(v, updater_),
-		graph(nullptr, updater_),
-		dragRow(&v->getParameter(), updater_)
-	{
-		static_assert(std::is_base_of<ScriptnodeExtraComponent<mothernode>, UIClass>(), "not a base class");
-
-		graph.initialise(v->p.parentNode);
-		this->addAndMakeVisible(dragRow);
-
-		this->addAndMakeVisible(graph);
-		this->setSize(graph.getWidth(), graph.getHeight() + 10 + parameter::ui::UIConstants::ButtonHeight + parameter::ui::UIConstants::DragHeight + UIValues::NodeMargin);
-		this->setRepaintsOnMouseActivity(true);
-		this->stop();
-	}
-
-	void timerCallback() override
-	{
-		jassertfalse;
-	};
-
-	void resized() override
-	{
-		auto b = this->getLocalBounds();
-		graph.setBounds(b.removeFromTop(graph.getHeight()));
-		b.removeFromTop(UIValues::NodeMargin);
-		dragRow.setBounds(b);
-	}
-
-	static Component* createExtraComponent(void* obj, PooledUIUpdater* updater)
-	{
-		auto v = static_cast<NodeType*>(obj);
-		return new multi_output_wrapper<NodeType, UIClass>(v, updater);
-	}
-
-	UIClass graph;
-	parameter::ui::dynamic_list_editor dragRow;
-};
-
-#endif
-}
-
 }
 
 
@@ -275,4 +219,4 @@ template <class NodeType, class UIClass> struct multi_output_wrapper : public Sc
 
 
 
-
+}

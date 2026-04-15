@@ -37,7 +37,7 @@ namespace hise { using namespace juce;
 */
 class StereoEditor  : public ProcessorEditorBody,
                       public Timer,
-                      public Slider::Listener
+                      public SliderListener
 {
 public:
     //==============================================================================

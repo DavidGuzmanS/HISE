@@ -59,12 +59,14 @@ ControlEditorBody::ControlEditorBody (ProcessorEditor *p)
 
     addAndMakeVisible (controllerNumberSlider = new HiSlider ("CC Nr."));
     controllerNumberSlider->setTooltip (TRANS("The CC number"));
+    controllerNumberSlider->setRange (1, 128, 1);
     controllerNumberSlider->setSliderStyle (Slider::RotaryHorizontalVerticalDrag);
     controllerNumberSlider->setTextBoxStyle (Slider::TextBoxRight, false, 30, 20);
     controllerNumberSlider->addListener (this);
 
     addAndMakeVisible (smoothingSlider = new HiSlider ("Smoothing"));
     smoothingSlider->setTooltip (TRANS("Smoothing Value"));
+    smoothingSlider->setRange (0, 2000, 0);
     smoothingSlider->setSliderStyle (Slider::RotaryHorizontalVerticalDrag);
     smoothingSlider->setTextBoxStyle (Slider::TextBoxRight, false, 60, 20);
     smoothingSlider->addListener (this);
@@ -76,6 +78,7 @@ ControlEditorBody::ControlEditorBody (ProcessorEditor *p)
 
     addAndMakeVisible (defaultSlider = new HiSlider ("Default"));
     defaultSlider->setTooltip (TRANS("Smoothing Value"));
+    defaultSlider->setRange (0, 127, 0);
     defaultSlider->setSliderStyle (Slider::RotaryHorizontalVerticalDrag);
     defaultSlider->setTextBoxStyle (Slider::TextBoxRight, false, 60, 20);
     defaultSlider->addListener (this);
@@ -85,12 +88,18 @@ ControlEditorBody::ControlEditorBody (ProcessorEditor *p)
 
 	cm = static_cast<ControlModulator*>(this->getProcessor());
 
-	auto md = getProcessor()->getMetadata();
-	md.setup(*smoothingSlider, getProcessor(), ControlModulator::SmoothTime);
-	md.setup(*controllerNumberSlider, getProcessor(), ControlModulator::ControllerNumber);
-	md.setup(*defaultSlider, getProcessor(), ControlModulator::DefaultValue);
-    md.setup(*useTableButton, getProcessor(), ControlModulator::Parameters::UseTable);
-    md.setup(*invertedButton, getProcessor(), ControlModulator::Parameters::Inverted);
+	smoothingSlider->setup(getProcessor(), ControlModulator::SmoothTime, "Smoothing");
+	smoothingSlider->setMode(HiSlider::Mode::Time, 0, 1000.0, 100.0);
+
+	controllerNumberSlider->setup(getProcessor(), ControlModulator::ControllerNumber, "CC Number");
+	controllerNumberSlider->setMode(HiSlider::Discrete, 0, 129.0, 64.0);
+
+	defaultSlider->setup(getProcessor(), ControlModulator::DefaultValue, "Default");
+	defaultSlider->setMode(HiSlider::Discrete, 0.0, 127.0);
+	defaultSlider->setRange(0.0, 127.0, 1.0);
+
+    useTableButton->setup(getProcessor(), ControlModulator::Parameters::UseTable, "UseTable");
+    invertedButton->setup(getProcessor(), ControlModulator::Parameters::Inverted, "Inverted");
 
 	getProcessor()->getMainController()->skin(*learnButton);
 

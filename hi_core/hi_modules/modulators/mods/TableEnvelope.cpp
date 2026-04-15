@@ -32,40 +32,6 @@
 
 namespace hise { using namespace juce;
 
-hise::ProcessorMetadata TableEnvelope::createMetadata()
-{
-	using Par = ProcessorMetadata::ParameterMetadata;
-	using Mod = ProcessorMetadata::ModulationMetadata;
-	using Range = scriptnode::InvertableParameterRange;
-
-	return EnvelopeModulator::createBaseMetadata()
-		.withStandardMetadata<TableEnvelope>()
-		.withDescription("An envelope with fully customizable attack and release shapes drawn as lookup tables.")
-		.withComplexDataInterface(ExternalData::DataType::Table)
-		.withParameter(Par(Attack)
-			.withId("Attack")
-			.withDescription("Controls how long the envelope takes to reach full level after a note-on")
-			.withSliderMode(HiSlider::Time, Range(1.0, 20000.0).withCentreSkew(2000.0))
-			.withDefault(20.0f))
-		.withParameter(Par(Release)
-			.withId("Release")
-			.withDescription("The time the envelope takes to fall from the sustain level to zero after note-off")
-			.withSliderMode(HiSlider::Time, Range(1.0, 20000.0).withCentreSkew(2000.0))
-			.withDefault(20.0f))
-		.withModulation(Mod(AttackChain)
-			.withId("AttackTimeModulation")
-			.withDescription("Modulates the attack time per voice")
-			.withConstrainer<VoiceStartModulatorFactoryType::Constrainer>()
-			.withMode(scriptnode::modulation::ParameterMode::ScaleOnly)
-			.withModulatedParameter(Attack))
-		.withModulation(Mod(ReleaseChain)
-			.withId("ReleaseTimeModulation")
-			.withDescription("Modulates the release time per voice")
-			.withConstrainer<VoiceStartModulatorFactoryType::Constrainer>()
-			.withMode(scriptnode::modulation::ParameterMode::ScaleOnly)
-			.withModulatedParameter(Release));
-}
-
 TableEnvelope::TableEnvelope(MainController *mc, const String &id, int voiceAmount, Modulation::Mode m, float attackTimeMs, float releaseTimeMs):
 		EnvelopeModulator(mc, id, voiceAmount, m),
 		Modulation(m),
@@ -77,6 +43,9 @@ TableEnvelope::TableEnvelope(MainController *mc, const String &id, int voiceAmou
 {
 	attackTable = dynamic_cast<SampleLookupTable*>(getTableUnchecked(0));
 	releaseTable = dynamic_cast<SampleLookupTable*>(getTableUnchecked(1));
+
+	parameterNames.add("Attack");
+	parameterNames.add("Release");
 
 	updateParameterSlots();
 
@@ -341,13 +310,12 @@ float TableEnvelope::calculateNewValue(int voiceIndex)
 	{
 	case TableEnvelopeState::ATTACK:
 	{
+		state->current_value = attackTable->getInterpolatedValue(state->uptime / (double)SAMPLE_LOOKUP_TABLE_SIZE, dontSendNotification);
+
 		state->uptime += attackUptimeDelta * state->attackModValue;
 
 		if ((int)state->uptime >= SAMPLE_LOOKUP_TABLE_SIZE)
 		{
-			// Very short attack times caused the sustain phase to use the wrong value
-			// This makes sure we use the last value of the table for the sustain phase
-			state->current_value = attackTable->getInterpolatedValue(1.0, dontSendNotification);
 			state->uptime = 0.0f;
 
 			if (!isMonophonic && attackTable->getLastValue() <= 0.01f)
@@ -359,10 +327,6 @@ float TableEnvelope::calculateNewValue(int voiceIndex)
 			{
 				state->current_state = TableEnvelopeState::SUSTAIN;
 			}
-		}
-		else
-		{
-			state->current_value = attackTable->getInterpolatedValue(state->uptime / (double)SAMPLE_LOOKUP_TABLE_SIZE, dontSendNotification);
 		}
 		break;
 	}
@@ -446,40 +410,6 @@ bool TableEnvelope::isPlaying(int voiceIndex) const
 		TableEnvelopeState *state = static_cast<TableEnvelopeState*>(states[voiceIndex]);
 		return state->current_state != TableEnvelopeState::IDLE;
 	}
-}
-
-void TableEnvelope::setInternalAttribute(int parameterIndex, float newValue)
-{
-	if (parameterIndex < EnvelopeModulator::Parameters::numParameters)
-	{
-		EnvelopeModulator::setInternalAttribute(parameterIndex, newValue);
-		return;
-	}
-
-	switch(parameterIndex)
-	{
-	case Attack:
-		attack = newValue;
-		attackUptimeDelta = calculateTableDelta(newValue);
-		break;
-	case Release:
-		release = newValue;
-		releaseUptimeDelta = calculateTableDelta(newValue);
-		break;
-	default:
-		jassertfalse;
-	}
-}
-
-ModulationDisplayValue::QueryFunction::Ptr TableEnvelope::getModulationQueryFunction(int parameterIndex) const
-{
-	switch(parameterIndex)
-	{
-	case Attack:  return new ModulatorChain::GetModulationOutput<(int)TableEnvelope::InternalChains::AttackChain>();
-	case Release: return new ModulatorChain::GetModulationOutput<(int)TableEnvelope::InternalChains::ReleaseChain>();
-	}
-
-	return EnvelopeModulator::getModulationQueryFunction(parameterIndex);
 }
 
 ProcessorEditorBody *TableEnvelope::createEditor(ProcessorEditor *parentEditor)

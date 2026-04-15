@@ -105,24 +105,23 @@ class SineSynth: public ModulatorSynth,
 {
 public:
 
-	SET_PROCESSOR_NAME("SineSynth", "Sine Wave Generator", "");
+	ADD_DOCUMENTATION_WITH_BASECLASS(ModulatorSynth);
 
-	static ProcessorMetadata createMetadata();
+	SET_PROCESSOR_NAME("SineSynth", "Sine Wave Generator", "A sine wave generator");
 
+	/** The parameters. */
 	enum SpecialParameters
 	{
-		OctaveTranspose = ModulatorSynth::numModulatorSynthParameters,
-		SemiTones,
-		UseFreqRatio,
-		CoarseFreqRatio,
-		FineFreqRatio,
-		SaturationAmount,
+		OctaveTranspose = ModulatorSynth::numModulatorSynthParameters, ///< The octave transpose amount (+- 5)
+		SemiTones, ///< the semitones transpose amount (+- 12)
+		UseFreqRatio, ///< switches between musical and harmonic-based tuning
+		CoarseFreqRatio, ///< the harmonic index (= frequency multiplier)
+		FineFreqRatio, ///< the harmonic detune amount
+		SaturationAmount, ///< the amount of the inbuilt saturator effect
 		numSineSynthParameters
 	};
 
 	SineSynth(MainController *mc, const String &id, int numVoices);;
-
-	const bool metadataInitialised;
 
 	void restoreFromValueTree(const ValueTree &v) override
 	{
@@ -150,6 +149,22 @@ public:
 
 		return v;
 	}
+
+	float getDefaultValue(int parameterIndex) const override
+	{
+		if (parameterIndex < ModulatorSynth::numModulatorSynthParameters) return ModulatorSynth::getDefaultValue(parameterIndex);
+
+		switch (parameterIndex)
+		{
+		case OctaveTranspose:		return 0.0f;
+		case SemiTones:				return 0.0f;
+		case UseFreqRatio:			return 0.0f;
+		case CoarseFreqRatio:		return 1.0f;
+		case FineFreqRatio:			return 0.0f;
+		case SaturationAmount:		return 0.0f;
+		default:					jassertfalse; return -1.0f;
+		}
+	};
 
 	float getAttribute(int parameterIndex) const override 
 	{

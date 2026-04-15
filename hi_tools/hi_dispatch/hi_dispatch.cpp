@@ -30,6 +30,8 @@
 *   ===========================================================================
 */
 
+#include "JuceHeader.h"
+
 #include "file3.cpp"
 #include "file1.cpp"
 #include "file2.cpp"

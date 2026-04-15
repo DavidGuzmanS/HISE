@@ -154,7 +154,6 @@ public:
 			lastValues[index] = v;
 			SimpleReadWriteLock::ScopedReadLock sl(getAccessLock());
 			pFunctions[index].callVoid(v);
-			changeFlag[index] = true;
 		}
 
 		template <int P> static void setParameterStatic(void* obj, double v)
@@ -163,35 +162,11 @@ public:
 			typed->setParameterDynamic(P, v);
 		}
 
-		bool hasParameterChanged(int index)
-		{
-			if(changeFlag[index])
-			{
-				changeFlag[index] = false;
-				return true;
-			}
-
-			return false;
-		}
-
-		bool hasAnyParameterChanged()
-		{
-			bool changed = false;
-
-			for(int i = 0; i < numParameters; i++)
-			{
-				changed |= hasParameterChanged(i);
-			}
-
-			return changed;
-		}
-
 	protected:
 
 		int numParameters = 0;
 		span<snex::jit::FunctionData, OpaqueNode::NumMaxParameters> pFunctions;
 		double lastValues[OpaqueNode::NumMaxParameters];
-		bool changeFlag[OpaqueNode::NumMaxParameters];
 	};
 
 	virtual SnexTestBase* createTester() = 0;
@@ -339,7 +314,7 @@ public:
 		}
 
 		Result recompiledOk(snex::jit::ComplexType::Ptr objectClass) override;
-		void initialise(ObjectWithValueTree* n);
+		void initialise(NodeBase* n);
 		void addOrRemoveDataFromUI(ExternalData::DataType t, bool shouldAdd);
 		void dataAddedOrRemoved(ValueTree v, bool wasAdded);
 		ValueTree getDataRoot() { return dataTree; }
@@ -601,9 +576,9 @@ public:
 
 	virtual Identifier getTypeId() const = 0;
 
-	virtual void initialise(ObjectWithValueTree* n)
+	virtual void initialise(NodeBase* n)
 	{
-		parentNode = dynamic_cast<NodeBase*>(n);
+		parentNode = n;
 
 		getComplexDataHandler().initialise(n);
 
@@ -630,16 +605,6 @@ public:
 	void logMessage(WorkbenchData::Ptr wb, int level, const String& s) override;
 
 	void debugModeChanged(bool isEnabled) override;
-
-	bool checkAllowCompilation()
-	{
-		if(parentNode != nullptr)
-		{
-			return parentNode->getRootNetwork()->checkAllowCompilationFlag(parentNode, true);
-		}
-
-		return false;
-	}
 
 	SimpleRingBuffer::Ptr getMainDisplayBuffer()
 	{

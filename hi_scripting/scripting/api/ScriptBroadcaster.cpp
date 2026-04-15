@@ -533,11 +533,11 @@ struct ScriptBroadcaster::Display: public Component,
 	{
 		Path p;
 
-		LOAD_EPATH_IF_URL("workspace", ColumnIcons::openWorkspaceIcon);
-		LOAD_EPATH_IF_URL("reset", ColumnIcons::resetIcon);
-		LOAD_EPATH_IF_URL("breakpoint", ColumnIcons::breakpointIcon);
+		LOAD_PATH_IF_URL("workspace", ColumnIcons::openWorkspaceIcon);
+		LOAD_PATH_IF_URL("reset", ColumnIcons::resetIcon);
+		LOAD_PATH_IF_URL("breakpoint", ColumnIcons::breakpointIcon);
 		LOAD_EPATH_IF_URL("enable", HiBinaryData::ProcessorEditorHeaderIcons::bypassShape);
-		LOAD_EPATH_IF_URL("delay", ColumnIcons::delayIcon);
+		LOAD_PATH_IF_URL("delay", ColumnIcons::delayIcon);
 
 		return p;
 	}
@@ -740,9 +740,7 @@ juce::Result ScriptBroadcaster::ComponentPropertyListener::callItem(TargetBase* 
 			args.set(1, id.value);
 			args.set(2, v);
 
-			
-
-			auto ok = n->callSyncWithProfile(i->parent, args);
+			auto ok = n->callSync(args);
 
 			if (!ok.wasOk())
 				return ok;
@@ -827,7 +825,7 @@ juce::Result ScriptBroadcaster::ComponentVisibilityListener::callItem(TargetBase
 {
 	for (auto item : items)
 	{
-		auto ok = n->callSyncWithProfile(item->parent, item->getArgs());
+		auto ok = n->callSync(item->getArgs());
 
 		if (!ok.wasOk())
 			return ok;
@@ -852,7 +850,6 @@ ScriptBroadcaster::ScriptTarget::ScriptTarget(ScriptBroadcaster* sb, int numArgs
 {
 	metadata.attachCommentFromCallableObject(f);
 	callback.incRefCount();
-	callback.addAsSource(sb, metadata.id.toString());
 }
 
 
@@ -958,11 +955,10 @@ juce::Result ScriptBroadcaster::OtherBroadcasterTarget::callSync(const Array<var
 			return ok;
 
 		if (rv.isArray())
+		{
 			target->sendMessageInternal(rv, async);
-		else
-			target->sendMessageInternal(var(args), async);
-
-		return target->lastResult;
+			return target->lastResult;
+		}
 	}
 	else
 	{
@@ -970,24 +966,24 @@ juce::Result ScriptBroadcaster::OtherBroadcasterTarget::callSync(const Array<var
 		return target->lastResult;
 	}
     
-  return Result::ok();
+    return Result::ok();
 }
 
 struct ScriptBroadcaster::EqListener::InternalListener
 {
-	InternalListener(ScriptBroadcaster* b_, ProcessorFilterStatistics::Ptr filterStats_, const StringArray& eventList_) :
+	InternalListener(ScriptBroadcaster* b_, CurveEq* eq_, const StringArray& eventList_) :
 		parent(b_),
-		filterStats(filterStats_),
+		eq(eq_),
 		eventTypes(eventList_),
 		keeper(args)
 	{
-		filterStats->eventBroadcaster.addListener(*this, onChange, false);
+		eq->eqBroadcaster.addListener(*this, onChange, false);
 	}
 
 	~InternalListener()
 	{
-		if (filterStats != nullptr)
-			filterStats->eventBroadcaster.removeListener(*this);
+		if (eq != nullptr)
+			eq->eqBroadcaster.removeListener(*this);
 	}
 
 	static void onChange(InternalListener& l, const String& type, const var& value)
@@ -1016,17 +1012,17 @@ struct ScriptBroadcaster::EqListener::InternalListener
 	Array<var> args;
 	var keeper;
 
-	ProcessorFilterStatistics::Ptr filterStats;
+	WeakReference<CurveEq> eq;
 	WeakReference<ScriptBroadcaster> parent;
 	StringArray eventTypes;
 
 	JUCE_DECLARE_WEAK_REFERENCEABLE(InternalListener);
 };
 
-ScriptBroadcaster::EqListener::EqListener(ScriptBroadcaster* b, const ReferenceCountedArray<ProcessorFilterStatistics>& filterStats, const StringArray& eventList, const var& metadata):
+ScriptBroadcaster::EqListener::EqListener(ScriptBroadcaster* b, const Array<WeakReference<CurveEq>>& eqs, const StringArray& eventList, const var& metadata):
 	ListenerBase(metadata)
 {
-	for (const auto& eq : filterStats)
+	for (const auto& eq : eqs)
 	{
 		listeners.add(new InternalListener(b, eq, eventList));
 	}
@@ -1101,9 +1097,6 @@ struct ScriptBroadcaster::ModuleParameterListener::ProcessorListener : public hi
 	void onAttributeUpdate(Processor* p, uint16 index) override
 	{
 		auto i = parameterIndexes.indexOf((int)index);
-
-		if(i == -1)
-			return;
 
 		auto newValue = p->getAttribute(index);
 
@@ -1454,8 +1447,8 @@ Result ScriptBroadcaster::ModuleParameterListener::callItem(TargetBase* n)
                 {
                     args.set(1, "Intensity");
                     args.set(2, m->getIntensity());
-
-                    auto r = n->callSyncWithProfile(*p->sb, args);
+                    
+                    auto r = n->callSync(args);
 
                     if (!r.wasOk())
                         return r;
@@ -1470,7 +1463,7 @@ Result ScriptBroadcaster::ModuleParameterListener::callItem(TargetBase* n)
 
                 args.set(2, var((float)(int)v));
 
-                auto r = n->callSyncWithProfile(*p->sb, args);
+                auto r = n->callSync(args);
 
                 if (!r.wasOk())
                     return r;
@@ -1484,7 +1477,7 @@ Result ScriptBroadcaster::ModuleParameterListener::callItem(TargetBase* n)
 			args.set(1, processor->getIdentifierForParameterIndex(parameterIndex).toString());
 			args.set(2, processor->getAttribute(parameterIndex));
 
-			auto r = n->callSyncWithProfile(*p->sb, args);
+			auto r = n->callSync(args);
 
 			if (!r.wasOk())
 				return r;
@@ -1685,7 +1678,7 @@ Result ScriptBroadcaster::SamplemapListener::callItem(TargetBase* n)
 			args.set(1, p->samplerId);
 			args.set(2, p->sampleMap->getReference().getReferenceString());
 
-			auto r = n->callSyncWithProfile(*p->sb, args);
+			auto r = n->callSync(args);
 
 			if (!r.wasOk())
 				return r;
@@ -1697,7 +1690,7 @@ Result ScriptBroadcaster::SamplemapListener::callItem(TargetBase* n)
 			args.set(1, p->samplerId);
 			args.set(2, p->sampleMap->getSampler()->getNumSounds());
 
-			auto r = n->callSyncWithProfile(*p->sb, args);
+			auto r = n->callSync(args);
 
 			if (!r.wasOk())
 				return r;
@@ -1862,7 +1855,7 @@ juce::Result ScriptBroadcaster::RoutingMatrixListener::callItem(TargetBase* n)
 		args.set(0, p->id);
 		args.set(1, p->scriptMatrix);
 
-		auto r = n->callSyncWithProfile(*p->sb, args);
+		auto r = n->callSync(args);
 
 		if (!r.wasOk())
 			return r;
@@ -2024,7 +2017,7 @@ Result ScriptBroadcaster::ComplexDataListener::callItem(TargetBase* n)
 		else
 			args.setUnchecked(2, p->data->toBase64String());
 
-		auto r = n->callSyncWithProfile(*p->parent, args);
+		auto r = n->callSync(args);
 
 		if (!r.wasOk())
 			return r;
@@ -2092,7 +2085,7 @@ void ScriptBroadcaster::NonRealtimeSource::registerSpecialBodyItems(ComponentWit
 juce::Result ScriptBroadcaster::NonRealtimeSource::callItem(TargetBase* n)
 {
 	auto rt = parent->getScriptProcessor()->getMainController_()->getSampleManager().isNonRealtime();
-	return n->callSyncWithProfile(*parent, var(rt));
+	return n->callSync(var(rt));
 }
 
 
@@ -2144,7 +2137,7 @@ void ScriptBroadcaster::ProcessingSpecSource::registerSpecialBodyItems(Component
 
 juce::Result ScriptBroadcaster::ProcessingSpecSource::callItem(TargetBase* n)
 {
-	return n->callSyncWithProfile(*parent, processArgs);
+	return n->callSync(processArgs);
 }
 
 void ScriptBroadcaster::ProcessingSpecSource::prepareCalled(ProcessingSpecSource& p, double sampleRate, int blockSize)
@@ -2324,8 +2317,7 @@ struct ScriptBroadcaster::ContextMenuListener : public ListenerBase
 struct ScriptBroadcaster::ComponentValueListener::InternalListener
 {
 	InternalListener(ScriptBroadcaster* parent, ScriptComponent* sc_) :
-		sc(sc_),
-	    sb(*parent)
+		sc(sc_)
 	{
 		sc->attachValueListener(parent);
 	};
@@ -2335,7 +2327,6 @@ struct ScriptBroadcaster::ComponentValueListener::InternalListener
 
 	}
 
-	ScriptBroadcaster& sb;
 	WeakReference<ScriptComponent> sc;
 };
 
@@ -2383,7 +2374,7 @@ juce::Result ScriptBroadcaster::ComponentValueListener::callItem(TargetBase* n)
 		args.set(0, var(i->sc.get()));
 		args.set(1, var(i->sc->getValue()));
 
-		auto ok = n->callSyncWithProfile(i->sb, args);
+		auto ok = n->callSync(args);
 		if (!ok.wasOk())
 			return ok;
 	}
@@ -2414,8 +2405,7 @@ struct ScriptBroadcaster::RadioGroupListener::InternalListener
 
 ScriptBroadcaster::RadioGroupListener::RadioGroupListener(ScriptBroadcaster* b, int radioGroupIndex, const var& metadata):
 	ListenerBase(metadata),
-	radioGroup(radioGroupIndex),
-	parent(*b) 
+	radioGroup(radioGroupIndex)
 {
 	auto content = b->getScriptProcessor()->getScriptingContent();
 
@@ -2558,7 +2548,7 @@ juce::Result ScriptBroadcaster::RadioGroupListener::callItem(TargetBase* n)
 	{
 		Array<var> args;
 		args.add(currentIndex);
-		auto ok = n->callSyncWithProfile(parent, args);
+		auto ok = n->callSync(args);
 
 		if (!ok.wasOk())
 			return ok;
@@ -2602,7 +2592,7 @@ juce::Result ScriptBroadcaster::DebugableObjectListener::callItem(TargetBase* n)
 			return Result::ok();
 	}
 
-	return n->callSyncWithProfile(*parent, parent->lastValues);
+	return n->callSync(parent->lastValues);
 }
 
 
@@ -2648,7 +2638,7 @@ void ScriptBroadcaster::DebugableObjectListener::registerSpecialBodyItems(Compon
 		Path createPath(const String& url) const override
 		{
 			Path p;
-			p.loadPathFromData(ColumnIcons::openWorkspaceIcon, ColumnIcons::openWorkspaceIcon_Size);
+			p.loadPathFromData(ColumnIcons::openWorkspaceIcon, sizeof(ColumnIcons::openWorkspaceIcon));
 			return p;
 		}
 
@@ -2805,7 +2795,7 @@ void ScriptBroadcaster::ScriptCallListener::registerSpecialBodyItems(ComponentWi
 		Path createPath(const String& url) const override
 		{
 			Path p;
-			p.loadPathFromData(ColumnIcons::openWorkspaceIcon, ColumnIcons::openWorkspaceIcon_Size);
+			p.loadPathFromData(ColumnIcons::openWorkspaceIcon, sizeof(ColumnIcons::openWorkspaceIcon));
 			return p;
 		}
 
@@ -3315,13 +3305,6 @@ ScriptBroadcaster::ScriptBroadcaster(ProcessorWithScriptingContent* p, const var
 
 	auto parentId = dynamic_cast<Processor*>(p)->getIDAsIdentifier();
 	setWantsCurrentLocation(true);
-
-	broadcasterProfile.setPrefix(parentId + "." + metadata.id.toString());
-	broadcasterProfile.setSourceType(DebugSession::ProfileDataSource::SourceType::Broadcaster);
-	broadcasterProfile.setColour(metadata.c.withAlpha(0.7f));
-	broadcasterProfile.setHolder(dynamic_cast<JavascriptProcessor*>(p), true);
-	broadcasterProfile.add(".sendMessage()");
-	broadcasterProfile.add(".callListeners()");
 }
 
 ScriptBroadcaster::~ScriptBroadcaster()
@@ -3430,13 +3413,8 @@ bool ScriptBroadcaster::addListener(var object, var metadata, var function)
     {
         if(auto c = dynamic_cast<WeakCallbackHolder::CallableObject*>(function.getObject()))
         {
-#if USE_BACKEND
-            if(HiseJavascriptEngine::RootObject::RealtimeSafetyInfo::check(c, this, "Broadcaster.addListener"))
-                reportScriptError("Listener callback is not safe for audio-thread execution");
-#else
             if(!c->isRealtimeSafe())
                 reportScriptError("You need to use inline functions in order to ensure realtime safe execution");
-#endif
         }
     }
     
@@ -3640,21 +3618,6 @@ void ScriptBroadcaster::sendMessage(var args, bool isSync)
 
 void ScriptBroadcaster::sendMessageInternal(var args, bool isSync)
 {
-#if HISE_INCLUDE_PROFILING_TOOLKIT
-	auto sp = broadcasterProfile.profile(0);
-
-	if(sp.data != nullptr)
-	{
-		DebugSession::DataItem::Ptr ni = new DebugSession::DataItem();
-		ni->label = metadata.id.toString() + ".args";
-		ni->id = metadata.id;
-		ni->data = args;
-		sp.session->addDataItem(ni);
-	}
-
-	broadcasterProfile.openTrack(0);
-#endif
-
 	if (forceSync)
 		isSync = true;
 
@@ -4301,7 +4264,7 @@ void ScriptBroadcaster::attachToComplexData(String dataTypeAndEvent, var moduleI
             type = t;
     });
     
-    bool isDisplay = eventType == "Display" || eventType == "DisplayIndex";
+    bool isDisplay = eventType == "Display";
     
     if (defaultValues.size() != 3)
     {
@@ -4381,7 +4344,7 @@ void ScriptBroadcaster::attachToEqEvents(var moduleIds, var events, var optional
 		reportScriptError("If you want to attach a broadcaster to an EQ, it needs two parameters (eventType, value)");
 	}
 
-	ReferenceCountedArray<ProcessorFilterStatistics> filterStats;
+	Array<WeakReference<CurveEq>> eqs;
 	auto synthChain = getScriptProcessor()->getMainController_()->getMainSynthChain();
 
 	if (moduleIds.isArray())
@@ -4390,9 +4353,9 @@ void ScriptBroadcaster::attachToEqEvents(var moduleIds, var events, var optional
 		{
 			auto p = ProcessorHelpers::getFirstProcessorWithName(synthChain, pId.toString());
 
-			if (auto asHolder = dynamic_cast<ProcessorFilterStatistics::Holder*>(p))
+			if (auto asHolder = dynamic_cast<CurveEq*>(p))
 			{
-				filterStats.add(asHolder->getOrCreateProcessorFilterStatistics());
+				eqs.add(asHolder);
 			}
 			else
 				reportScriptError(pId.toString() + " is not an EQ");
@@ -4402,9 +4365,9 @@ void ScriptBroadcaster::attachToEqEvents(var moduleIds, var events, var optional
 	{
 		auto p = ProcessorHelpers::getFirstProcessorWithName(synthChain, moduleIds.toString());
 
-		if (auto asHolder = dynamic_cast<ProcessorFilterStatistics::Holder*>(p))
+		if (auto asHolder = dynamic_cast<CurveEq*>(p))
 		{
-			filterStats.add(asHolder->getOrCreateProcessorFilterStatistics());
+			eqs.add(asHolder);
 		}
 		else
 			reportScriptError(moduleIds.toString() + " is not an EQ");
@@ -4432,7 +4395,7 @@ void ScriptBroadcaster::attachToEqEvents(var moduleIds, var events, var optional
 	if (eventTypes.isEmpty())
 		eventTypes.swapWith(legitEventTypes);
 		
-	attachedListeners.add(new EqListener(this, filterStats, eventTypes, optionalMetadata));
+	attachedListeners.add(new EqListener(this, eqs, eventTypes, optionalMetadata));
 
 	checkMetadataAndCallWithInitValues(attachedListeners.getLast());
 }
@@ -4620,8 +4583,6 @@ void ScriptBroadcaster::handleDebugStuff()
 Result ScriptBroadcaster::sendInternal(const Array<var>& args)
 {
 	TRACE_EVENT("dispatch", "Broadcaster.callListeners");
-	auto sp = broadcasterProfile.profile(1);
-	broadcasterProfile.closeTrack(0);
 
 	{
 		SimpleReadWriteLock::ScopedReadLock v(lastValueLock);
@@ -4638,7 +4599,7 @@ Result ScriptBroadcaster::sendInternal(const Array<var>& args)
     {
         for (auto i : items)
         {
-            auto r = i->callSyncWithProfile(*this, args);
+            auto r = i->callSync(args);
             
 			if (!r.wasOk())
 			{
@@ -4659,7 +4620,7 @@ Result ScriptBroadcaster::sendInternal(const Array<var>& args)
                 thisValues.addArray(args);
             }
 
-            auto r = i->callSyncWithProfile(*this, thisValues);
+            auto r = i->callSync(thisValues);
             if (!r.wasOk())
             {
 
@@ -4702,12 +4663,12 @@ void ScriptBroadcaster::initItem(TargetBase* ni)
 {
 	checkMetadataAndCallWithInitValues(ni);
 
-	if (!attachedListeners.isEmpty() && !isBypassed())
+	if (!attachedListeners.isEmpty())
 	{
 		for (auto attachedListener : attachedListeners)
 		{
 			// If it's attached to a listener, we'll update it with the current values.
-			auto r = attachedListener->callItemWithProfile(*this, ni);
+			auto r = attachedListener->callItem(ni);
 
 			if (!r.wasOk())
 				sendErrorMessage(ni, r.getErrorMessage());
@@ -4720,9 +4681,9 @@ void ScriptBroadcaster::initItem(TargetBase* ni)
 		for (const auto& v : lastValues)
 			callListener &= (!v.isUndefined() && !v.isVoid());
 
-		if ((callListener || sendWhenUndefined) && !isBypassed())
+		if (callListener || sendWhenUndefined)
 		{
-			auto r = ni->callSyncWithProfile(*this, lastValues);
+			auto r = ni->callSync(lastValues);
 
 			if (!r.wasOk())
 				sendErrorMessage(ni, r.getErrorMessage());
@@ -4735,11 +4696,6 @@ void ScriptBroadcaster::checkMetadataAndCallWithInitValues(ItemBase* i)
 	if (!i->metadata.r.wasOk())
 		sendErrorMessage(i, i->metadata.r.getErrorMessage(), true);
 
-	i->profileIndex = broadcasterProfile.add(i->metadata.id.toString());
-
-    if(isBypassed())
-        return;
-    
 	if (auto l = dynamic_cast<ListenerBase*>(i))
 	{
 		int numInitArgs = l->getNumInitialCalls();
@@ -4749,7 +4705,7 @@ void ScriptBroadcaster::checkMetadataAndCallWithInitValues(ItemBase* i)
 			lastValues = l->getInitialArgs(j);
 
 			for (auto target : items)
-				target->callSyncWithProfile(*this, lastValues);
+				target->callSync(lastValues);
 		}
 	}
 }

@@ -602,7 +602,7 @@ Identifier ObjectWithDefaultProperties::getDefaultablePropertyId(int i) const
 	return defaultValues.getName(i);
 }
 
-void ObjectWithDefaultProperties::resetObject(DynamicObject* objectToClear) const
+void ObjectWithDefaultProperties::resetObject(DynamicObject* objectToClear)
 {
 	jassert(objectToClear != nullptr);
 
@@ -616,22 +616,11 @@ void ObjectWithDefaultProperties::resetObject(DynamicObject* objectToClear) cons
 
 void ObjectWithDefaultProperties::storePropertyInObject(var obj, int id, var value, var defaultValue) const
 {
-	auto object = obj.getDynamicObject();
+	jassert(obj.isObject());
 
-	jassert(object != nullptr);
-
-	if(object == nullptr)
-		return;
-
-	auto key = getDefaultablePropertyId(id);
-
-	if(value.isUndefined() || value.isVoid())
+	if ((defaultValue.isUndefined() || defaultValue.isVoid()) || value != defaultValue)
 	{
-		object->setProperty(key, getDefaultProperty(id));
-	}
-	else if ((defaultValue.isUndefined() || defaultValue.isVoid()) || value != defaultValue)
-	{
-		object->setProperty(key, value);
+		obj.getDynamicObject()->setProperty(getDefaultablePropertyId(id), value);
 	}
 }
 

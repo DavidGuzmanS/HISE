@@ -40,10 +40,6 @@ FilterGraph::FilterGraph (int numFiltersInit, int drawType_):
 	drawType((DrawType)drawType_),
 	numFilters(numFiltersInit)
 {
-#if !HISE_NO_GUI_TOOLS
-	simple_css::FlexboxComponent::Helpers::writeSelectorsToProperties(*this, { ".filtergraph" });
-#endif
-
 	setSpecialLookAndFeel(new DefaultLookAndFeel(), true);
 
 	setOpaque(true);
@@ -73,9 +69,7 @@ FilterGraph::~FilterGraph()
 
 void FilterGraph::refreshFilterPath()
 {
-	if(getLocalBounds().isEmpty())
-		return;
-
+	
 	float width = (float) getWidth();
 	float height = (float) getHeight();
 
@@ -89,12 +83,12 @@ void FilterGraph::refreshFilterPath()
 	}
 	else
 	{
+    
 		Array<FilterInfo*> activeFilters;
 
-		for(auto& v: filterVector)
+		for(int i = 0; i < numFilters; i++)
 		{
-			if(v->isEnabled())
-				activeFilters.add(v);
+			if(filterVector[i]->isEnabled()) activeFilters.add(filterVector[i]);
 		}
 
 		const int numActiveFilters = activeFilters.size();
@@ -118,40 +112,25 @@ void FilterGraph::refreshFilterPath()
 		}
 		traceMagnitude = 20 * log10 (traceMagnitude);
 		
-        tracePath.startNewSubPath(-1.0f * pathMargin, -1.0f * pathMargin);
-        tracePath.startNewSubPath((float)width+ 2.0f * pathMargin, (float)height+ 2.0f * pathMargin);
-
-		bool started = false;
-
+        tracePath.startNewSubPath(-3.0f, -3.0f);
+        tracePath.startNewSubPath((float)width+6.0f, (float)height+6.0f);
+        
 		if(drawType == Line)
 		{
-			if(!minimalPath)
-			{
-				tracePath.startNewSubPath (-1.0f * pathMargin, height / 2);
-				started = true;
-			}
-				
+			tracePath.startNewSubPath (-3, height / 2);
 			//tracePath.lineTo (-1, (height / 2) - (traceMagnitude * scaleFactor));
 
 		}
 		else if(drawType == Icon)
 		{
 			tracePath.startNewSubPath (0, height);
-			started = true;
 		}
 		else
 		{
-			if(!minimalPath)
-			{
-				tracePath.startNewSubPath (-1.0f * pathMargin, height / 2);
-				started = true;
-			}
+			tracePath.startNewSubPath (-1, height+1);
+			tracePath.lineTo (-1, (height / 2) - (traceMagnitude * scaleFactor));
 		}
 
-		float firstX = -1.0f;
-		float lastX = 0.0f;
-		float lastY = 0.0f;
-		
 		for (float xPos = 0; xPos < width; xPos += 1)
 		{
 			float freq = xToFreq (xPos);
@@ -162,40 +141,17 @@ void FilterGraph::refreshFilterPath()
 			{
 				traceMagnitude *= (float) (activeFilters [i]->getResponse (freq).magnitudeValue);
 			}
-
 			traceMagnitude = 20 * log10 (traceMagnitude);
-
-			auto yValue = (height / 2) - (traceMagnitude * scaleFactor);
-
-			if(minimalPath && yValue > height)
-				continue;
-
-            yValue = jlimit<float>(0.0f, (float)height, yValue);
-
-			if(firstX == -1.0f)
-				firstX = xPos;
-
-			if(started)
-			{
-				tracePath.lineTo (xPos, yValue);
-			}
-			else
-			{
-				tracePath.startNewSubPath(xPos, yValue);
-				started = true;
-			}
-
-			lastY = yValue;
-			lastX = xPos;
+        
+            auto yValue = jlimit<float>(0.0f, (float)height, (height / 2) - (traceMagnitude * scaleFactor));
+            
+			tracePath.lineTo (xPos, yValue);
 		}
 
 		if(drawType == Line)
 		{
-			if(!minimalPath)
-			{
-				tracePath.lineTo (width+ 1.0f * pathMargin, lastY);
-				tracePath.lineTo (width+ 1.0f * pathMargin, (height / 2));
-			}
+			tracePath.lineTo (width+3, (height / 2));
+
 		}
 		else if (drawType == Icon)
 		{
@@ -204,21 +160,17 @@ void FilterGraph::refreshFilterPath()
 		}
 		else
 		{
-			if(minimalPath)
-			{
-				tracePath.lineTo(lastX, height+1.0f * pathMargin);
-				tracePath.lineTo(firstX, height+1.0f * pathMargin);
-			}
-			else
-			{
-				tracePath.lineTo (width+1.0f * pathMargin, (height / 2));
-			}
-			
-			tracePath.closeSubPath();
-		}
-	}
+			tracePath.lineTo (width+1, (height / 2) - (traceMagnitude * scaleFactor));
+			tracePath.lineTo (width+1, height+1);
 
-	repaint();
+			tracePath.closeSubPath();
+
+		}
+    
+		
+
+		return;
+	}
 }
 
 void FilterGraph::changeListenerCallback(SafeChangeBroadcaster *b)
@@ -285,7 +237,7 @@ void FilterGraph::onComplexDataEvent(ComplexDataUIUpdaterBase::EventType e, var 
 		}
 
 		fs = filterData->getSamplerate();
-		refreshAsync();
+		repaint();
 	}
 }
 
@@ -294,7 +246,7 @@ void FilterGraph::paint (Graphics& g)
 	if(drawType == Icon)
 	{
 		g.fillAll(Colour(0xff111111));
-		//refreshFilterPath();
+		refreshFilterPath();
 
 		g.setGradientFill (ColourGradient (Colour (0xaaffffff),
 										0.0f, 0.0f,
@@ -308,13 +260,9 @@ void FilterGraph::paint (Graphics& g)
 	}
 	else
 	{
-		LookAndFeelMethods fallback;
-		auto laf = &fallback;
-
-		if(auto laf2 = getSpecialLookAndFeel<LookAndFeelMethods>(this))
-		{
-			laf = laf2;
-		}
+		auto laf = getSpecialLookAndFeel<LookAndFeelMethods>();
+		
+		jassert(laf != nullptr);
 
 		laf->drawFilterBackground(g, *this);
 
@@ -324,7 +272,7 @@ void FilterGraph::paint (Graphics& g)
 			laf->drawFilterGridLines(g, *this, gridPath);
 		}
 		
-		//refreshFilterPath();
+		refreshFilterPath();
 
 		laf->drawFilterPath(g, *this, tracePath);
 	}
@@ -344,8 +292,6 @@ void FilterGraph::addEqBand(BandType eqType){
 
 void FilterGraph::resized()
 {
-	refreshFilterPath();
-	repaint();
 }
 
 void FilterGraph::createGridPath()
@@ -398,7 +344,6 @@ void FilterGraph::setBypassed(bool shouldBeBypassed)
 	if (shouldBeBypassed != bypassed)
 	{
 		bypassed = shouldBeBypassed; repaint();
-		refreshAsync();
 	}
 }
 
@@ -407,7 +352,7 @@ void FilterGraph::setFilterGain (int filterNum, double gain)
 	if (filterNum < filterVector.size())
 	{
 		filterVector[filterNum]->setGain(gain);
-		refreshAsync();
+		repaint();
 	}
     
 }
@@ -420,7 +365,7 @@ void FilterGraph::setFilter (int filterNum, double sampleRate, double frequency,
 		filterVector[filterNum]->setFilter(frequency, filterType);
 
 		fs = sampleRate;
-		refreshAsync();
+		repaint();
 	}
     
 }
@@ -433,7 +378,7 @@ void FilterGraph::setEqBand (int filterNum, double sampleRate, double frequency,
 		filterVector[filterNum]->setEqBand(frequency, Q, gain, eqType);
 
 		fs = sampleRate;
-		refreshAsync();
+		repaint();
 	}
     
 }
@@ -446,7 +391,7 @@ void FilterGraph::setCustom (int filterNum, double sampleRate, std::vector <doub
 		filterVector[filterNum]->setCustom(numCoeffs, denCoeffs);
 
 		fs = sampleRate;
-		refreshAsync();
+		repaint();
 	}
 }
 
@@ -462,7 +407,7 @@ void FilterGraph::setCoefficients(int filterNum, double sampleRate, FilterDataOb
 			filterVector[filterNum]->setCoefficients(filterNum, sampleRate, newCoefficients);
 
 			fs = sampleRate;
-			refreshAsync();
+			repaint();
 		}
 	}
 }

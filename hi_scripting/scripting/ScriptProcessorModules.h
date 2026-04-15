@@ -30,21 +30,11 @@
 *   ===========================================================================
 */
 
-#pragma once
+#ifndef SCRIPTPROCESSORMODULES_H_INCLUDED
+#define SCRIPTPROCESSORMODULES_H_INCLUDED
 
 namespace hise { using namespace juce;
 
-#ifndef HISE_NUM_SCRIPTNODE_FX_MODS
-#define HISE_NUM_SCRIPTNODE_FX_MODS 0
-#endif
-
-#ifndef HISE_NUM_POLYPHONIC_SCRIPTNODE_FX_MODS
-#define HISE_NUM_POLYPHONIC_SCRIPTNODE_FX_MODS 0
-#endif
-
-#ifndef HISE_NUM_SCRIPTNODE_SYNTH_MODS
-#define HISE_NUM_SCRIPTNODE_SYNTH_MODS 2
-#endif
 
 /** This scripting processor uses the JavaScript Engine to execute small scripts that can change the midi message.
 *	@ingroup midiTypes
@@ -65,24 +55,7 @@ class JavascriptMidiProcessor : public ScriptBaseMidiProcessor,
 {
 public:
 
-	SET_PROCESSOR_NAME("ScriptProcessor", "Script Processor", "")
-
-	static ProcessorMetadata createMetadata()
-	{
-		return ProcessorMetadata(getClassType(), ProcessorMetadata::DataType::Dynamic)
-			.withPrettyName(getClassName())
-			.withDescription("The main scripting interface for MIDI processing, UI creation, and plugin control via the HiseScript API.")
-			.withType<JavascriptMidiProcessor>()
-			.withInterface<JavascriptMidiProcessor>()
-			.withComplexDataInterface(ExternalData::DataType::Table)
-			.withComplexDataInterface(ExternalData::DataType::SliderPack)
-			.withComplexDataInterface(ExternalData::DataType::AudioFile);
-	}
-
-	ProcessorMetadata getMetadata() const override
-	{
-		return withDynamicScriptParameters(createMetadata());
-	}
+	SET_PROCESSOR_NAME("ScriptProcessor", "Script Processor", "MIDI Processor that allows scripting.")
 
 	enum SnippetsOpen
 	{
@@ -111,6 +84,21 @@ public:
 	int getNumSnippets() const override;
 	void registerApiClasses() override;
 
+	Identifier getIdentifierForParameterIndex(int parameterIndex) const override
+	{
+		return getContentParameterIdentifier(parameterIndex);
+	}
+
+	int getParameterIndexForIdentifier(const Identifier& id) const override
+	{
+		return getContentParameterIdentifierIndex(id);
+	}
+
+	int getNumAttributes() const override
+	{
+		return getContentParameterAmount();
+	}
+
 	void addToFront(bool addToFront_) noexcept;;
 	bool isFront() const;;
 
@@ -127,13 +115,7 @@ public:
 
 	void processHiseEvent(HiseEvent &m) override;
 
-	ModulationDisplayValue::QueryFunction::Ptr getModulationQueryFunction(int parameterIndex) const override;
-
-	void onModulationDrop(int parameterIndex, int modulationSourceIndex) override;
-
-	String getModulationTargetId(int parameterIndex) const override;
-
-	static JavascriptMidiProcessor* getFirstInterfaceScriptProcessor(const MainController* mc);
+	static JavascriptMidiProcessor* getFirstInterfaceScriptProcessor(MainController* mc);
 
 	ScriptingApi::Server::WeakPtr getServerObject();
 
@@ -217,24 +199,8 @@ public:
 		numScriptEditorStates
 	};
 
-	SET_PROCESSOR_NAME("ScriptVoiceStartModulator", "Script Voice Start Modulator", "")
+	SET_PROCESSOR_NAME("ScriptVoiceStartModulator", "Script Voice Start Modulator", "Creates a scriptable modulation value at the start of the voice.")
 
-	static ProcessorMetadata createMetadata()
-	{
-		return ProcessorMetadata(getClassType(), ProcessorMetadata::DataType::Dynamic)
-			.withPrettyName(getClassName())
-			.withDescription("Computes a per-voice modulation value at note-on using a HiseScript callback, for custom velocity curves or scripted voice logic.")
-			.withType<JavascriptVoiceStartModulator>()
-			.withInterface<JavascriptVoiceStartModulator>()
-			.withComplexDataInterface(ExternalData::DataType::Table)
-			.withComplexDataInterface(ExternalData::DataType::SliderPack)
-			.withComplexDataInterface(ExternalData::DataType::AudioFile);
-	}
-
-	ProcessorMetadata getMetadata() const override
-	{
-		return withDynamicScriptParameters(createMetadata());
-	}
 
 	JavascriptVoiceStartModulator(MainController *mc, const String &id, int voiceAmount, Modulation::Mode m);;
 	~JavascriptVoiceStartModulator();
@@ -254,6 +220,21 @@ public:
 
 	/** When the startNote function is called, a previously calculated value (by the handleMidiMessage function) is stored using the supplied voice index. */
 	virtual float startVoice(int voiceIndex) override;;
+
+	int getNumAttributes() const override
+	{
+		return getContentParameterAmount();
+	}
+
+	Identifier getIdentifierForParameterIndex(int parameterIndex) const override
+	{
+		return getContentParameterIdentifier(parameterIndex);
+	}
+
+	int getParameterIndexForIdentifier(const Identifier& id) const override
+	{
+		return getContentParameterIdentifierIndex(id);
+	}
 
 	SnippetDocument *getSnippet(int c) override;
 	const SnippetDocument *getSnippet(int c) const override;
@@ -287,18 +268,7 @@ class JavascriptTimeVariantModulator : public JavascriptProcessor,
 {
 public:
 
-	SET_PROCESSOR_NAME("ScriptTimeVariantModulator", "Script Time Variant Modulator", "")
-
-	static ProcessorMetadata createMetadata()
-	{
-		return withScriptnodeMetadata<JavascriptTimeVariantModulator>({})
-			.withDescription("Generates a continuous monophonic modulation signal from a scriptnode DSP network or HiseScript timer callback.");
-	}
-
-	ProcessorMetadata getMetadata() const override
-	{
-		return withDynamicParametersFromNetwork(createMetadata(), -1, 0);
-	}
+	SET_PROCESSOR_NAME("ScriptTimeVariantModulator", "Script Time Variant Modulator", "Creates a scriptable monophonic modulation signal.")
 
 	enum Callback
 	{
@@ -332,6 +302,24 @@ public:
 	float getAttribute(int index) const override;
 
 	void setInternalAttribute(int index, float newValue) override;
+
+	Identifier getIdentifierForParameterIndex(int parameterIndex) const override;
+
+	int getParameterIndexForIdentifier(const Identifier& id) const override
+	{
+		if (auto n = getActiveOrDebuggedNetwork())
+			return n->networkParameterHandler.getParameterIndexForIdentifier(id);
+		else
+			return contentParameterHandler.getParameterIndexForIdentifier(id);
+	}
+
+	int getNumAttributes() const override
+	{
+		if (auto n = getActiveOrDebuggedNetwork())
+			return n->networkParameterHandler.getNumParameters();
+		else
+			return contentParameterHandler.getNumParameters();
+	}
 
 	ValueTree exportAsValueTree() const override;
 	void restoreFromValueTree(const ValueTree &v) override;
@@ -383,15 +371,14 @@ class ScriptnodeVoiceKiller : public EnvelopeModulator,
 public:
 
 
-	SET_PROCESSOR_NAME("ScriptnodeVoiceKiller", "Scriptnode Voice Killer", "")
+	SET_PROCESSOR_NAME("ScriptnodeVoiceKiller", "Scriptnode Voice Killer", "kills the voices from a scriptnode envelope's gate output")
 
-	ScriptnodeVoiceKiller(MainController* mc, const String& id, int numVoices);;
+		ScriptnodeVoiceKiller(MainController* mc, const String& id, int numVoices);;
 
 	static void initialiseNetworks(ScriptnodeVoiceKiller& v);
 
-	static ProcessorMetadata createMetadata();
-
 	void setInternalAttribute(int parameter_index, float newValue) override;
+	float getDefaultValue(int parameterIndex) const override;
 	float getAttribute(int parameter_index) const;
 
 	int getNumInternalChains() const override;;
@@ -445,7 +432,7 @@ class JavascriptEnvelopeModulator : public JavascriptProcessor,
 {
 public:
 
-	SET_PROCESSOR_NAME("ScriptEnvelopeModulator", "Script Envelope Modulator", "")
+	SET_PROCESSOR_NAME("ScriptEnvelopeModulator", "Script Envelope Modulator", "Creates a scriptable polyphonic modulation signal.")
 
 	enum Callback
 	{
@@ -461,17 +448,6 @@ public:
 		externalPopupShown,
 		numScriptEditorStates
 	};
-
-	static ProcessorMetadata createMetadata()
-	{
-		return withScriptnodeMetadata<JavascriptEnvelopeModulator>(EnvelopeModulator::createBaseMetadata())
-			.withDescription("Generates a polyphonic envelope signal from a scriptnode DSP network, with per-voice state and voice kill detection.");
-	}
-
-	ProcessorMetadata getMetadata() const override
-	{
-		return withDynamicParametersFromNetwork(createMetadata(), -1, 0);
-	}
 
 	JavascriptEnvelopeModulator(MainController *mc, const String &id, int numVoices, Modulation::Mode m);
 	~JavascriptEnvelopeModulator();
@@ -493,9 +469,29 @@ public:
 		return true;
 	}
 
+	int getNumParameters() const override;
+
 	void setInternalAttribute(int index, float newValue) override;
 
 	float getAttribute(int index) const override;
+
+	Identifier getIdentifierForParameterIndex(int index) const override;
+
+	int getParameterIndexForIdentifier(const Identifier& id) const override
+	{
+		if (auto n = getActiveOrDebuggedNetwork())
+			return n->networkParameterHandler.getParameterIndexForIdentifier(id);
+		else
+			return contentParameterHandler.getParameterIndexForIdentifier(id);
+	}
+
+	int getNumAttributes() const override
+	{
+		if (auto n = getActiveOrDebuggedNetwork())
+			return n->networkParameterHandler.getNumParameters();
+		else
+			return contentParameterHandler.getNumParameters();
+	}
 
 	ProcessorEditorBody *createEditor(ProcessorEditor *parentEditor)  override;
 
@@ -555,24 +551,11 @@ private:
 
 class JavascriptMasterEffect : public JavascriptProcessor,
 							   public ProcessorWithScriptingContent,
-							   public MasterEffectProcessor,
-							   public ProcessorWithCustomFilterStatistics
+							   public MasterEffectProcessor
 {
 public:
 
-	SET_PROCESSOR_NAME("ScriptFX", "Script FX", "");
-
-	static ProcessorMetadata createMetadata()
-	{
-		return withScriptnodeMetadata<JavascriptMasterEffect>({})
-			.withDescription("Processes audio through a scriptnode DSP network as a master effect, with scriptable parameters and complex data routing.");
-	}
-
-	ProcessorMetadata getMetadata() const override
-	{
-		auto numMods = HISE_GET_PREPROCESSOR(getMainController(), HISE_NUM_SCRIPTNODE_FX_MODS);
-		return withDynamicParametersFromNetwork(createMetadata(), numMods, 0);
-	}
+	SET_PROCESSOR_NAME("ScriptFX", "Script FX", "A scriptable audio effect.");
 
 	enum class Callback
 	{
@@ -593,11 +576,8 @@ public:
 	};
 	
 	JavascriptMasterEffect(MainController *mc, const String &id);
-	~JavascriptMasterEffect() override;
-
-
-	void onProfileEnableChange() override;
-
+	~JavascriptMasterEffect();
+	
 
 	Path getSpecialSymbol() const override;
 
@@ -629,16 +609,31 @@ public:
 	void prepareToPlay(double sampleRate, int samplesPerBlock) override;
 	void applyEffect(AudioSampleBuffer &b, int startSample, int numSamples) override;
 
-	ModulatorChain::ExtraModulatorRuntimeTargetSource* getExtraModulationHandler() override { return &extraModSources; }
-
-	void connectToRuntimeTargets(scriptnode::OpaqueNode& opaqueNode, bool shouldAdd) override;
-	ModulationDisplayValue::QueryFunction::Ptr getModulationQueryFunction(int parameterIndex) const override;
-
+    
+    
 	float getAttribute(int index) const override;
 
 	void setInternalAttribute(int index, float newValue) override;
 
 	void setBypassed(bool shouldBeBypassed, NotificationType notifyChangeHandler) noexcept override;
+
+	Identifier getIdentifierForParameterIndex(int parameterIndex) const override;
+
+	int getParameterIndexForIdentifier(const Identifier& id) const override
+	{
+		if (auto n = getActiveOrDebuggedNetwork())
+			return n->networkParameterHandler.getParameterIndexForIdentifier(id);
+		else
+			return contentParameterHandler.getParameterIndexForIdentifier(id);
+	}
+
+	int getNumAttributes() const override
+	{
+		if (auto n = getActiveOrDebuggedNetwork())
+			return n->networkParameterHandler.getNumParameters();
+		else
+			return contentParameterHandler.getNumParameters();
+	}
 
 	ValueTree exportAsValueTree() const override;
 	void restoreFromValueTree(const ValueTree &v) override;
@@ -646,8 +641,6 @@ public:
 	int getControlCallbackIndex() const override;;
 
 private:
-
-	ModulatorChain::ExtraModulatorRuntimeTargetSource extraModSources;
 
 	var buffers[NUM_MAX_CHANNELS];
 
@@ -674,19 +667,7 @@ class JavascriptPolyphonicEffect : public JavascriptProcessor,
 {
 public:
 
-	SET_PROCESSOR_NAME("PolyScriptFX", "Polyphonic Script FX", "");
-
-	static ProcessorMetadata createMetadata()
-	{
-		return withScriptnodeMetadata<JavascriptPolyphonicEffect>({})
-			.withDescription("Processes each voice independently through a scriptnode DSP network, with per-voice state and polyphonic modulation support.");
-	}
-
-	ProcessorMetadata getMetadata() const override
-	{
-		auto numMods = HISE_GET_PREPROCESSOR(getMainController(), HISE_NUM_POLYPHONIC_SCRIPTNODE_FX_MODS);
-		return withDynamicParametersFromNetwork(createMetadata(), numMods, 0);
-	}
+	SET_PROCESSOR_NAME("PolyScriptFX", "Polyphonic Script FX", "A polyphonic scriptable audio effect.");
 
 	enum class Callback
 	{
@@ -721,11 +702,11 @@ public:
 
 	bool isSuspendedOnSilence() const override;
 
-	Processor *getChildProcessor(int i) override;;
-	const Processor *getChildProcessor(int i) const override;;
+	Processor *getChildProcessor(int /*processorIndex*/) override { return nullptr; };
+	const Processor *getChildProcessor(int /*processorIndex*/) const override { return nullptr; };
 
-	int getNumInternalChains() const override { return modChains.size(); };
-	int getNumChildProcessors() const override { return modChains.size(); };
+	int getNumInternalChains() const override { return 0; };
+	int getNumChildProcessors() const override { return 0; };
 
 	void prepareToPlay(double sampleRate, int samplesPerBlock) override;
 
@@ -740,6 +721,27 @@ public:
 	void setInternalAttribute(int index, float newValue) override
 	{
 		getCurrentNetworkParameterHandler(&contentParameterHandler)->setParameter(index, newValue);
+	}
+
+	Identifier getIdentifierForParameterIndex(int parameterIndex) const override
+	{
+		return getCurrentNetworkParameterHandler(&contentParameterHandler)->getParameterId(parameterIndex);
+	}
+
+	int getParameterIndexForIdentifier(const Identifier& id) const override
+	{
+		if (auto n = getActiveOrDebuggedNetwork())
+			return n->networkParameterHandler.getParameterIndexForIdentifier(id);
+		else
+			return contentParameterHandler.getParameterIndexForIdentifier(id);
+	}
+
+	int getNumAttributes() const override
+	{
+		if (auto n = getActiveOrDebuggedNetwork())
+			return n->networkParameterHandler.getNumParameters();
+		else
+			return contentParameterHandler.getNumParameters();
 	}
 
 	int getControlCallbackIndex() const override { return (int)Callback::onControl; };
@@ -774,22 +776,14 @@ public:
 		return hasTail();
 	}
 
-    void onVoiceReset(bool allVoices, int voiceIndex) override;
-
-	ModulatorChain::ExtraModulatorRuntimeTargetSource* getExtraModulationHandler() override { return &extraModSources; }
-
-	void connectToRuntimeTargets(scriptnode::OpaqueNode& opaqueNode, bool shouldAdd) override;
-
-	ModulationDisplayValue::QueryFunction::Ptr getModulationQueryFunction(int parameterIndex) const override
-	{
-		if(auto n = getActiveNetwork())
-		{
-			return extraModSources.getModulationQueryFunction(n->getParameterProperties(), parameterIndex);
-		}
-
-		return nullptr;
-	}
-
+    void onVoiceReset(bool allVoices, int voiceIndex) override
+    {
+        if (allVoices)
+            voiceData.voiceNoteOns.clear();
+        else
+            voiceData.reset(voiceIndex);
+    }
+    
 private:
 
 	VoiceDataStack voiceData;
@@ -797,37 +791,27 @@ private:
 	ScopedPointer<SnippetDocument> onInitCallback;
 	ScopedPointer<SnippetDocument> onControlCallback;
 
-	ModulatorChain::ExtraModulatorRuntimeTargetSource extraModSources;
-
 	ScriptingApi::Engine* engineObject;
 };
 
 class JavascriptSynthesiser : public JavascriptProcessor,
-							  public ProcessorWithScriptingContent,
-							  public ModulatorSynth,
-							  public snex::VoiceResetter
+						  public ProcessorWithScriptingContent,
+						  public ModulatorSynth
 {
 public:
 
-	SET_PROCESSOR_NAME("ScriptSynth", "Scriptnode Synthesiser", "");
-
-	static ProcessorMetadata createMetadata()
+	enum ModChains
 	{
-		return withScriptnodeMetadata<JavascriptSynthesiser>(ModulatorSynth::createBaseMetadata())
-			.withDescription("Generates polyphonic audio from a scriptnode DSP network, with per-voice processing and full modulator chain support.");
-	}
-
-	ProcessorMetadata getMetadata() const override
-	{
-		auto numMods = HISE_GET_PREPROCESSOR(getMainController(), HISE_NUM_SCRIPTNODE_SYNTH_MODS);
-		return withDynamicParametersFromNetwork(createMetadata(), numMods, ModulatorSynth::numInternalChains);
-	}
+		Extra1 = 2,
+		Extra2,
+		numModChains
+	};
 
 	struct Sound : public ModulatorSynthSound
 	{
-		bool appliesToNote(int ) final;
-		bool appliesToChannel(int ) final;
-		bool appliesToVelocity(int ) final;
+		bool appliesToNote(int ) final override;;
+		bool appliesToChannel(int ) final override;;
+		bool appliesToVelocity(int ) final override;;
 	};
 
 	struct Voice : public ModulatorSynthVoice
@@ -835,23 +819,17 @@ public:
 		Voice(JavascriptSynthesiser* p);
 
 		void calculateBlock(int startSample, int numSamples) override;
+
 		void setVoiceStartDataForNextRenderCallback();
-		void resetVoice() override;
 
-		void prepareToPlay(double sampleRate, int samplesPerBlock) override
-		{
-			ModulatorSynthVoice::prepareToPlay(sampleRate, samplesPerBlock);
-
-			auto numSynthChannels = synth->getMatrix().getNumSourceChannels();
-
-			if(numSynthChannels != voiceBuffer.getNumChannels())
-				voiceBuffer.setSize(numSynthChannels, samplesPerBlock);
-		}
+		virtual void resetVoice() override;
 
 		JavascriptSynthesiser* synth;
 
 		bool isVoiceStart = false;
 	};
+	
+	SET_PROCESSOR_NAME("ScriptSynth", "Scriptnode Synthesiser", "A polyphonic scriptable synthesiser.");
 
 	enum class Callback
 	{
@@ -868,16 +846,12 @@ public:
 	};
 
 	JavascriptSynthesiser(MainController *mc, const String &id, int numVoices);
+		
 	~JavascriptSynthesiser();
 
 	Path getSpecialSymbol() const override;
-	ProcessorEditorBody *createEditor(ProcessorEditor *parentEditor)  override;
 
-	void numSourceChannelsChanged() override
-	{
-		if(getSampleRate() > 0.0)
-			prepareToPlay(getSampleRate(), getLargestBlockSize());
-	}
+	ProcessorEditorBody *createEditor(ProcessorEditor *parentEditor)  override;
 
 	SnippetDocument *getSnippet(int c) override;
 	const SnippetDocument *getSnippet(int c) const override;
@@ -886,43 +860,66 @@ public:
 	void postCompileCallback() override;
 
 	void preHiseEventCallback(HiseEvent &e) override;
+
 	void preStartVoice(int voiceIndex, const HiseEvent& e) override;
+
 	void prepareToPlay(double sampleRate, int samplesPerBlock) override;
+
 	bool isPolyphonic() const override;
 
+	float getModValueForNode(int modIndex, int startSample) const;
+
 	Processor* getChildProcessor(int processorIndex) override;
+
 	const Processor* getChildProcessor(int processorIndex) const override;
+
 	int getNumInternalChains() const override;;
+
 	int getNumChildProcessors() const override;;
 
 	ValueTree exportAsValueTree() const override;
 	void restoreFromValueTree(const ValueTree &v) override;
 
-	void setInternalAttribute(int index, float newValue) override;
+	int getNumParameters() const override;
+
 	float getAttribute(int index) const override;
-	
-	ModulatorChain::ExtraModulatorRuntimeTargetSource* getExtraModulationHandler() override { return &extraModSources; }
-	void connectToRuntimeTargets(scriptnode::OpaqueNode& opaqueNode, bool shouldAdd) override;
-	ModulationDisplayValue::QueryFunction::Ptr getModulationQueryFunction(int parameterIndex) const override;
+
+	void setInternalAttribute(int index, float newValue) override;
+
+	Identifier getIdentifierForParameterIndex(int parameterIndex) const override;
+
+	int getParameterIndexForIdentifier(const Identifier& id) const override
+	{
+		if (auto n = getActiveOrDebuggedNetwork())
+			return n->networkParameterHandler.getParameterIndexForIdentifier(id);
+		else
+			return contentParameterHandler.getParameterIndexForIdentifier(id);
+	}
+
+	int getNumAttributes() const override
+	{
+		if (auto n = getActiveOrDebuggedNetwork())
+			return n->networkParameterHandler.getNumParameters();
+		else
+			return contentParameterHandler.getNumParameters();
+	}
+
 	int getControlCallbackIndex() const override;;
 
-	// voice resetter methods
-	void onVoiceReset(bool allVoices, int voiceIndex) override;
-	bool isVoiceResetActive() const override;
-	int getNumActiveVoices() const override;
-
-private:
-
-	ModulatorChain::ExtraModulatorRuntimeTargetSource extraModSources;
+	ModulatorChain::ModChainWithBuffer* nodeChains[3];
 
 	ScopedPointer<SnippetDocument> onInitCallback;
 	ScopedPointer<SnippetDocument> onControlCallback;
 
 	VoiceDataStack voiceData;
+
 	ScriptingApi::Engine* engineObject;
+
+	int currentVoiceStartSample = 0;
 
 	JUCE_DECLARE_WEAK_REFERENCEABLE(JavascriptSynthesiser);
 };
 
 
 } // namespace hise
+#endif  // SCRIPTPROCESSORMODULES_H_INCLUDED

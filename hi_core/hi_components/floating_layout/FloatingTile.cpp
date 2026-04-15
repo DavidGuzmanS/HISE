@@ -329,10 +329,7 @@ var FloatingTile::LayoutData::toDynamicObject() const
 
 void FloatingTile::LayoutData::fromDynamicObject(const var& objectData)
 {
-	if(auto obj = objectData.getDynamicObject())
-		layoutDataObject = obj;
-	else
-		reset();
+	layoutDataObject = objectData.getDynamicObject();
 }
 
 int FloatingTile::LayoutData::getNumDefaultableProperties() const
@@ -583,7 +580,7 @@ FloatingTile::MoveButton::MoveButton() :
 	ShapeButton("Move", Colours::white.withAlpha(0.2f), Colours::white.withAlpha(0.8f), Colours::white)
 {
 	Path p;
-	p.loadPathFromData(ColumnIcons::moveIcon, SIZE_OF_PATH(ColumnIcons::moveIcon));
+	p.loadPathFromData(ColumnIcons::moveIcon, sizeof(ColumnIcons::moveIcon));
 
 	setShape(p, false, true, true);
 
@@ -702,6 +699,10 @@ FloatingTile::FloatingTile(MainController* mc_, FloatingTileContainer* parent, v
 	addAndMakeVisible(moveButton = new MoveButton());
 	addAndMakeVisible(foldButton = new FoldButton());
 	addAndMakeVisible(resizeButton = new ResizeButton());
+
+	//layoutIcon.loadPathFromData(ColumnIcons::layoutIcon, sizeof(ColumnIcons::layoutIcon));
+
+
 
 	setContent(data);
 }
@@ -894,9 +895,9 @@ void FloatingTile::refreshPinButton()
 	Path p;
 
 	if (layoutData.isAbsolute())
-		p.loadPathFromData(ColumnIcons::absoluteIcon, ColumnIcons::absoluteIcon_Size);
+		p.loadPathFromData(ColumnIcons::absoluteIcon, sizeof(ColumnIcons::absoluteIcon));
 	else
-		p.loadPathFromData(ColumnIcons::relativeIcon, ColumnIcons::relativeIcon_Size);
+		p.loadPathFromData(ColumnIcons::relativeIcon, sizeof(ColumnIcons::relativeIcon));
 	
 	resizeButton->setShape(p, false, true, true);
 }
@@ -1206,7 +1207,7 @@ void FloatingTile::paintOverChildren(Graphics& g)
 		{
 			Path layoutPath;
 
-			layoutPath.loadPathFromData(ColumnIcons::layoutIcon, ColumnIcons::layoutIcon_Size);
+			layoutPath.loadPathFromData(ColumnIcons::layoutIcon, sizeof(ColumnIcons::layoutIcon));
 
 			g.setColour(Colours::white.withAlpha(0.1f));
 			layoutPath.scaleToFit((float)(getWidth() - 40) / 2.0f, (float)(getHeight() - 40) / 2.0f, 40.0f, 40.0f, true);

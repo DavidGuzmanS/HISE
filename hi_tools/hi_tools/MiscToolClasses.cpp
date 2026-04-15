@@ -35,19 +35,13 @@
 #include "xmmintrin.h"
 #endif
 
-#if !HISE_INCLUDE_XSIMD
-#include "../hi_neural/RTNeural/modules/xsimd/xsimd.hpp"
-#endif
+
 
 
 namespace hise {
 using namespace juce;
 
 
-SafeChangeBroadcaster::~SafeChangeBroadcaster()
-{
-	dispatcher.cancelPendingUpdate();
-}
 
 void SafeChangeBroadcaster::sendSynchronousChangeMessage()
 {
@@ -468,89 +462,11 @@ StringArray FuzzySearcher::searchForResults(const String &word, const StringArra
 	return foundWords;
 }
 
-Array<int> FuzzySearcher::searchForIndexes(const String &word, const StringArray &wordList, double fuzzyness, bool sortByScore)
+Array<int> FuzzySearcher::searchForIndexes(const String &word, const StringArray &wordList, double fuzzyness)
 {
 	Array<int> foundIndexes;
 	search(&foundIndexes, true, word, wordList, fuzzyness);
-	
-	if (sortByScore && foundIndexes.size() > 1)
-	{
-		String searchWord = word.toLowerCase();
-		searchWord = searchWord.removeCharacters("()`[]*_-` ");
-		
-		// Precompute distances for each matched index
-		HashMap<int, int> distances;
-		for (int idx : foundIndexes)
-		{
-			String w = wordList[idx].toLowerCase();
-			w = w.removeCharacters("()`[]*_-` ").substring(0, 32);
-			distances.set(idx, getLevenshteinDistance(searchWord, w));
-		}
-		
-		struct DistanceSorter
-		{
-			const HashMap<int, int>& distances;
-			
-			int compareElements(int a, int b) const
-			{
-				return distances[a] - distances[b];
-			}
-		} sorter { distances };
-		
-		foundIndexes.sort(sorter);
-	}
-	
 	return foundIndexes;
-}
-
-String FuzzySearcher::suggestCorrection(const juce::String& wrongToken, const juce::StringArray& availableTokens,
-	double fuzzyness)
-{
-	juce::Array<int> matchingIndexes = FuzzySearcher::searchForIndexes(wrongToken, availableTokens, fuzzyness);
-
-	if (matchingIndexes.isEmpty())
-		return {}; // No suitable match found
-
-	// Find the best match with the lowest Levenshtein distance
-	juce::String bestMatch;
-	double bestScore = 0.0;
-
-	auto wt = wrongToken;
-
-	if(wt.containsChar('.'))
-		wt = wt.fromLastOccurrenceOf(".", false, false);
-
-	for (int index : matchingIndexes)
-	{
-		auto ft = availableTokens[index];
-		auto t = ft;
-
-		auto preferLastToken = t.containsChar('.');
-
-		if(preferLastToken)
-			t = t.fromLastOccurrenceOf(".", false, false);
-
-		int distance = FuzzySearcher::getLevenshteinDistance(wt, t);
-		auto l = jmax(t.length(), wt.length());
-		auto score = 1.0 - (double)distance / (double)l;
-
-		if(preferLastToken)
-		{
-			int fullDistance = FuzzySearcher::getLevenshteinDistance(wrongToken, ft);
-			auto fullL = jmax(ft.length(), wrongToken.length());
-			auto fullScore = 1.0 - (double)fullDistance / (double)fullL;
-
-			score = 0.5 * score + 0.5 * fullScore;
-		}
-
-		if (score > bestScore)
-		{
-			bestScore = score;
-			bestMatch = availableTokens[index];
-		}
-	}
-
-	return bestMatch;
 }
 
 #define NUM_MAX_CHARS 128
@@ -820,22 +736,6 @@ bool FloatSanitizers::isNotSilence(const float value)
 
 void FloatSanitizers::sanitizeArray(float* data, int size)
 {
-    // Fallback for remaining elements (or non-SIMD platforms)
-    for (int i = 0; i < size; i++)
-    {
-        uint32_t valueAsInt;
-        std::memcpy(&valueAsInt, &data[i], sizeof(float));
-
-        const uint32_t exponent = valueAsInt & 0x7F800000;
-        const int aNaN = exponent < 0x7F800000;
-        const int aDen = exponent > 0;
-
-        valueAsInt = valueAsInt * (aNaN & aDen);
-
-        std::memcpy(&data[i], &valueAsInt, sizeof(float));
-    }
-
-#if 0
 	uint32* dataAsInt = reinterpret_cast<uint32*>(data);
 
 	for (int i = 0; i < size; i++)
@@ -848,25 +748,10 @@ void FloatSanitizers::sanitizeArray(float* data, int size)
 
 		*dataAsInt++ = sample * (aNaN & aDen);
 	}
-#endif
 }
 
 float FloatSanitizers::sanitizeFloatNumber(float& input)
 {
-    uint32_t valueAsInt;
-    std::memcpy(&valueAsInt, &input, sizeof(float));
-
-    const uint32_t exponent = valueAsInt & 0x7F800000;
-
-    const int aNaN = exponent < 0x7F800000;
-    const int aDen = exponent > 0;
-
-    const uint32_t sanitized = valueAsInt * (aNaN & aDen);
-
-    std::memcpy(&input, &sanitized, sizeof(float));
-    return input;
-
-#if 0 // old version, Xcode 16.3 doesn't like that
 	uint32* valueAsInt = reinterpret_cast<uint32*>(&input);
 	const uint32 exponent = *valueAsInt & 0x7F800000;
 
@@ -878,25 +763,10 @@ float FloatSanitizers::sanitizeFloatNumber(float& input)
 	input = *reinterpret_cast<const float*>(&sanitized);
 
 	return input;
-#endif
 }
 
 double FloatSanitizers::sanitizeDoubleNumber(double& input)
 {
-	uint64_t valueAsInt;
-    std::memcpy(&valueAsInt, &input, sizeof(double));
-
-    const uint64_t exponent = valueAsInt & 0x7FF0000000000000ULL;
-
-    const int aNaN = exponent < 0x7FF0000000000000ULL;
-    const int aDen = exponent > 0;
-
-    const uint64_t sanitized = valueAsInt * (aNaN & aDen);
-
-    std::memcpy(&input, &sanitized, sizeof(double));
-    return input;
-
-#if 0 // Xcode 16.3
 	uint64_t* valueAsInt = reinterpret_cast<uint64_t*>(&input);
 	const uint64_t exponent = *valueAsInt & 0x7FF0000000000000;
 
@@ -908,7 +778,6 @@ double FloatSanitizers::sanitizeDoubleNumber(double& input)
 	input = *reinterpret_cast<const double*>(&sanitized);
 
 	return input;
-#endif
 }
 
 FloatSanitizers::Test::Test():
@@ -947,254 +816,6 @@ void FloatSanitizers::Test::testArray()
 	expectEquals<float>(d[5], 0.0052f, "Small Number");
 
 			
-}
-
-bool ModBufferExpansion::isEqual(float rampStart, const float* data, int numElements)
-{
-	auto range = FloatVectorOperations::findMinAndMax(data, numElements);
-	return (range.contains(rampStart) || range.getEnd() == rampStart) && range.getLength() < 0.001f;
-}
-
-bool ModBufferExpansion::expand(const float* modulationData, int startSample, int numSamples, float& rampStart)
-{
-	const int startSample_cr = startSample / HISE_CONTROL_RATE_DOWNSAMPLING_FACTOR;
-	const int numSamples_cr = numSamples / HISE_CONTROL_RATE_DOWNSAMPLING_FACTOR;
-
-	if (isEqual(rampStart, modulationData + startSample_cr, numSamples_cr))
-	{
-		rampStart = modulationData[startSample_cr];
-		return false;
-	}
-	else
-	{
-#if HISE_USE_CONTROLRATE_DOWNSAMPLING
-
-		float* temp = (float*)alloca(sizeof(float) * (numSamples_cr));
-		FloatVectorOperations::copy(temp, modulationData + startSample_cr, numSamples_cr);
-		float* d = const_cast<float*>(modulationData + startSample);
-
-		constexpr float ratio = 1.0f / (float)HISE_CONTROL_RATE_DOWNSAMPLING_FACTOR;
-
-		for (int i = 0; i < numSamples_cr; i++)
-		{
-			AlignedSSERamper<HISE_CONTROL_RATE_DOWNSAMPLING_FACTOR> ramper(d);
-
-			const float delta1 = (temp[i] - rampStart) * ratio;
-			ramper.ramp(rampStart, delta1);
-			rampStart = temp[i];
-			d += HISE_CONTROL_RATE_DOWNSAMPLING_FACTOR;
-		}
-#endif
-
-		return true;
-	}
-}
-
-
-template <bool Inverse> struct PitchSimd
-{
-	template <class Arch>
-    void operator()(Arch, float* rangeValues, int numValues)
-    {
-		using b_type = xsimd::batch<float, Arch>;
-	    auto inc = (int)b_type::size;
-		auto numVectorized = numValues - numValues % inc;
-
-	    for (int i = 0; i < numVectorized; i += inc)
-	    {
-	        auto v = b_type::load_unaligned(rangeValues + i);
-
-			if constexpr (Inverse)
-			{
-				v = xsimd::log2(v);
-				v *= 0.5f;
-				v += 0.5f;
-			}
-			else
-				v = xsimd::exp2(v);
-
-	        v.store_unaligned(rangeValues + i);
-	    }
-
-		if constexpr (Inverse)
-		{
-			for (int i = numVectorized; i < numValues; ++i)
-				rangeValues[i] = 0.5f * std::log2(rangeValues[i]) + 0.5f;
-		}
-		else
-		{
-			for (int i = numVectorized; i < numValues; ++i)
-				rangeValues[i] = std::exp2(rangeValues[i]);
-		}
-    }
-};
-
-struct StepSimd
-{
-	template <class Arch>
-	void operator()(Arch, float* data, int numValues, Range<float> targetRange, float interval)
-	{
-		using b_type = xsimd::batch<float, Arch>;
-		auto inc = (int)b_type::size;
-		auto numVectorized = numValues - numValues % inc;
-
-		jassert(interval != 0.0f);
-
-		const auto min = targetRange.getStart();
-		const auto max = targetRange.getEnd();
-		const auto intervalInv = 1.0f / interval;
-		const auto delta = max - min;
-
-		for (int i = 0; i < numVectorized; i += inc)
-		{
-			auto v = b_type::load_unaligned(data + i);
-			
-			v *= (max - min);
-			v *= intervalInv;
-			v += 0.5f;
-			v  = xsimd::floor(v);
-			v *= interval;
-			v += min;
-
-			v.store_unaligned(data + i);
-		}
-
-		for (int i = numVectorized; i < numValues; i++)
-		{
-			// v [0 ... 1]
-			auto v = data[i];
-
-			v *= delta;
-			v *= intervalInv;
-			v += 0.5f;
-			v  = std::floor (v);
-			v *= interval;
-			v += min;
-
-			data[i] = v;
-		}
-	}
-};
-
-struct ScaleSimd
-{
-	template <class Arch>
-	void operator()(Arch, float* data, int numValues, Range<float> targetRange)
-	{
-		using b_type = xsimd::batch<float, Arch>;
-		auto inc = (int)b_type::size;
-		auto numVectorized = numValues - numValues % inc;
-
-		auto min = targetRange.getStart();
-		auto max = targetRange.getEnd();
-
-		auto offset = min;
-		auto scale = max - min;
-
-		// return min + (max - min) * hmath::exp(hmath::log(value) / skew);
-
-		for (int i = 0; i < numVectorized; i += inc)
-		{
-			auto v = b_type::load_unaligned(data + i);
-			v *= scale;
-			v += offset;
-			v.store_unaligned(data + i);
-		}
-
-		for (int i = numVectorized; i < numValues; i++)
-		{
-			auto v = data[i];
-			v *= scale;
-			v += offset;
-			data[i] = v;
-		}
-	}
-};
-
-struct SkewSimd
-{
-	template <class Arch>
-	void operator()(Arch, float* data, int numValues, Range<float> targetRange, float skew)
-	{
-		using b_type = xsimd::batch<float, Arch>;
-		auto inc = (int)b_type::size;
-		auto numVectorized = numValues - numValues % inc;
-
-		auto min = targetRange.getStart();
-		auto max = targetRange.getEnd();
-
-		auto offset = min;
-		auto scale = max - min;
-
-		jassert(skew != 1.0f);
-
-		skew = 1.0f / skew;
-
-		for (int i = 0; i < numVectorized; i += inc)
-		{
-			auto v = b_type::load_unaligned(data + i);
-
-			v = xsimd::clip(v, b_type(0.0f), b_type(1.0f));
-
-			v = xsimd::log(v);
-			v *= skew;
-			v = xsimd::exp(v);
-			v *= scale;
-			v += offset;
-
-			v.store_unaligned(data + i);
-		}
-
-		for (int i = numVectorized; i < numValues; i++)
-		{
-			auto v = jlimit(0.0f, 1.0f, data[i]);
-			v = std::log(v);
-			v *= skew;
-			v = std::exp(v);
-			v *= scale;
-			v += offset;
-
-			data[i] = v;
-		}
-	}
-};
-
-void ModBufferExpansion::pitchFactorToNormalisedRange(float* data, int numSamples)
-{
-	xsimd::dispatch(PitchSimd<true>{})(data, numSamples);
-}
-
-void ModBufferExpansion::normalisedRangeToPitchFactor(float* data, int numSamples)
-{
-	xsimd::dispatch(PitchSimd<false>{})(data, numSamples);
-}
-
-void ModBufferExpansion::applySkewFactor(float* data, int numSamples, NormalisableRange<double> targetRange)
-{
-	Range<float> r((float)targetRange.start, (float)targetRange.end);
-
-	if(targetRange.skew != 1.0)
-		xsimd::dispatch(SkewSimd{})(data, numSamples, r, targetRange.skew);
-	else if (targetRange.interval != 0.0)
-		xsimd::dispatch(StepSimd{})(data, numSamples, r, targetRange.interval);
-	else
-		xsimd::dispatch(ScaleSimd{})(data, numSamples, r);
-}
-
-Ramper::Ramper():
-	targetValue(0.0f),
-	stepDelta(0.0f),
-	stepAmount(-1)
-{}
-
-void Ramper::setTarget(float currentValue, float newTarget, int numberOfSteps)
-{
-	if (numberOfSteps != -1) stepDelta = (newTarget - currentValue) / numberOfSteps;
-	else if (stepAmount != -1) stepDelta = (newTarget - currentValue) / stepAmount;
-	else jassertfalse; // Either the step amount should be set, or a new step amount should be supplied
-
-	targetValue = newTarget;
-	busy = true;
 }
 
 
@@ -1740,16 +1361,6 @@ void SuspendableTimer::Internal::timerCallback()
 PooledUIUpdater::PooledUIUpdater():
 	pendingHandlers(8192)
 {
-#if HISE_INCLUDE_PROFILING_TOOLKIT
-
-	auto p = new DebugSession::ProfileDataSource();
-	p->name = "UI Timer callback";
-	p->threadRoot = DebugSession::ThreadIdentifier::Type::UIThread;
-	p->sourceType = DebugSession::ProfileDataSource::SourceType::TimerCallback;
-	timerSession = p;
-
-#endif
-
 	suspendTimer(false);
 	startTimer(30);
 }
@@ -1782,22 +1393,9 @@ void PooledUIUpdater::SimpleTimer::stop()
 bool PooledUIUpdater::SimpleTimer::isTimerRunning() const
 { return isRunning; }
 
-void PooledUIUpdater::SimpleTimer::setEnableProfiling(const String& profileName)
-{
-#if HISE_INCLUDE_PROFILING_TOOLKIT
-	using PD = DebugSession::ProfileDataSource;
-
-	PD* p = new PD();
-	p->name = profileName;
-	p->sourceType = PD::SourceType::TimerCallback;
-	p->threadRoot = DebugSession::ThreadIdentifier::Type::UIThread;
-	profileData = p;
-#endif
-}
-
 void PooledUIUpdater::SimpleTimer::startOrStop(bool shouldStart)
 {
-	if(updater == nullptr || isTimerRunning() == shouldStart)
+	if(updater == nullptr)
 		return;
 
 	WeakReference<SimpleTimer> safeThis(this);
@@ -1841,8 +1439,6 @@ void PooledUIUpdater::Broadcaster::removePooledChangeListener(Listener* l)
 bool PooledUIUpdater::Broadcaster::isHandlerInitialised() const
 { return handler != nullptr; }
 
-
-
 void PooledUIUpdater::timerCallback()
 {
 	PerfettoHelpers::setCurrentThreadName("UI Timer Thread");
@@ -1850,60 +1446,20 @@ void PooledUIUpdater::timerCallback()
 	TRACE_DISPATCH("UI Timer callback");
 
 	{
-		PROFILE_ONLY(DebugSession::ProfileDataSource::ScopedProfiler sp((debugSession != nullptr && debugSession->isRecordingMultithread()) ? dynamic_cast<DebugSession::ProfileDataSource*>(timerSession.get()) : nullptr, debugSession));
-
 		ScopedLock sl(simpleTimers.getLock());
 
-#if MEASURE_TIMER_CHILDREN
-		auto now = Time::getMillisecondCounterHiRes();
-#endif
+		int x = 0;
 
 		for (int i = 0; i < simpleTimers.size(); i++)
 		{
 			auto st = simpleTimers[i];
 
+			x++;
 			if (st.get() != nullptr)
-			{
-#if HISE_INCLUDE_PROFILING_TOOLKIT
-				if(debugSession != nullptr && debugSession->isRecordingMultithread())
-				{
-					if(auto pd = st->getProfileDataSource<DebugSession::ProfileDataSource>())
-					{
-						DebugSession::ProfileDataSource::ScopedProfiler sp(pd, debugSession);
-						st->timerCallback();
-						continue;
-					}
-				}
-#endif
-
-#if MEASURE_TIMER_CHILDREN
-                auto before = Time::getMillisecondCounterHiRes();
-                
-                st->timerCallback();
-                
-				auto timerDuration = Time::getMillisecondCounterHiRes() - before;
-
-				if(lastDuration != 0.0 && st->getProfileDataSource<DebugSession::ProfileDataSource>() == nullptr)
-				{
-					auto relative = timerDuration / lastDuration;
-					auto threshold = JUCE_LIVE_CONSTANT(0.05);
-
-					if(relative > threshold)
-					{
-						int x = 5;
-					}
-				}
-#else
-                st->timerCallback();
-#endif
-			}
+				st->timerCallback();
 			else
 				simpleTimers.remove(i--);
 		}
-
-#if MEASURE_TIMER_CHILDREN
-		lastDuration = Time::getMillisecondCounterHiRes() - now;
-#endif
 	}
 
 	WeakReference<Broadcaster> b;
@@ -1996,12 +1552,7 @@ float ComplexDataUIUpdaterBase::getLastDisplayValue() const
 void ComplexDataUIUpdaterBase::updateUpdater()
 {
 	if (globalUpdater != nullptr && currentUpdater == nullptr && listeners.size() > 0)
-	{
 		currentUpdater = new Updater(*this);
-
-		if(profileName.isNotEmpty())
-			currentUpdater->setEnableProfiling(profileName);
-	}
 
 	if (listeners.size() == 0 || globalUpdater == nullptr)
 		currentUpdater = nullptr;
@@ -2390,7 +1941,7 @@ MasterClock::GridInfo MasterClock::updateFromExternalPlayHead(const AudioPlayHea
 
 			auto gridPos = std::fmod(info.ppqPosition, multiplier);
 
-			if (std::abs(gridPos) <= clockTolerance)
+			if (std::abs(gridPos) <= 0.2)
 			{
 				gi.change = true;
 				gi.gridIndex = roundToInt(info.ppqPosition / multiplier);
@@ -2429,13 +1980,10 @@ MasterClock::GridInfo MasterClock::updateFromExternalPlayHead(const AudioPlayHea
 		auto ppqAfter = ppqBefore + numSamplesInPPQ;
 		auto multiplier = (double)TempoSyncer::getTempoFactor(clockGrid);
 
-		auto p1 = (ppqBefore / multiplier);
-		auto p2 = (ppqAfter / multiplier);
+		auto i1 = (int)(ppqBefore / multiplier);
+		auto i2 = (int)(ppqAfter / multiplier);
 
-		auto i1 = (int)p1;
-		auto i2 = (int)p2;
-
-		if (i1 != i2 || hmath::sign(p1) != hmath::sign(p2))
+		if (i1 != i2)
 		{
 			auto gridPosPPQ = (double)i2 * multiplier;
 			auto deltaPPQ = gridPosPPQ - ppqBefore;
@@ -2730,12 +2278,12 @@ String FFTHelpers::getWindowType(WindowType w)
 }
 
 void FFTHelpers::toComplexArray(const AudioSampleBuffer& phaseBuffer, const AudioSampleBuffer& magBuffer,
-	AudioSampleBuffer& out, int channelIndex)
+	AudioSampleBuffer& out)
 {
-	auto phase = phaseBuffer.getReadPointer(channelIndex);
-	auto mag = magBuffer.getReadPointer(channelIndex);
+	auto phase = phaseBuffer.getReadPointer(0);
+	auto mag = magBuffer.getReadPointer(0);
 
-	auto output = out.getWritePointer(channelIndex);
+	auto output = out.getWritePointer(0);
 		
 	jassert(phaseBuffer.getNumSamples() == magBuffer.getNumSamples());
 	jassert(phaseBuffer.getNumSamples() * 2 == out.getNumSamples());
@@ -2752,10 +2300,10 @@ void FFTHelpers::toComplexArray(const AudioSampleBuffer& phaseBuffer, const Audi
 	}
 }
 
-void FFTHelpers::toPhaseSpectrum(const AudioSampleBuffer& inp, AudioSampleBuffer& out, int channelIndex)
+void FFTHelpers::toPhaseSpectrum(const AudioSampleBuffer& inp, AudioSampleBuffer& out)
 {
-	auto input = inp.getReadPointer(channelIndex);
-	auto output = out.getWritePointer(channelIndex);
+	auto input = inp.getReadPointer(0);
+	auto output = out.getWritePointer(0);
 
 	jassert(inp.getNumSamples() == out.getNumSamples() * 2);
 
@@ -2769,10 +2317,10 @@ void FFTHelpers::toPhaseSpectrum(const AudioSampleBuffer& inp, AudioSampleBuffer
 	}
 }
 
-void FFTHelpers::toFreqSpectrum(const AudioSampleBuffer& inp, AudioSampleBuffer& out, int channelIndex)
+void FFTHelpers::toFreqSpectrum(const AudioSampleBuffer& inp, AudioSampleBuffer& out)
 {
-	auto input = inp.getReadPointer(channelIndex);
-	auto output = out.getWritePointer(channelIndex);
+	auto input = inp.getReadPointer(0);
+	auto output = out.getWritePointer(0);
         
 	jassert(inp.getNumSamples() == out.getNumSamples() * 2);
 
@@ -2786,9 +2334,9 @@ void FFTHelpers::toFreqSpectrum(const AudioSampleBuffer& inp, AudioSampleBuffer&
 	}
 }
 
-void FFTHelpers::scaleFrequencyOutput(AudioSampleBuffer& b, bool convertToDb, bool invert, int channelIndex)
+void FFTHelpers::scaleFrequencyOutput(AudioSampleBuffer& b, bool convertToDb, bool invert)
 {
-	auto data = b.getWritePointer(channelIndex);
+	auto data = b.getWritePointer(0);
 	auto numOriginalSamples = b.getNumSamples();
 
 	if (numOriginalSamples == 0)
@@ -2873,10 +2421,10 @@ void Spectrum2D::draw(Graphics& g, const Image& img, Rectangle<int> area, Graphi
 	g.restoreState();
 }
 
-void FFTHelpers::applyWindow(WindowType t, AudioSampleBuffer& b, bool normalise, int channelIndex)
+void FFTHelpers::applyWindow(WindowType t, AudioSampleBuffer& b, bool normalise)
 {
     auto s = b.getNumSamples() / 2;
-    auto data = b.getWritePointer(channelIndex);
+    auto data = b.getWritePointer(0);
 
     applyWindow(t, data, s, normalise);
 }
@@ -2971,75 +2519,21 @@ Image Spectrum2D::createSpectrumImage(AudioSampleBuffer& lastBuffer)
     auto newImage = Image(Image::ARGB, lastBuffer.getNumSamples(), lastBuffer.getNumChannels(), true);
 
 	Image::BitmapData bd(newImage, Image::BitmapData::writeOnly);
-
-	float stddev = 1.0f;
-	float mean = 0.0f;
-
-	if(parameters->standardize)
-	{
-		size_t rows = lastBuffer.getNumSamples();
-	    size_t cols = lastBuffer.getNumChannels();
-	    size_t total = rows * cols;
-
-	    // Compute mean
-	    float sum = 0.0f;
-
-	    for (int i = 0; i < lastBuffer.getNumChannels(); i++)
-	    {
-			for(int j = 0; j < lastBuffer.getNumSamples(); j++)
-				sum += lastBuffer.getSample(i, j);
-		}
-
-	    mean = sum / total;
-
-	    // Compute standard deviation
-	    float sq_sum = 0.0f;
-
-		for (int i = 0; i < lastBuffer.getNumChannels(); i++)
-	    {
-			for(int j = 0; j < lastBuffer.getNumSamples(); j++)
-			{
-				auto val = lastBuffer.getSample(i, j);
-				sq_sum += (val - mean) * (val - mean);
-			}
-		}
-		
-	    stddev = std::sqrt(sq_sum / total);
-
-	    // Avoid division by zero
-	    float epsilon = 1e-6f;
-	    stddev = std::max(stddev, epsilon);
-	}
-
+	
 	for(int y = 0; y < lastBuffer.getNumChannels(); y++)
 	{
 		auto src = lastBuffer.getReadPointer(y);
-
+		
 		for(int x = 0; x < lastBuffer.getNumSamples(); x++)
 		{
-			auto inputValue = src[x];
-
-			if(parameters->freqGamma != 100)
-			{
-				float normX = (float)x / lastBuffer.getNumSamples();
-				normX = std::pow(normX, (float)parameters->freqGamma * 0.01f);
-				normX *= (lastBuffer.getNumSamples());
-				auto low = (int)normX;
-				auto high = low + 1;
-				auto alpha = std::fmod(normX, 1.0f);
-				inputValue = Interpolator::interpolateLinear(src[low], src[high], alpha);
-			}
-
-			if(parameters->standardize)
-			{
-				inputValue = (inputValue - mean) / stddev;
-			}
-
-			auto lutValue = parameters->lut->getColouredPixel(inputValue, useAlphaChannel);
+			auto lutValue = parameters->lut->getColouredPixel(src[x], useAlphaChannel);
 			auto pp = (PixelARGB*)(bd.getPixelPointer(x, y));
 			pp->set(lutValue);
 		}
 	}
+
+	testImage(newImage, false, "after creation");
+
 
     return newImage;
 }
@@ -3187,10 +2681,6 @@ void Spectrum2D::Parameters::set(const Identifier& id, var value, NotificationTy
 		lut->setColourScheme((LookupTable::ColourScheme)(int)value);
 	if (id == Identifier("WindowType"))
 		currentWindowType = (FFTHelpers::WindowType)(int)value;
-	if(id == Identifier("FrequencyGamma"))
-		freqGamma = jlimit(100, 200, (int)value);
-	if(id == Identifier("Standardize"))
-		standardize = (bool)value;
 	if(id == Identifier("ResamplingQuality"))
 	{
 		StringArray q("Low", "Mid", "High");
@@ -3221,10 +2711,6 @@ var Spectrum2D::Parameters::get(const Identifier& id) const
 		return gainFactorDb;
 	if (id == Identifier("Gamma"))
 		return gammaPercent;
-	if( id == Identifier("FrequencyGamma"))
-		return freqGamma;
-	if(id == Identifier("Standardize"))
-		return standardize;
 	if (id == Identifier("ResamplingQuality"))
 	{
 		StringArray q("Low", "Mid", "High");
@@ -3267,8 +2753,6 @@ juce::Array<juce::Identifier> Spectrum2D::Parameters::getAllIds()
 		Identifier("GainFactor"),
 		Identifier("ResamplingQuality"),
 		Identifier("Gamma"),
-		Identifier("Standardize"),
-		Identifier("FrequencyGamma"),
 		Identifier("WindowType")
 	};
 	
@@ -3288,8 +2772,6 @@ Spectrum2D::Parameters::Editor::Editor(Parameters::Ptr p) :
     addEditor("DynamicRange");
 	addEditor("ColourScheme");
 	addEditor("Gamma");
-	addEditor("Standardize");
-	addEditor("FrequencyGamma");
 	addEditor("ResamplingQuality");
 	addEditor("GainFactor");
 
@@ -3356,23 +2838,6 @@ void Spectrum2D::Parameters::Editor::addEditor(const Identifier& id)
 		cb->addItem("Low", 1);
 		cb->addItem("Mid", 2);
 		cb->addItem("High", 3);
-	}
-	if(id == Identifier("Standardize"))
-	{
-		
-	}
-	if(id == Identifier("FrequencyGamma"))
-	{
-		cb->addItem("100%", 101);
-		cb->addItem("110%", 111);
-		cb->addItem("120%", 121);
-		cb->addItem("130%", 131);
-		cb->addItem("140%", 141);
-	}
-	if(id == Identifier("Standardize"))
-	{
-		cb->addItem("No", 1);
-		cb->addItem("Yes", 2);
 	}
 	if (id == Identifier("GainFactor"))
 	{
@@ -3476,21 +2941,6 @@ SemanticVersionChecker::SemanticVersionChecker(const std::array<int, 3>& oldVers
 	oldVersion.validVersion = true;
 }
 
-SemanticVersionChecker::SemanticVersionChecker(const std::array<int, 4>& oldVersion_, const std::array<int, 4>& newVersion_)
-{
-	newVersion.majorVersion = newVersion_[0];
-	newVersion.minorVersion = newVersion_[1];
-	newVersion.patchVersion = newVersion_[2];
-	newVersion.buildNumber = newVersion_[3];
-	newVersion.validVersion = true;
-
-	oldVersion.majorVersion = oldVersion_[0];
-	oldVersion.minorVersion = oldVersion_[1];
-	oldVersion.patchVersion = oldVersion_[2];
-	oldVersion.buildNumber = oldVersion_[3];
-	oldVersion.validVersion = true;
-}
-
 SemanticVersionChecker::SemanticVersionChecker(const String& oldVersion_, const String& newVersion_)
 {
 	parseVersion(oldVersion, oldVersion_);
@@ -3506,9 +2956,6 @@ bool SemanticVersionChecker::isMinorVersionUpdate() const
 bool SemanticVersionChecker::isPatchVersionUpdate() const
 { return newVersion.patchVersion > oldVersion.patchVersion; }
 
-bool SemanticVersionChecker::isBuildNumberUpdate() const
-{ return newVersion.buildNumber > oldVersion.buildNumber; }
-
 bool SemanticVersionChecker::oldVersionNumberIsValid() const
 { return oldVersion.validVersion; }
 
@@ -3520,7 +2967,7 @@ void SemanticVersionChecker::parseVersion(VersionInfo& info, const String& v)
 	const String sanitized = v.replace("v", "", true);
 	StringArray a = StringArray::fromTokens(sanitized, ".", "");
 
-	if (a.size() != 3 && a.size() != 4)
+	if (a.size() != 3)
 	{
 		info.validVersion = false;
 		return;
@@ -3530,10 +2977,6 @@ void SemanticVersionChecker::parseVersion(VersionInfo& info, const String& v)
 		info.majorVersion = a[0].getIntValue();
 		info.minorVersion = a[1].getIntValue();
 		info.patchVersion = a[2].getIntValue();
-
-		if (a.size() == 4)
-			info.buildNumber = a[3].getIntValue();
-
 		info.validVersion = true;
 	}
 }
@@ -3554,15 +2997,8 @@ bool SemanticVersionChecker::isUpdate() const
         {
             if (newVersion.patchVersion > oldVersion.patchVersion)
                 return true;
-            else if (newVersion.patchVersion < oldVersion.patchVersion)
-                return false;
             else
-            {
-                if (newVersion.buildNumber > oldVersion.buildNumber)
-                    return true;
-                else
-                    return false;
-            }
+                return false;
         }
     }
 }
@@ -3580,584 +3016,6 @@ double MasterClock::getBpmToUse(double hostBpm, double internalBpm) const
 		return shouldPreferInternal() ? internalBpm : hostBpm;
 
 	return internalBpm;
-}
-
-
-struct TextEditorWithAutocompleteComponent::Autocomplete: public Component,
-                                public ScrollBar::Listener,
-                                public ComponentMovementWatcher
-{
-    struct Item
-    {
-        String displayString;
-    };
-    
-    ScrollBar sb;
-    ScrollbarFader fader;
-       
-    void mouseWheelMove(const MouseEvent& e, const MouseWheelDetails& details)
-    {
-        sb.mouseWheelMove(e, details);
-    }
-    
-    void scrollBarMoved (ScrollBar* scrollBarThatHasMoved,
-                                 double newRangeStart) override
-    {
-        repaint();
-    }
-    
-    Font f;
-    
-    void componentMovedOrResized (bool wasMoved, bool wasResized) override
-    {
-        dismiss();
-    }
-
-    /** This callback happens when the component's top-level peer is changed. */
-    void componentPeerChanged() {};
-
-    /** This callback happens when the component's visibility state changes, possibly due to
-        one of its parents being made visible or invisible.
-    */
-    void componentVisibilityChanged() override
-    {
-        if(getComponent()->isShowing())
-            dismiss();
-    }
-    
-    Autocomplete(TextEditorWithAutocompleteComponent& p, int maxItemsToShow=4):
-      ComponentMovementWatcher(dynamic_cast<Component*>(&p)),
-      parent(&p),
-	  itemsToShow(maxItemsToShow),
-      sb(true)
-    {
-        f = parent->getTextEditor()->getFont();
-        
-        sb.addListener(this);
-        addAndMakeVisible(sb);
-        fader.addScrollBarToAnimate(sb);
-
-        for(auto& i: p.autocompleteItems)
-            allItems.add({i});
-
-        sb.setSingleStepSize(0.2);
-        
-        auto& ed = *parent->getTextEditor();
-        
-        update(ed.getText());
-        
-        setSize(jmax(300, ed.getWidth() + 20), TextEditorWithAutocompleteComponent::ItemHeight * itemsToShow + 5 + 20);
-        
-        setWantsKeyboardFocus(true);
-
-		auto pp = getParentAsComponent()->findParentComponentOfClass<Parent>();
-
-		Component* top = nullptr;
-
-		if(pp != nullptr)
-		{
-			if(pp->isTopLevel())
-				top = dynamic_cast<Component*>(pp);
-		}
-		
-#if !HISE_NO_GUI_TOOLS
-        if(top == nullptr)
-			top = TopLevelWindowWithOptionalOpenGL::findRoot(getParentAsComponent());
-#endif
-
-        if(top == nullptr)
-            top = getParentAsComponent()->getTopLevelComponent();
-
-        top->addChildComponent(this);
-        auto topLeft = top->getLocalArea(&ed, ed.getLocalBounds()).getTopLeft();
-        
-        setTopLeftPosition(topLeft.getX() - 10, topLeft.getY() + ed.getHeight());
-
-#if JUCE_DEBUG
-        setVisible(true);
-#else
-        Desktop::getInstance().getAnimator().fadeIn(this, 150);
-#endif
-        
-    }
-    
-    ~Autocomplete()
-    {
-        setComponentEffect(nullptr);
-    }
-
-	const int itemsToShow;
-    int selectedIndex = 0;
-    
-    void mouseDown(const MouseEvent& e) override
-    {
-        auto newIndex = sb.getCurrentRangeStart() + (e.getPosition().getY() - 15) / ItemHeight;
-        
-        if(isPositiveAndBelow(newIndex, items.size()))
-            setSelectedIndex(newIndex, sendNotification);
-    }
-    
-    void mouseDoubleClick(const MouseEvent& e) override
-    {
-        setAndDismiss();
-    }
-    
-    bool inc(bool next)
-    {
-        auto newIndex = selectedIndex + (next ? 1 : -1);
-        
-        if(isPositiveAndBelow(newIndex, items.size()))
-        {
-            setSelectedIndex(newIndex, sendNotification);
-            return true;
-        }
-        
-        return false;
-    }
-    
-    bool keyPressed(const KeyPress& k)
-    {
-        if(k == KeyPress::upKey)
-            return inc(false);
-        if(k == KeyPress::downKey)
-            return inc(true);
-        if(k == KeyPress::escapeKey)
-            return dismiss();
-        if(k == KeyPress::returnKey ||
-           k == KeyPress::tabKey)
-            return setAndDismiss();
-        
-        return false;
-    }
-    
-    void setSelectedIndex(int index, NotificationType n)
-    {
-        selectedIndex = index;
-        
-        if(!sb.getCurrentRange().contains(selectedIndex))
-        {
-            if(sb.getCurrentRange().getStart() > selectedIndex)
-                sb.setCurrentRangeStart(selectedIndex);
-            else
-                sb.setCurrentRangeStart(selectedIndex - 3);
-        }
-        
-		if(n != dontSendNotification)
-			parent.get()->autoCompleteItemSelected(selectedIndex, items[selectedIndex].displayString);
-
-        repaint();
-    }
-    
-    void resized() override
-    {
-        sb.setBounds(getLocalBounds().reduced(10).removeFromRight(16).reduced(1));
-    }
-
-	LookAndFeelMethods laf;
-
-    void paint(Graphics& g) override
-    {
-        auto r = sb.getCurrentRange();
-		auto offset = roundToInt(r.getStart());
-		auto thisIndex = selectedIndex - offset;
-
-		StringArray thisItems;
-
-		LookAndFeelMethods* lafToUse = &laf;
-
-		if(parent != nullptr)
-		{
-			auto plaf = dynamic_cast<LookAndFeelMethods*>(&dynamic_cast<Component*>(parent.get())->getLookAndFeel());
-
-			if(plaf != nullptr)
-				lafToUse = plaf;
-		}
-
-		if(!items.isEmpty())
-		{
-			for(int i = 0; i < itemsToShow; i++)
-			{
-				thisItems.add(items[i + offset].displayString);
-			}
-		}
-
-		lafToUse->drawAutocompleteBackground(g, *parent->getTextEditor(), getLocalBounds().toFloat(), thisItems, thisIndex);
-    }
-    
-    bool setAndDismiss()
-    {
-        auto newTextAfterComma = items[selectedIndex].displayString;
-        auto ed = parent->getTextEditor();
-        
-        String nt = ed->getText();
-            
-        if(nt.containsChar(','))
-        {
-            nt = nt.upToLastOccurrenceOf(",", false, false);
-            nt << ", " << newTextAfterComma;
-        }
-        else
-            nt = newTextAfterComma;
-        
-		ed->setText("", false);
-        ed->setText(nt, true);
-        
-        return dismiss();
-    }
-    
-    bool dismiss()
-    {
-        SafeAsyncCall::call<TextEditorWithAutocompleteComponent>(*parent, [](TextEditorWithAutocompleteComponent& ti)
-        {
-            ti.dismissAutocomplete();
-            ti.getTextEditor()->grabKeyboardFocusAsync();
-        });
-        
-        return true;
-    }
-
-    Component* getParentAsComponent()
-    {
-	    return dynamic_cast<Component*>(parent.get());
-    }
-
-    void update(const String& currentText)
-    {
-        auto search = currentText.fromLastOccurrenceOf(",", false, false).toLowerCase().trim();
-        
-        items.clear();
-        
-        for(const auto& i: allItems)
-        {
-            if(search.isEmpty() || i.displayString.toLowerCase().contains(search))
-            {
-                items.add(i);
-            }
-        }
-        
-        sb.setRangeLimits(0.0, (double)items.size());
-        sb.setCurrentRange(0.0, (double)itemsToShow);
-        setSelectedIndex(0, dontSendNotification);
-        
-        if(items.isEmpty())
-            dismiss();
-    }
-    
-    Array<Item> allItems;
-    Array<Item> items;
-    
-    WeakReference<TextEditorWithAutocompleteComponent> parent;
-};
-
-void TextEditorWithAutocompleteComponent::LookAndFeelMethods::drawAutocompleteBackground(Graphics& g, TextEditor& te,
-	Rectangle<float> b, const StringArray& itemToShow, int selectedIndex)
-{
-	b = b.reduced(10.0f);
-	        
-	DropShadow sh;
-	sh.colour = Colours::black.withAlpha(0.7f);
-	sh.radius = 10;
-	sh.drawForRectangle(g, b.toNearestInt());
-	            
-	b.reduced(2.0f);
-	g.setColour(Colour(0xFF222222));
-	g.fillRoundedRectangle(b, 5.0f);
-	g.setColour(Colours::white.withAlpha(0.3f));
-	g.drawRoundedRectangle(b, 5.0f, 2.0f);
-	        
-	b.reduced(5.0f);
-	b.removeFromLeft(10.0f);
-	b.removeFromTop(2.5f);
-	        
-	g.setFont(te.getFont());
-	        
-	if(itemToShow.isEmpty())
-	{
-		g.setColour(Colours::white.withAlpha(0.1f));
-		g.drawText("No items found", b, Justification::centred);
-	}
-	else
-	{
-		auto f = te.findParentComponentOfClass<TextEditorWithAutocompleteComponent>();
-
-		for(int i = 0; i < itemToShow.size(); i++)
-			drawAutocompleteItem(g, *f, itemToShow[i], b.removeFromTop(ItemHeight).toFloat(), i == selectedIndex);			
-	}
-}
-
-void TextEditorWithAutocompleteComponent::LookAndFeelMethods::drawAutocompleteItem(Graphics& g, TextEditorWithAutocompleteComponent& parent, const String& itemName, Rectangle<float> itemBounds, bool selected)
-{
-	g.setColour(Colours::white.withAlpha(0.6f));
-
-	if (selected)
-	{
-		g.fillRoundedRectangle(itemBounds.withX(10.0f).reduced(3.0f, 1.0f), 3.0f);
-		g.setColour(Colours::black.withAlpha(0.8f));
-	}
-
-	g.drawText(itemName, itemBounds, Justification::left);
-}
-
-void TextEditorWithAutocompleteComponent::textEditorReturnKeyPressed(TextEditor& e)
-{
-	if(auto ac = getCurrentAutocomplete())
-		ac->setAndDismiss();
-}
-
-void TextEditorWithAutocompleteComponent::textEditorEscapeKeyPressed(TextEditor& e)
-{
-	if(currentAutocomplete != nullptr)
-		dismissAutocomplete();
-	else
-		currentAutocomplete = new Autocomplete(*this, itemsToShow);
-}
-
-bool TextEditorWithAutocompleteComponent::AutocompleteNavigator::keyPressed(const KeyPress& k, Component* originatingComponent)
-{
-    if(k == KeyPress::tabKey)
-    {
-        if(parent.currentAutocomplete != nullptr)
-			parent.dismissAutocomplete();
-
-	    parent.getTextEditor()->moveKeyboardFocusToSibling(true);
-        return true;
-    }
-
-    if(parent.currentAutocomplete == nullptr)
-		return false;
-
-	if(auto ac = parent.getCurrentAutocomplete())
-	{
-		if(k == KeyPress::upKey)
-			return ac->inc(false);
-		if(k == KeyPress::downKey)
-			return ac->inc(true);
-	}
-        
-	return false;
-}
-
-TextEditorWithAutocompleteComponent::Autocomplete* TextEditorWithAutocompleteComponent::getCurrentAutocomplete()
-{
-	return dynamic_cast<Autocomplete*>(currentAutocomplete.get());
-}
-
-bool TextEditorWithAutocompleteComponent::isAutocomplete(Component* c)
-{
-	return dynamic_cast<Autocomplete*>(c) != nullptr;
-}
-
-void ModulationDisplayValue::clipTo0To1()
-{
-	normalisedValue = jlimit(0.0, 1.0, normalisedValue);
-	addValue = jlimit(0.0, 1.0, scaledValue + addValue) - scaledValue;
-	modulationRange.setStart(jlimit(0.0, 1.0, modulationRange.getStart()));
-	modulationRange.setEnd(jlimit(0.0, 1.0, modulationRange.getEnd()));
-}
-
-String ValueToTextConverter::getTextForValue(double v) const
-{
-	if(!active)
-		return String(v, 0);
-
-	if(customConverter != nullptr)
-		return customConverter->getText(v);
-
-	if(!itemList.isEmpty())
-	{
-		auto idx = jlimit<int>(0, itemList.size(), roundToInt(v));
-		return itemList[idx];
-	}
-
-	if(valueToTextFunction)
-		return valueToTextFunction(v);
-
-	auto numDecimalPlaces = jlimit(0, 4, roundToInt(log10(stepSize) * -1.0));
-	String valueString(v, numDecimalPlaces);
-	valueString << suffix;
-	return valueString;
-}
-
-double ValueToTextConverter::getValueForText(const String& v) const
-{
-	if(!active)
-		return v.getDoubleValue();
-
-	if(customConverter != nullptr)
-		return customConverter->getValue(v);
-
-	if(!itemList.isEmpty())
-		return (double)itemList.indexOf(v);
-
-	if(textToValueFunction)
-		return textToValueFunction(v);
-
-	return v.getDoubleValue();
-}
-
-ValueToTextConverter ValueToTextConverter::createForOptions(const StringArray& options)
-{
-	ValueToTextConverter vtc;
-	vtc.active = true;
-	vtc.itemList = options;
-	return vtc;
-}
-
-ValueToTextConverter ValueToTextConverter::createForMode(const String& modeString)
-{
-	ValueToTextConverter vtc;
-		
-#define FUNC(x) if(modeString == #x) { vtc.active = true; vtc.valueToTextFunction = ConverterFunctions::x; vtc.textToValueFunction = InverterFunctions::x; }
-
-	FUNC(Frequency);
-	FUNC(Time);
-	FUNC(TempoSync);
-	FUNC(Pan);
-	FUNC(NormalizedPercentage);
-	FUNC(Decibel);
-	FUNC(Semitones);
-
-#undef FUNC
-
-	return vtc;
-}
-
-ValueToTextConverter ValueToTextConverter::fromString(const String& converterString)
-{
-	ValueToTextConverter vtc;
-
-	if(converterString.isNotEmpty())
-	{
-		if(getAvailableTextConverterModes().contains(converterString))
-			return createForMode(converterString);
-
-#if HI_ZSTD_INCLUDED
-			zstd::ZDefaultCompressor comp;
-
-			MemoryBlock mb;
-			mb.fromBase64Encoding(converterString);
-			ValueTree v;
-
-			comp.expand(mb, v);
-
-			vtc.active = (bool)v["active"];
-
-			
-
-			vtc.itemList = StringArray::fromLines(v["items"].toString().trim());
-			vtc.itemList.removeEmptyStrings();
-
-#define FUNC(x) if(v.getProperty("function", "").toString() == #x) { vtc.valueToTextFunction = ConverterFunctions::x; vtc.textToValueFunction = InverterFunctions::x; }
-			FUNC(Frequency);
-			FUNC(Time);
-			FUNC(TempoSync);
-			FUNC(Pan);
-			FUNC(NormalizedPercentage);
-#undef FUNC
-#else
-		// You haven't included zstd here...
-		jassertfalse;
-#endif
-	}
-		
-	return vtc;
-}
-
-ValueToTextConverter ValueToTextConverter::createForCustomClass(CustomConverter* c)
-{
-	ValueToTextConverter vtc;
-	vtc.active = true;
-	vtc.customConverter = c;
-	return vtc;
-}
-
-StringArray ValueToTextConverter::getAvailableTextConverterModes()
-{
-	return {
-		"Frequency",
-		"Time",
-		"TempoSync",
-		"Pan",
-		"NormalizedPercentage",
-		"Decibel",
-		"Semitones"
-	};
-}
-
-String ValueToTextConverter::toString() const
-{
-#if HI_ZSTD_INCLUDED
-		ValueTree v("ValueConverter");
-
-		if(customConverter != nullptr)
-		{
-			// custom converters can't be serialized!
-			jassertfalse;
-		}
-
-		if(!itemList.isEmpty())
-			v.setProperty("items", itemList.joinIntoString("\n"), nullptr);
-
-		v.setProperty("active", active, nullptr);
-
-		if(suffix.isNotEmpty())
-			v.setProperty("suffix", suffix, nullptr);
-		
-#define FUNC(x) if(valueToTextFunction == ConverterFunctions::x) v.setProperty("function", #x, nullptr);
-
-		FUNC(Frequency);
-		FUNC(Time);
-		FUNC(TempoSync);
-		FUNC(Pan);
-		FUNC(NormalizedPercentage);
-
-#undef FUNC
-
-		MemoryBlock mb;
-		zstd::ZDefaultCompressor comp;
-		comp.compress(v, mb);
-		return mb.toBase64Encoding();
-#else
-	// you need to include zstd...
-	jassertfalse;
-	return {};
-#endif
-}
-
-void TextEditorWithAutocompleteComponent::showAutocomplete(const String& currentText)
-{
-    if(useDynamicAutocomplete)
-    {
-        if(auto hd = dynamic_cast<Component*>(this)->findParentComponentOfClass<Parent>())
-            autocompleteItems = hd->getAutocompleteItems(getIdForAutocomplete());
-        else
-            autocompleteItems = {};
-    }
-    
-	if(!autocompleteItems.isEmpty() && currentAutocomplete == nullptr)
-	{
-		currentAutocomplete = new Autocomplete(*this, itemsToShow);
-	}
-	else
-	{
-		if(currentText.isEmpty())
-			currentAutocomplete = nullptr;
-		else if (auto ac = getCurrentAutocomplete())
-			ac->update(currentText);
-	}
-}
-
-void TextEditorWithAutocompleteComponent::dismissAutocomplete()
-{
-	stopTimer();
-#if JUCE_DEBUG
-    if(currentAutocomplete != nullptr)
-		currentAutocomplete->setVisible(false);
-#else
-    if(currentAutocomplete != nullptr)
-		Desktop::getInstance().getAnimator().fadeOut(currentAutocomplete, 150);
-#endif
-	currentAutocomplete = nullptr;
 }
 
 }

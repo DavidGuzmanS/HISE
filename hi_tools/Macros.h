@@ -35,6 +35,7 @@
 namespace juce
 {
 using ButtonListener = Button::Listener;
+using SliderListener = Slider::Listener;
 using ComboBoxListener = ComboBox::Listener;
 using TextEditorListener = TextEditor::Listener;
 using LabelListener = Label::Listener;
@@ -182,68 +183,54 @@ static Typeface::Ptr sourceCodeProBoldTypeFace = Typeface::createSystemTypefaceF
 
 class LinuxFontHandler
 {
-public:
+    public:
+
     LinuxFontHandler()
     {
-    #if USE_LATO_AS_DEFAULT
-        regularFontData = HiBinaryData::FrontendBinaryData::LatoRegular_ttf;
-        regularFontSize = HiBinaryData::FrontendBinaryData::LatoRegular_ttfSize;
-        boldFontData = HiBinaryData::FrontendBinaryData::LatoBold_ttf;
-        boldFontSize = HiBinaryData::FrontendBinaryData::LatoBold_ttfSize;
-    #else
-        regularFontData = HiBinaryData::FrontendBinaryData::oxygen_regular_ttf;
-        regularFontSize = HiBinaryData::FrontendBinaryData::oxygen_regular_ttfSize;
-        boldFontData = HiBinaryData::FrontendBinaryData::oxygen_bold_ttf;
-        boldFontSize = HiBinaryData::FrontendBinaryData::oxygen_bold_ttfSize;
-    #endif
+#if USE_LATO_AS_DEFAULT
+		Typeface::Ptr oxygenBoldTypeFace = Typeface::createSystemTypefaceFor(HiBinaryData::FrontendBinaryData::LatoBold_ttf, HiBinaryData::FrontendBinaryData::LatoBold_ttfSize);
+		Typeface::Ptr oxygenTypeFace = Typeface::createSystemTypefaceFor(HiBinaryData::FrontendBinaryData::LatoRegular_ttf, HiBinaryData::FrontendBinaryData::LatoRegular_ttfSize);
+#else
+		Typeface::Ptr oxygenBoldTypeFace = Typeface::createSystemTypefaceFor(HiBinaryData::FrontendBinaryData::oxygen_bold_ttf, HiBinaryData::FrontendBinaryData::oxygen_bold_ttfSize);
+		Typeface::Ptr oxygenTypeFace = Typeface::createSystemTypefaceFor(HiBinaryData::FrontendBinaryData::oxygen_regular_ttf, HiBinaryData::FrontendBinaryData::oxygen_regular_ttfSize);
+#endif
+
+        Typeface::Ptr sourceCodeProTypeFace = Typeface::createSystemTypefaceFor(HiBinaryData::FrontendBinaryData::SourceCodeProRegular_otf, HiBinaryData::FrontendBinaryData::SourceCodeProRegular_otfSize);
+        Typeface::Ptr sourceCodeProBoldTypeFace = Typeface::createSystemTypefaceFor(HiBinaryData::FrontendBinaryData::SourceCodeProBold_otf, HiBinaryData::FrontendBinaryData::SourceCodeProBold_otfSize);
+
+        globalFont = Font(oxygenTypeFace).withHeight(13.0f);
+        globalBoldFont = Font(oxygenBoldTypeFace).withHeight(14.0f);
+        monospaceFont = Font(sourceCodeProTypeFace).withHeight(14.0f);
+        monospaceBoldFont = Font(sourceCodeProBoldTypeFace).withHeight(14.0f);
     }
 
-    Font getGlobalFont()
+    Font globalFont;
+    Font globalBoldFont;
+    Font monospaceFont;
+    Font monospaceBoldFont;
+
+    class Instance
     {
-        return Font(getTypeface(typefaceRegular, regularFontData, regularFontSize)).withHeight(13.0f);
-    }
+    public:
 
-    Font getGlobalBoldFont()
-    {
-        return Font(getTypeface(typefaceBold, boldFontData, boldFontSize)).withHeight(14.0f);
-    }
+        Instance() {};
 
-    Font getGlobalMonospaceFont()
-    {
-        return Font(getTypeface(typefaceMono, HiBinaryData::FrontendBinaryData::SourceCodeProRegular_otf, HiBinaryData::FrontendBinaryData::SourceCodeProRegular_otfSize)).withHeight(14.0f);
-    }
+        Font getGlobalFont() {return data->globalFont;};
+        Font getGlobalBoldFont() {return data->globalBoldFont;};
+        Font getGlobalMonospaceFont() {return data->monospaceFont; }
+        Font getGlobalMonospaceBoldFont() { return data->monospaceBoldFont; }
 
-    Font getGlobalMonospaceBoldFont()
-    {
-        return Font(getTypeface(typefaceMonoBold, HiBinaryData::FrontendBinaryData::SourceCodeProBold_otf, HiBinaryData::FrontendBinaryData::SourceCodeProBold_otfSize)).withHeight(14.0f);
-    }
+    private:
 
-private:
-    Typeface::Ptr getTypeface(Typeface::Ptr& typeface, const void* data, size_t size)
-    {
-        if (typeface == nullptr)
-            typeface = Typeface::createSystemTypefaceFor(data, size);
-
-        return typeface;
-    }
-
-    const void* regularFontData;
-    size_t regularFontSize;
-    const void* boldFontData;
-    size_t boldFontSize;
-
-    Typeface::Ptr typefaceRegular;
-    Typeface::Ptr typefaceBold;
-    Typeface::Ptr typefaceMono;
-    Typeface::Ptr typefaceMonoBold;
+        SharedResourcePointer<LinuxFontHandler> data;
+    };
 };
 
-static std::unique_ptr<LinuxFontHandler> fontHandlerInstance;
 
-#define GLOBAL_FONT() (fontHandlerInstance ? fontHandlerInstance->getGlobalFont() : (fontHandlerInstance = std::make_unique<LinuxFontHandler>(), fontHandlerInstance->getGlobalFont()))
-#define GLOBAL_BOLD_FONT() (fontHandlerInstance ? fontHandlerInstance->getGlobalBoldFont() : (fontHandlerInstance = std::make_unique<LinuxFontHandler>(), fontHandlerInstance->getGlobalBoldFont()))
-#define GLOBAL_MONOSPACE_FONT() (fontHandlerInstance ? fontHandlerInstance->getGlobalMonospaceFont() : (fontHandlerInstance = std::make_unique<LinuxFontHandler>(), fontHandlerInstance->getGlobalMonospaceFont()))
-#define GLOBAL_BOLD_MONOSPACE_FONT() (fontHandlerInstance ? fontHandlerInstance->getGlobalMonospaceBoldFont() : (fontHandlerInstance = std::make_unique<LinuxFontHandler>(), fontHandlerInstance->getGlobalMonospaceBoldFont()))
+#define GLOBAL_FONT() (LinuxFontHandler::Instance().getGlobalFont())
+#define GLOBAL_BOLD_FONT() (LinuxFontHandler::Instance().getGlobalBoldFont())
+#define GLOBAL_MONOSPACE_FONT() (LinuxFontHandler::Instance().getGlobalMonospaceFont())
+#define GLOBAL_BOLD_MONOSPACE_FONT() (LinuxFontHandler::Instance().getGlobalMonospaceBoldFont())
 
 #else
 
@@ -552,16 +539,5 @@ private:
 #define HI_RASTER_SIZE 10
 #endif
 
-/** This is the maximum amount of modulators that a chain can have. Raise this if you need more. */
-#ifndef HISE_NUM_MODULATORS_PER_CHAIN
-#define HISE_NUM_MODULATORS_PER_CHAIN 64
-#endif
-
-/** This is the maximum amount of listener slots. This needs to be at least HISE_NUM_MODULATORS_PER_CHAIN but you can increase it manually
- *  if you hit that limitation.
- */
-#ifndef HISE_NUM_LISTENER_SLOTS
-#define HISE_NUM_LISTENER_SLOTS HISE_NUM_MODULATORS_PER_CHAIN
-#endif
 
 } // namespace hise

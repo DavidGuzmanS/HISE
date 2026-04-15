@@ -76,10 +76,8 @@ MidiPlayerEditor::MidiPlayerEditor(ProcessorEditor* p) :
 	getProcessor()->getMainController()->skin(currentPosition);
 	updateLabel();
 
-	auto md = getProcessor()->getMetadata();
-
 	addAndMakeVisible(currentTrack);
-	md.setup(currentTrack, getProcessor(), MidiPlayer::CurrentTrack);
+	currentTrack.setup(getProcessor(), MidiPlayer::CurrentTrack, "Track");
 	currentTrack.setTextWhenNoChoicesAvailable("No tracks");
 	currentTrack.setTextWhenNothingSelected("No tracks");
 
@@ -102,12 +100,12 @@ MidiPlayerEditor::MidiPlayerEditor(ProcessorEditor* p) :
 	recordButton.setRadioGroupId(1, dontSendNotification);
 
 	addAndMakeVisible(currentSequence);
-	md.setup(currentSequence, getProcessor(), MidiPlayer::CurrentSequence);
+	currentSequence.setup(getProcessor(), MidiPlayer::CurrentSequence, "Current Sequence");
 	currentSequence.setTextWhenNoChoicesAvailable("Nothing loaded");
 	currentSequence.setTextWhenNothingSelected("Nothing loaded");
 
 	addAndMakeVisible(loopButton);
-	md.setup(loopButton, getProcessor(), MidiPlayer::LoopEnabled);
+	loopButton.setup(getProcessor(), MidiPlayer::LoopEnabled, "Loop Enabled");
 
 	startTimer(50);
 

@@ -32,86 +32,65 @@
 
 namespace hise { using namespace juce;
 
-hise::ProcessorMetadata ModulatorSampler::createMetadata()
-{
-	using Par = ProcessorMetadata::ParameterMetadata;
-	using Mod = ProcessorMetadata::ModulationMetadata;
-	using Range = scriptnode::InvertableParameterRange;
 
-	return ModulatorSynth::createBaseMetadata(true)
-		.withStandardMetadata<ModulatorSampler>()
-		.withDescription("A disk-streaming sampler with sample maps, round robin, crossfade groups, and timestretching.")
-		.withComplexDataInterface(ExternalData::DataType::Table)
-		.withParameter(Par(PreloadSize)
-			.withId("PreloadSize")
-			.withDescription("Preload buffer size in samples for all loaded samples. Set to -1 to load the entire sample into memory.")
-			.withSliderMode(HiSlider::Discrete, Range(-1.0, 65536.0, 1.0))
-			.withDefault(8192.0f))
-		.withParameter(Par(BufferSize)
-			.withId("BufferSize")
-			.withDescription("Streaming buffer size in samples. Two buffers per voice are swapped between disk reading and audio output.")
-			.withSliderMode(HiSlider::Discrete, Range(512.0, 65536.0, 1.0))
-			.withDefault(4096.0f))
-		.withParameter(Par(VoiceAmount)
-			.withId("VoiceAmount")
-			.withDescription("The actual number of allocated voices for sample playback")
-			.withSliderMode(HiSlider::Discrete, Range(1.0, (double)NUM_POLYPHONIC_VOICES, 1.0))
-			.withDefault((float)NUM_POLYPHONIC_VOICES))
-		.withParameter(Par(RRGroupAmount)
-			.withId("RRGroupAmount")
-			.withDescription("Number of round-robin groups. Also used as a general mapping dimension for velocity layers or articulations.")
-			.withSliderMode(HiSlider::Discrete, Range(1.0, 128.0, 1.0))
-			.withDefault(1.0f))
-		.withParameter(Par(SamplerRepeatMode)
-			.withId("SamplerRepeatMode")
-			.withDescription("How the sampler handles retriggered notes on the same key")
-			.withValueList({ "Kill Note", "Note off", "Do nothing", "Kill Duplicate", "Kill Third" })
-			.withDefault(3.0f))
-		.withParameter(Par(PitchTracking)
-			.withId("PitchTracking")
-			.withDescription("Transposes playback pitch based on the MIDI note relative to the sample root note. Disable for drum samples.")
-			.asToggle()
-			.withDefault(1.0f))
-		.withParameter(Par(OneShot)
-			.withId("OneShot")
-			.withDescription("Plays the entire sample ignoring note-off events")
-			.asToggle()
-			.withDefault(0.0f))
-		.withParameter(Par(CrossfadeGroups)
-			.withId("CrossfadeGroups")
-			.withDescription("Plays all round-robin groups simultaneously and crossfades between them using the Group Fade modulation chain")
-			.asToggle()
-			.withDefault(0.0f))
-		.withParameter(Par(Purged)
-			.withId("Purged")
-			.withDescription("Memory management: Disabled keeps samples loaded, Enabled unloads all preload buffers, Lazy Load delays preloading until first trigger")
-			.withValueList({ "Disabled", "Enabled", "Lazy Load" }, 0.0f)
-			.withDefault(0.0f))
-		.withParameter(Par(Reversed)
-			.withId("Reversed")
-			.withDescription("Loads samples fully into the preload buffer and reverses the playback direction")
-			.asToggle()
-			.withDefault(0.0f))
-		.withParameter(Par(UseStaticMatrix)
-			.withId("UseStaticMatrix")
-			.withDescription("Prevents the routing matrix from resizing when loading a sample map with a different mic position count")
-			.asToggle()
-			.withDefault(0.0f))
-		.withParameter(Par(LowPassEnvelopeOrder)
-			.withId("LowPassEnvelopeOrder")
-			.withDescription("Filter order for the envelope follower low-pass filter, stored in multiples of 6 (0 = off, 6, 12, ...)")
-			.withSliderMode(HiSlider::Discrete, Range(0.0, 48.0, 6.0))
-			.withDefault(0.0f))
-		.withModulation(Mod(SampleStartModulation)
-			.withId("Sample Start")
-			.withDescription("Modulates the sample start position within each sample's SampleStartMod range. Voice-start-only, gain mode.")
-			.withConstrainer<VoiceStartModulatorFactoryType::Constrainer>()
-			.withMode(scriptnode::modulation::ParameterMode::ScaleOnly))
-		.withModulation(Mod(CrossFadeModulation)
-			.withId("Group Fade")
-			.withDescription("Crossfades between round-robin groups using the crossfade tables for dynamic layering"))
-		;
-}
+
+
+
+SET_DOCUMENTATION(ModulatorSampler)
+{
+	SET_DOC_NAME(ModulatorSampler);
+
+	addLine("A Sampler is a synthesiser which allows playback of samples.");
+	addLine("Features:");
+	addLine("- Disk Streaming with fast MemoryMappedFile reading");
+	addLine("- Looping with crossfades & sample start modulation");
+	addLine("- Round - Robin groups");
+	addLine("- Application - wide sample pool with reference counting to ensure minimal memory usage.");
+	addLine("- Different playback modes(pitch tracking / one shot, etc.)");
+
+	ADD_PARAMETER_DOC_WITH_NAME(PreloadSize, "Preload Size",
+		"The preload size in samples for all samples that are loaded into the sampler. " \
+		"If the preload size is `-1`, then the whole sample will be loaded into memory.");
+
+	ADD_PARAMETER_DOC_WITH_NAME(BufferSize, "Buffer Size",
+		"The buffer size of the streaming buffers (2 per voice) in samples.  " \
+		"The sampler uses two buffers which are swapped (one is used for reading from disk and one is used to supply the sampler with the audio data)");
+
+	ADD_PARAMETER_DOC_WITH_NAME(VoiceAmount, "Soft Limit", 
+		"The amount of voices that the sampler can play. ");
+
+	ADD_PARAMETER_DOC_WITH_NAME(RRGroupAmount, "RR Groups", 
+		"The number of groups that are cycled in a round robin manier. "\
+		"This is effectively just another dimension for mapping samples and " \
+		"can be used for many different purposes (handling round robins is just the default).");
+
+	ADD_PARAMETER_DOC_WITH_NAME(SamplerRepeatMode, "Retrigger",
+		"Determines how the sampler treats repeated notes.  "); 
+
+	ADD_PARAMETER_DOC(PitchTracking, 
+		"Enables pitch ratio modification for different notes than the root note. Disable this for drum samples.");
+
+	ADD_PARAMETER_DOC(OneShot, 
+		"Plays the whole sample (ignores the note off) if set to enabled.");
+
+	ADD_PARAMETER_DOC_WITH_NAME(CrossfadeGroups, "Group XF", 
+		"If enabled, the groups are played simultanously and can be crossfaded with the Group-Fade Modulation Chain.");
+
+	ADD_PARAMETER_DOC(Purged, 
+		"If *Enabled*, it will unload all preload buffers and deactivate the sample playback to save memory. The **Lazy load** option unloads all preload buffers and delays the preloading of a sample until it is triggered for the first time.");
+
+	ADD_PARAMETER_DOC(Reversed, 
+		"If this is true, the samples will be fully loaded into preload buffer and reversed");
+
+    ADD_PARAMETER_DOC(UseStaticMatrix,
+        "If this is true, then the routing matrix will not be resized when you load a sample map with another mic position amount.");
+
+	ADD_CHAIN_DOC(SampleStartModulation, "Sample Start", 
+		"Allows modification of the sample start if the sound allows this. The modulation range is depending on the *SampleStartMod* value of each sample.");
+
+	ADD_CHAIN_DOC(CrossFadeModulation, "Group Fade",
+		"Fades between the RR groups. This can be used for crossfading dynamics samples.");
+};
 
 
 ModulatorSampler::ModulatorSampler(MainController *mc, const String &id, int numVoices) :
@@ -158,6 +137,20 @@ syncVoiceHandler(false)
 
 	//enableAllocationFreeMessages(50);
 
+	parameterNames.add("PreloadSize");
+	parameterNames.add("BufferSize");
+	parameterNames.add("VoiceAmount");
+	parameterNames.add("RRGroupAmount");
+	parameterNames.add("SamplerRepeatMode");
+	parameterNames.add("PitchTracking");
+	parameterNames.add("OneShot");
+	parameterNames.add("CrossfadeGroups");
+	parameterNames.add("Purged");
+	parameterNames.add("Reversed");
+    parameterNames.add("UseStaticMatrix");
+	parameterNames.add("LowPassEnvelopeOrder");
+	parameterNames.add("Timestretching");
+
 	updateParameterSlots();
 
 	editorStateIdentifiers.add("SampleStartChainShown");
@@ -176,7 +169,7 @@ syncVoiceHandler(false)
 	sampleStartChain->setColour(JUCE_LIVE_CONSTANT_OFF(Colour(0xff5e8127)));
 	crossFadeChain->setColour(JUCE_LIVE_CONSTANT_OFF(Colour(0xff884b29)));
 
-	for (int i = 0; i < 128; i++) 
+	for (int i = 0; i < 127; i++) 
 		samplerDisplayValues.currentNotes[i] = 0;
 
 	setVoiceAmount(numVoices);
@@ -349,116 +342,6 @@ void ModulatorSampler::setNumChannels(int numNewChannels)
 
 }
 
-bool ModulatorSampler::setAllowReleaseStart(int eventId, bool shouldAllow)
-{
-#if HISE_SAMPLER_ALLOW_RELEASE_START
-	if(eventId == -1)
-	{
-		for(auto v: voices)
-		{
-			auto s = shouldAllow ? ModulatorSamplerVoice::ReleaseStartState::Enabled :
-								   ModulatorSamplerVoice::ReleaseStartState::AlwaysDisabled;
-
-			static_cast<ModulatorSamplerVoice*>(v)->setAllowReleaseStart(s);
-		}
-
-		return true;
-	}
-
-	for(auto av: activeVoices)
-	{
-		if(av->getCurrentHiseEvent().getEventId() == eventId)
-		{
-			auto s = shouldAllow ? ModulatorSamplerVoice::ReleaseStartState::Enabled :
-								   ModulatorSamplerVoice::ReleaseStartState::DisabledOnce;
-
-			static_cast<ModulatorSamplerVoice*>(av)->setAllowReleaseStart(s);
-			return true;
-		}
-	}
-#endif
-
-	return false;
-}
-
-void ModulatorSampler::handleSustainPedal(int midiChannel, bool isDown)
-{
-	ModulatorSynth::handleSustainPedal(midiChannel, isDown);
-
-#if HISE_SAMPLER_ALLOW_RELEASE_START
-	if(!isDown)
-	{
-		if(soundsHaveReleaseStart)
-		{
-			for (auto v : activeVoices)
-			{
-				if (!v->isPlayingChannel (midiChannel))
-					continue;
-
-                if ((v->isKeyDown() || v->isSostenutoPedalDown()))
-					continue;
-
-                auto s = static_cast<ModulatorSamplerSound*>(v->getCurrentlyPlayingSound().get());
-
-				if(s->getReferenceToSound()->isReleaseStartEnabled())
-					static_cast<ModulatorSamplerVoice*>(v)->jumpToRelease();
-			}
-		}
-	}
-#endif
-}
-
-void ModulatorSampler::setUseComplexGroupManager(bool shouldUseComplexGroupManager)
-{
-	auto usesComplexGroup = getComplexGroupManager() != nullptr;
-
-	if(usesComplexGroup != shouldUseComplexGroupManager)
-	{
-		LockHelpers::SafeLock sl(getMainController(), LockHelpers::Type::AudioLock);
-
-		if(shouldUseComplexGroupManager)
-			soundCollector = new ComplexGroupManager(&sounds, getMainController()->getGlobalUIUpdater());
-		else
-			soundCollector = nullptr;
-
-		if(auto gm = getComplexGroupManager())
-			gm->setSampler(this);
-
-#if USE_BACKEND || HI_ENABLE_EXPANSION_EDITING
-		auto enabled = (getComplexGroupManager() != nullptr) ? SampleEditHandler::ComplexGroupEvent::ComplexManagerEnabled :
-															   SampleEditHandler::ComplexGroupEvent::ComplexManagerDisabled;	
-		auto n = sendNotificationAsync;
-		
-		getSampleEditHandler()->complexGroupEventBroadcaster.sendMessage(n, enabled);
-#endif
-	}
-}
-
-const ModulatorSampler::ChannelData& ModulatorSampler::getChannelData(int index) const
-{
-	if (index >= 0 && index < getNumMicPositions())
-	{
-		return channelData[index];
-	}
-	else
-	{
-		jassertfalse;
-		return channelData[0];
-	}
-		
-}
-
-void ModulatorSampler::setMicEnabled(int channelIndex, bool channelIsEnabled) noexcept
-{
-	if (channelIndex >= NUM_MIC_POSITIONS || channelIndex < 0) return;
-
-	if(channelData[channelIndex].enabled != channelIsEnabled)
-	{
-		channelData[channelIndex].enabled = channelIsEnabled;
-		asyncPurger.triggerAsyncUpdate(); // will call refreshChannelsForSound asynchronously
-	}
-}
-
 int ModulatorSampler::getNumActiveGroups() const
 {
 	if (crossfadeGroups)
@@ -561,25 +444,6 @@ void ModulatorSampler::restoreFromValueTree(const ValueTree &v)
 
     loadAttribute(CrossfadeGroups, "CrossfadeGroups");
     loadAttribute(RRGroupAmount, "RRGroupAmount");
-	loadAttribute(LowPassEnvelopeOrder, "LowPassEnvelopeOrder");
-
-	auto groupData = v.getChildWithName(groupIds::Layers);
-
-	if(groupData.isValid())
-	{
-		getSampleMap()->setStoreComplexLayers(false);
-		setUseComplexGroupManager(groupData.isValid());
-
-		if (auto gm = getComplexGroupManager())
-		{
-			auto t = gm->getDataTree();
-
-			ComplexGroupManager::ScopedUpdateDelayer sds(*gm);
-
-			for (auto c : groupData)
-				t.addChild(c.createCopy(), -1, nullptr);
-		}
-	}
 
 	TimestretchOptions newOptions;
 	newOptions.restoreFromValueTree(v.getChildWithName(TimestretchOptions::getStaticId()));
@@ -608,7 +472,6 @@ ValueTree ModulatorSampler::exportAsValueTree() const
 	saveAttribute(Reversed, "Reversed");
 	v.setProperty("NumChannels", numChannels, nullptr);
     saveAttribute(UseStaticMatrix, "UseStaticMatrix");
-	saveAttribute(LowPassEnvelopeOrder, "LowPassEnvelopeOrder");
 
 	ValueTree channels("channels");
 
@@ -627,14 +490,6 @@ ValueTree ModulatorSampler::exportAsValueTree() const
 	for (int i = 0; i < 8; i++)
 	{
 		saveTable(getTableUnchecked(i), "Group" + String(i) + "Table");
-	}
-
-	if(!sampleMap->storeComplexLayers)
-	{
-		if(auto gm = getComplexGroupManager())
-		{
-			v.addChild(gm->getDataTree().createCopy(), -1, nullptr);
-		}
 	}
 
 	if (sampleMap->isUsingUnsavedValueTree())
@@ -780,16 +635,6 @@ void ModulatorSampler::prepareToPlay(double newSampleRate, int samplesPerBlock)
 
 		if (envelopeFilter != nullptr)
 			setEnableEnvelopeFilter();
-
-		if(auto gm = getComplexGroupManager())
-		{
-			PrepareSpecs ps;
-			ps.blockSize = samplesPerBlock;
-			ps.sampleRate = newSampleRate;
-			ps.numChannels = getMatrix().getNumSourceChannels();
-			ps.voiceIndex = nullptr;
-			gm->prepare(ps);
-		}
 	}
 }
 
@@ -1108,9 +953,7 @@ void ModulatorSampler::setDisplayedGroup(int index, bool shouldBeVisible, Modifi
 
 void ModulatorSampler::setSortByGroup(bool shouldSortByGroup)
 {
-	auto sortByGroup = dynamic_cast<GroupedRoundRobinCollector*>(soundCollector.get()) != nullptr;
-
-	if (shouldSortByGroup != sortByGroup)
+	if (shouldSortByGroup != (soundCollector != nullptr))
 	{
 		LockHelpers::SafeLock sl(getMainController(), LockHelpers::Type::AudioLock);
 
@@ -1399,10 +1242,9 @@ bool ModulatorSampler::soundCanBePlayed(ModulatorSynthSound *sound, int midiChan
 	const bool messageFits = ModulatorSynth::soundCanBePlayed(sound, midiChannel, midiNoteNumber, velocity);
 
 	if (!messageFits) return false;
-
-	jassert(getComplexGroupManager() == nullptr);
 	
-	auto soundGroup = (int)static_cast<ModulatorSamplerSound*>(sound)->getBitmask();
+	
+	auto soundGroup = static_cast<ModulatorSamplerSound*>(sound)->getRRGroup();
 
 	const bool rrGroupApplies = (!multiRRGroupState && (crossfadeGroups || multiRRGroupState.getSingleGroupIndex() == soundGroup)) ||
 								multiRRGroupState[soundGroup];
@@ -1449,7 +1291,7 @@ void ModulatorSampler::handleRetriggeredNote(ModulatorSynthVoice *voice)
 
 void ModulatorSampler::noteOff(const HiseEvent &m)
 {
-	if (!oneShotEnabled && !m.isIgnored())
+	if (!oneShotEnabled)
 	{
 #if HISE_SAMPLER_ALLOW_RELEASE_START
 		if(soundsHaveReleaseStart)
@@ -1458,9 +1300,6 @@ void ModulatorSampler::noteOff(const HiseEvent &m)
 			{
 				if(v->getCurrentHiseEvent().getEventId() == m.getEventId())
 				{
-					if(v->isSostenutoPedalDown() || v->isSustainPedalDown())
-						continue;
-
 					auto s = static_cast<ModulatorSamplerSound*>(v->getCurrentlyPlayingSound().get());
 
 					if(s->getReferenceToSound()->isReleaseStartEnabled())
@@ -1478,63 +1317,51 @@ void ModulatorSampler::noteOff(const HiseEvent &m)
 
 void ModulatorSampler::preHiseEventCallback(HiseEvent &m)
 {
-	if(soundCollector != nullptr)
-		soundCollector->preHiseEventCallback(m);
-
 	if (m.isNoteOnOrOff())
 	{
-		
-
 		if (m.isNoteOn())
 		{
+			if (useRoundRobinCycleLogic)
+			{
+				multiRRGroupState.bumpRoundRobin(rrGroupAmount);
+			}
+			else if (!eventIdsForGroupIndexes.isEmpty())
+			{
+				for(const auto& pending: eventIdsForGroupIndexes)
+				{
+					if(pending.first == m.getEventId())
+					{
+						memcpy(&multiRRGroupState, &pending.second, sizeof(MultiGroupState));
+						break;
+					}
+				}
+			}
+
 #if USE_BACKEND
+
+			getSampleEditHandler()->noteBroadcaster.sendMessage(sendNotificationAsync, m.getNoteNumber(), m.getVelocity());
+
+			if (lockRRGroup != -1)
+				multiRRGroupState.setSingleGroupIndex(lockRRGroup);
+
 			if (lockVelocity > 0)
 				m.setVelocity(lockVelocity);
 
-			getSampleEditHandler()->noteBroadcaster.sendMessage(sendNotificationAsync, m.getNoteNumber(), m.getVelocity());
-#endif
+			auto rrIndex = multiRRGroupState.getSingleGroupIndex();
 
-			if(soundCollector == nullptr)
+			jassert(rrIndex == getCurrentRRGroup());
+
+			if(isDisplayGroupFollowingRRGroup())
 			{
-				if (useRoundRobinCycleLogic)
-				{
-					multiRRGroupState.bumpRoundRobin(rrGroupAmount);
-				}
-				else if (!eventIdsForGroupIndexes.isEmpty())
-				{
-					for(const auto& pending: eventIdsForGroupIndexes)
-					{
-						if(pending.first == m.getEventId())
-						{
-							memcpy(&multiRRGroupState, &pending.second, sizeof(MultiGroupState));
-							break;
-						}
-					}
-				}
-
-	#if USE_BACKEND
-
-				if (lockRRGroup != -1)
-					multiRRGroupState.setSingleGroupIndex(lockRRGroup);
-
-				auto rrIndex = multiRRGroupState.getSingleGroupIndex();
-
-				jassert(rrIndex == getCurrentRRGroup());
-
-				if(isDisplayGroupFollowingRRGroup())
-				{
-					getSamplerDisplayValues().visibleGroups.clear();
-					getSamplerDisplayValues().visibleGroups.setBit(rrIndex-1);
-				}
-					
-
-				getSampleEditHandler()->groupBroadcaster.sendMessage(sendNotificationAsync, rrIndex, &getSamplerDisplayValues().visibleGroups);
-	#endif
-			
-				samplerDisplayValues.currentGroup = multiRRGroupState.getSingleGroupIndex();
+				getSamplerDisplayValues().visibleGroups.clear();
+				getSamplerDisplayValues().visibleGroups.setBit(rrIndex-1);
 			}
+				
 
-			
+			getSampleEditHandler()->groupBroadcaster.sendMessage(sendNotificationAsync, rrIndex, &getSamplerDisplayValues().visibleGroups);
+#endif
+		
+			samplerDisplayValues.currentGroup = multiRRGroupState.getSingleGroupIndex();
 		}
 
 		if (m.isNoteOn())
@@ -1559,32 +1386,14 @@ void ModulatorSampler::preHiseEventCallback(HiseEvent &m)
 	}
 }
 
-float* ModulatorSampler::calculateCrossfadeModulationValuesForVoice(int voiceIndex, int startSample, int numSamples, ModulatorSamplerSound::Bitmask group)
+float* ModulatorSampler::calculateCrossfadeModulationValuesForVoice(int voiceIndex, int startSample, int numSamples, int groupIndex)
 {
-	int groupIndex = -1;
+	// If we have set multiple groups to be active manually
+	// we want to use only as much tables as there are active groups...
+	if (multiRRGroupState)
+		groupIndex %= multiRRGroupState.getNumSetBits();
 
-	if(auto gm = getComplexGroupManager())
-	{
-		// The group parameter is zero based for backwards compatibility...
-		group += 1;
-
-		if(auto g = gm->getTableFadeValue(group))
-			groupIndex = g - 1;
-	}
-	else
-	{
-		// already zero based, just take the value and convert it to an int
-		groupIndex = (int)(group);
-
-		// If we have set multiple groups to be active manually
-		// we want to use only as much tables as there are active groups...
-		if (multiRRGroupState)
-			groupIndex %= multiRRGroupState.getNumSetBits();
-
-		if (groupIndex > 8) return nullptr;
-	}
-
-	
+	if (groupIndex > 8) return nullptr;
 
 	if (auto compressedValues = modChains[Chains::XFade].getWritePointerForManualExpansion(startSample))
 	{
@@ -1938,7 +1747,13 @@ void ModulatorSampler::setRRGroupAmount(int newGroupLimit)
 	rrGroupAmount = jmax(1, newGroupLimit);
 
 	allNotesOff(1, true);
-	
+
+	ModulatorSampler::SoundIterator sIter(this);
+	jassert(sIter.canIterate());
+
+	while (auto sound = sIter.getNextSound())
+		sound->setMaxRRGroupIndex(rrGroupAmount);
+
 	rrGroupGains.ensureStorageAllocated(rrGroupAmount);
 
 	for (int i = rrGroupGains.size(); i < rrGroupAmount; i++)

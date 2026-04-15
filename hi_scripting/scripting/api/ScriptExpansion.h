@@ -90,12 +90,6 @@ public:
 	/** Attaches a callback to automation changes. Pass a non-function as updateCallback to remove the callback for the given automation ID. */
 	void attachAutomationCallback(String automationId, var updateCallback, var isSynchronous);
 
-	/** Attaches a callback to the begin and end of parameter gestures. */
-	void setParameterGestureCallback(var callbackFunction);
-
-	/** Sends a parameter gesture change message to the host. Returns true if the parameter exists. */
-	bool sendParameterGesture(int automationType, int indexWithinType, bool gestureActive);
-	
 	/** Clears all attached callbacks. */
 	void clearAttachedCallbacks();
 
@@ -107,12 +101,7 @@ public:
 
 	/** Loads the default user preset (if it's defined in the project). */
 	void resetToDefaultUserPreset();
-
-	/** Sets the available group names for plugin parameter groups. */
-	void setPluginParameterGroupNames(var pluginParameterGroupNames);
-
-	/** Sets a custom sort function for the plugin parameter order. */
-	void setPluginParameterSortFunction(var customSortFunction);
+	
 
 	/** Creates an object containing the values for every automation ID. */
 	var createObjectForAutomationValues();
@@ -144,11 +133,13 @@ public:
 	ValueTree prePresetLoad(const ValueTree& dataToLoad, const File& fileToLoad) override;
 
 	void presetChanged(const File& newPreset) override;
-	void presetSaved(const File& newPreset) override;
-	void presetListUpdated() override;
-	void loadCustomUserPreset(const var& dataObject) override;
 
-	void onParameterGesture(bool startGesture, int parameterIndex) override;
+	void presetSaved(const File& newPreset) override;
+
+	void presetListUpdated() override;
+
+
+	void loadCustomUserPreset(const var& dataObject) override;
 
 	var saveCustomUserPreset(const String& presetName) override;
 
@@ -188,7 +179,6 @@ private:
 
 	WeakCallbackHolder customLoadCallback;
 	WeakCallbackHolder customSaveCallback;
-	WeakCallbackHolder parameterGestureCallback;
 	
 	ReferenceCountedArray<AttachedCallback> attachedCallbacks;
 
@@ -258,9 +248,6 @@ public:
 	/** Decompresses the samples and installs the .hxi / .hxp file. */
 	bool installExpansionFromPackage(var packageFile, var sampleDirectory);
 
-	/** Returns a meta data object from the .hr file */
-	var getMetaDataFromPackage(var packageFile);
-
 	/** Checks if the expansion is already installed and returns a reference to the expansion if it exists. */
 	var getExpansionForInstallPackage(var packageFile);
 
@@ -275,9 +262,9 @@ public:
 		return h.getCredentials().isObject();
 	}
 
-	String getEncryptionKey(const String& expansionId) const
+	String getEncryptionKey() const
 	{
-		return getMainController()->getExpansionHandler().getEncryptionKey(expansionId);
+		return getMainController()->getExpansionHandler().getEncryptionKey();
 	}
 
 	void expansionPackLoaded(Expansion* currentExpansion) override;
@@ -359,7 +346,7 @@ public:
 	Result initialise() override;
 	juce::BlowFish* createBlowfish();
 
-	static BlowFish* createBlowfishStatic(MainController* mc, const Identifier& expId);
+	static BlowFish* createBlowfish(MainController* mc);
 	static bool encryptIntermediateFile(MainController* mc, const File& f, File expansionRoot=File());
 
 	void extractUserPresetsIfEmpty(ValueTree encryptedTree, bool forceExtraction = false);
@@ -622,15 +609,6 @@ struct ScriptUnlocker : public juce::OnlineUnlockStatus,
 		/** Checks if the string contains the given substring. */
 		bool contains(String otherString);
 
-		/** Reloads the expansion list if the unlocker manages expansions. */
-		bool loadExpansionList();
-
-		/** Unlocks the given expansion IDs in HISE. */
-		bool unlockExpansionList(const var& expansionIdList);
-
-		/** Writes the expansion license key data to the location. */
-		var writeExpansionKeyFile(const String& keyData);
-
 		WeakCallbackHolder pcheck;
 		WeakCallbackHolder mcheck;
 
@@ -663,9 +641,7 @@ struct ScriptUnlocker : public juce::OnlineUnlockStatus,
 
 	String registeredMachineId;
 
-	File getExpansionListFile();
-
-	var getExpansionList();
+	
 
 	JUCE_DECLARE_WEAK_REFERENCEABLE(ScriptUnlocker);
 };

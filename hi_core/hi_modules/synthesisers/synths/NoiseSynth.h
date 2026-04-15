@@ -83,9 +83,7 @@ public:
 		numTestSignals
 	};
 
-	SET_PROCESSOR_NAME("Noise", "Noise Generator", "");
-
-	static ProcessorMetadata createMetadata();
+	SET_PROCESSOR_NAME("Noise", "Noise Generator", "A simple noise generator.");
 
 	NoiseSynth(MainController *mc, const String &id, int numVoices);
 
@@ -166,9 +164,7 @@ class SilentSynth : public ModulatorSynth
 {
 public:
 
-	SET_PROCESSOR_NAME("SilentSynth", "Silent Synth", "");
-
-	static ProcessorMetadata createMetadata();
+	SET_PROCESSOR_NAME("SilentSynth", "Silent Synth", "A sound generator that produces silence.");
 
 	SilentSynth(MainController *mc, const String &id, int numVoices);
 

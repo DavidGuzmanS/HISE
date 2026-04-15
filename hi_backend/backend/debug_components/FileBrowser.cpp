@@ -191,7 +191,7 @@ FileBrowser::FileBrowser(BackendRootWindow* rootWindow_) :
     rootWindow->getBackendProcessor()->workspaceBroadcaster.addListener(*this, FileBrowser::updateWorkspace, true);
     
     if(!rootWindow_->getBackendProcessor()->isFlakyThreadingAllowed())
-		ThreadStarters::startLow(&directorySearcher);
+       directorySearcher.startThread(3);
 
 	fileFilter = new HiseFileBrowserFilter();
 

@@ -88,8 +88,6 @@ public:
 
     void setFont(Font f);
 
-	void setUseFade(bool shouldUseFade) { useFade = shouldUseFade; }
-
 private:
 
     Font font;
@@ -98,7 +96,6 @@ private:
 
 	bool showIcon = true;
 	bool isFadingOut = false;
-	bool useFade = true;
 
 
 	int counterSinceLastTextChange;

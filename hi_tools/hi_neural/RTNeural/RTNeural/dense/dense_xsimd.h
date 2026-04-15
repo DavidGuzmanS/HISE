@@ -16,8 +16,6 @@ template <typename T>
 class Dense : public Layer<T>
 {
 public:
-    static constexpr bool dense_has_bias = true;
-
     /** Constructs a dense layer for a given input and output size. */
     Dense(int in_size, int out_size)
         : Layer<T>(in_size, out_size)
@@ -56,7 +54,9 @@ public:
         {
             xsimd::transform(input, &input[Layer<T>::in_size], weights[l].data(), prod.data(),
                 [](auto const& a, auto const& b)
-                { return a * b; });
+                {
+	                return a * b;
+                });
 
             auto sum = xsimd::reduce(prod.begin(), prod.begin() + Layer<T>::in_size, (T)0);
             out[l] = sum + bias[l];
@@ -120,7 +120,7 @@ private:
  * Static implementation of a fully-connected (dense) layer,
  * with no activation.
  */
-template <typename T, int in_sizet, int out_sizet, bool has_bias = true>
+template <typename T, int in_sizet, int out_sizet>
 class DenseT
 {
     using v_type = xsimd::simd_type<T>;
@@ -131,7 +131,6 @@ class DenseT
 public:
     static constexpr auto in_size = in_sizet;
     static constexpr auto out_size = out_sizet;
-    static constexpr bool dense_has_bias = has_bias;
 
     DenseT()
     {
@@ -139,11 +138,8 @@ public:
             for(int k = 0; k < in_size; ++k)
                 weights[k][i] = v_type((T)0.0);
 
-        RTNEURAL_IF_CONSTEXPR(has_bias)
-        {
-            for(int i = 0; i < v_out_size; ++i)
-                bias[i] = v_type((T)0.0);
-        }
+        for(int i = 0; i < v_out_size; ++i)
+            bias[i] = v_type((T)0.0);
 
         for(int i = 0; i < v_out_size; ++i)
             outs[i] = v_type((T)0.0);
@@ -159,34 +155,12 @@ public:
     RTNEURAL_REALTIME void reset() { }
 
     /** Performs forward propagation for this layer. */
-    template <bool b = has_bias>
-    RTNEURAL_REALTIME inline typename std::enable_if<b>::type forward(const v_type (&ins)[v_in_size]) noexcept
+    RTNEURAL_REALTIME inline void forward(const v_type (&ins)[v_in_size]) noexcept
     {
         static constexpr auto v_size_inner = std::min(v_size, in_size);
 
         for(int i = 0; i < v_out_size; ++i)
             outs[i] = bias[i];
-
-        T scalar_in alignas(RTNEURAL_DEFAULT_ALIGNMENT)[v_size] { (T)0 };
-        for(int k = 0; k < v_in_size; ++k)
-        {
-            ins[k].store_aligned(scalar_in);
-            for(int i = 0; i < v_out_size; ++i)
-            {
-                for(int j = 0; j < v_size_inner; ++j)
-                    outs[i] += scalar_in[j] * weights[k * v_size + j][i];
-            }
-        }
-    }
-
-    /** Performs forward propagation for this layer (no bias). */
-    template <bool b = has_bias>
-    RTNEURAL_REALTIME inline typename std::enable_if<!b>::type forward(const v_type (&ins)[v_in_size]) noexcept
-    {
-        static constexpr auto v_size_inner = std::min(v_size, in_size);
-
-        for(int i = 0; i < v_out_size; ++i)
-            outs[i] = v_type((T)0.0);
 
         T scalar_in alignas(RTNEURAL_DEFAULT_ALIGNMENT)[v_size] { (T)0 };
         for(int k = 0; k < v_in_size; ++k)
@@ -238,25 +212,16 @@ public:
      * Sets the layer bias from a given array of size
      * bias[out_size]
      */
-#if RTNEURAL_HAS_CPP17
-    template <bool b = has_bias>
-    RTNEURAL_REALTIME inline typename std::enable_if<b>::type setBias(const T* bias_vals)
-#else
-    RTNEURAL_REALTIME inline void setBias(const T* bias_vals)
-#endif
+    RTNEURAL_REALTIME void setBias(const T* b)
     {
         for(int i = 0; i < out_size; ++i)
-            bias[i / v_size] = set_value(bias[i / v_size], i % v_size, bias_vals[i]);
+            bias[i / v_size] = set_value(bias[i / v_size], i % v_size, b[i]);
     }
 
     v_type outs[v_out_size];
 
 private:
-#if RTNEURAL_HAS_CPP17
-    std::conditional_t<has_bias, v_type[v_out_size], Empty> bias;
-#else
     v_type bias[v_out_size];
-#endif
     v_type weights[in_size][v_out_size];
 };
 
@@ -264,8 +229,8 @@ private:
  * Static implementation of a fully-connected (dense) layer,
  * optimized for out_size=1.
  */
-template <typename T, int in_sizet, bool has_bias>
-class DenseT<T, in_sizet, 1, has_bias>
+template <typename T, int in_sizet>
+class DenseT<T, in_sizet, 1>
 {
     using v_type = xsimd::simd_type<T>;
     static constexpr auto v_size = (int)v_type::size;
@@ -274,7 +239,6 @@ class DenseT<T, in_sizet, 1, has_bias>
 public:
     static constexpr auto in_size = in_sizet;
     static constexpr auto out_size = 1;
-    static constexpr bool dense_has_bias = has_bias;
 
     DenseT()
     {
@@ -289,24 +253,13 @@ public:
 
     RTNEURAL_REALTIME void reset() { }
 
-    template <bool b = has_bias>
-    RTNEURAL_REALTIME inline typename std::enable_if<b>::type forward(const v_type (&ins)[v_in_size]) noexcept
+    RTNEURAL_REALTIME inline void forward(const v_type (&ins)[v_in_size]) noexcept
     {
         v_type y {};
         for(int k = 0; k < v_in_size; ++k)
             y += ins[k] * weights[k];
 
         outs[0] = v_type(xsimd::reduce_add(y) + bias);
-    }
-
-    template <bool b = has_bias>
-    RTNEURAL_REALTIME inline typename std::enable_if<!b>::type forward(const v_type (&ins)[v_in_size]) noexcept
-    {
-        v_type y {};
-        for(int k = 0; k < v_in_size; ++k)
-            y += ins[k] * weights[k];
-
-        outs[0] = v_type(xsimd::reduce_add(y));
     }
 
     RTNEURAL_REALTIME void setWeights(const std::vector<std::vector<T>>& newWeights)
@@ -333,24 +286,15 @@ public:
         }
     }
 
-#if RTNEURAL_HAS_CPP17
-    template <bool b = has_bias>
-    RTNEURAL_REALTIME inline typename std::enable_if<b>::type setBias(const T* bias_vals)
-#else
-    RTNEURAL_REALTIME inline void setBias(const T* bias_vals)
-#endif
+    RTNEURAL_REALTIME void setBias(const T* b)
     {
-        bias = bias_vals[0];
+        bias = b[0];
     }
 
     v_type outs[1];
 
 private:
-#if RTNEURAL_HAS_CPP17
-    std::conditional_t<has_bias, T, Empty> bias {};
-#else
-    T bias {};
-#endif
+    T bias;
     v_type weights[v_in_size];
 };
 
@@ -358,8 +302,8 @@ private:
  * Static implementation of a fully-connected (dense) layer,
  * optimized for in_size=1.
  */
-template <typename T, int out_sizet, bool has_bias>
-class DenseT<T, 1, out_sizet, has_bias>
+template <typename T, int out_sizet>
+class DenseT<T, 1, out_sizet>
 {
     using v_type = xsimd::simd_type<T>;
     static constexpr auto v_size = (int)v_type::size;
@@ -368,18 +312,14 @@ class DenseT<T, 1, out_sizet, has_bias>
 public:
     static constexpr auto in_size = 1;
     static constexpr auto out_size = out_sizet;
-    static constexpr bool dense_has_bias = has_bias;
 
     DenseT()
     {
         for(int i = 0; i < v_out_size; ++i)
             weights[i] = v_type((T)0.0);
 
-        RTNEURAL_IF_CONSTEXPR(has_bias)
-        {
-            for(int i = 0; i < v_out_size; ++i)
-                bias[i] = v_type((T)0.0);
-        }
+        for(int i = 0; i < v_out_size; ++i)
+            bias[i] = v_type((T)0.0);
 
         for(int i = 0; i < v_out_size; ++i)
             outs[i] = v_type((T)0.0);
@@ -395,24 +335,13 @@ public:
     RTNEURAL_REALTIME void reset() { }
 
     /** Performs forward propagation for this layer. */
-    template <bool b = has_bias>
-    RTNEURAL_REALTIME inline typename std::enable_if<b>::type forward(const v_type (&ins)[1]) noexcept
+    RTNEURAL_REALTIME inline void forward(const v_type (&ins)[1]) noexcept
     {
         for(int i = 0; i < v_out_size; ++i)
             outs[i] = bias[i];
 
-        const auto in = ins[0].get(0);
         for(int i = 0; i < v_out_size; ++i)
-            outs[i] += in * weights[i];
-    }
-
-    /** Performs forward propagation for this layer (no bias). */
-    template <bool b = has_bias>
-    RTNEURAL_REALTIME inline typename std::enable_if<!b>::type forward(const v_type (&ins)[1]) noexcept
-    {
-        const auto in = ins[0].get(0);
-        for(int i = 0; i < v_out_size; ++i)
-            outs[i] = in * weights[i];
+            outs[i] += ins[0] * weights[i];
     }
 
     /**
@@ -443,25 +372,16 @@ public:
      * Sets the layer bias from a given array of size
      * bias[out_size]
      */
-#if RTNEURAL_HAS_CPP17
-    template <bool b = has_bias>
-    RTNEURAL_REALTIME inline typename std::enable_if<b>::type setBias(const T* bias_vals)
-#else
-    RTNEURAL_REALTIME inline void setBias(const T* bias_vals)
-#endif
+    RTNEURAL_REALTIME void setBias(const T* b)
     {
         for(int i = 0; i < out_size; ++i)
-            bias[i / v_size] = set_value(bias[i / v_size], i % v_size, bias_vals[i]);
+            bias[i / v_size] = set_value(bias[i / v_size], i % v_size, b[i]);
     }
 
     v_type outs[v_out_size];
 
 private:
-#if RTNEURAL_HAS_CPP17
-    std::conditional_t<has_bias, v_type[v_out_size], Empty> bias;
-#else
     v_type bias[v_out_size];
-#endif
     v_type weights[v_out_size];
 };
 

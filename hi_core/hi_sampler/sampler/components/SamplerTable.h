@@ -106,18 +106,8 @@ public:
 	{
 		auto index = s->getId();
 
-		if(table->useComplexGroupManager && id == SampleIds::RRGroup)
-		{
-			for(int i = table->complexGroupOffset; i < table->columnIds.size(); i++)
-			{
-				table->refreshPropertyForRow(index, table->columnIds[i]);
-			}
-		}
-		else
-		{
-			if(SampleIds::Helpers::isMapProperty(id))
-				table->refreshPropertyForRow(index, id);
-		}
+		if(SampleIds::Helpers::isMapProperty(id))
+			table->refreshPropertyForRow(index, id);
 	}
 
 	void sampleMapWasChanged(PoolReference newSampleMap) override

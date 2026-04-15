@@ -302,26 +302,9 @@ VoiceStartModulator(mc, id, numVoices, m),
 Modulation(m),
 GlobalModulator(mc)
 {
+	parameterNames.add("UseTable");
+	parameterNames.add("Inverted");
 	updateParameterSlots();
-}
-
-hise::ProcessorMetadata GlobalVoiceStartModulator::createMetadata()
-{
-	return ProcessorMetadata(getClassType())
-		.withPrettyName("Global Voice Start Modulator")
-		.withDescription("Connects to a global VoiceStartModulator in a GlobalModulatorContainer, allowing voice-start modulation to be shared across multiple targets.")
-		.withType<hise::VoiceStartModulator>()
-		.withComplexDataInterface(ExternalData::DataType::Table)
-		.withParameter(ProcessorMetadata::ParameterMetadata(GlobalModulator::Parameters::UseTable)
-			.withId("UseTable")
-			.withDescription("Enables a lookup table to transform the incoming modulation value")
-			.asToggle()
-			.withDefault(0.0f))
-		.withParameter(ProcessorMetadata::ParameterMetadata(GlobalModulator::Parameters::Inverted)
-			.withId("Inverted")
-			.withDescription("Inverts the modulation signal (1 - value)")
-			.asToggle()
-			.withDefault(0.0f));
 }
 
 GlobalVoiceStartModulator::~GlobalVoiceStartModulator()
@@ -399,26 +382,9 @@ GlobalStaticTimeVariantModulator::GlobalStaticTimeVariantModulator(MainControlle
 	Modulation(m),
 	GlobalModulator(mc)
 {
+	parameterNames.add("UseTable");
+	parameterNames.add("Inverted");
 	updateParameterSlots();
-}
-
-hise::ProcessorMetadata GlobalStaticTimeVariantModulator::createMetadata()
-{
-	return ProcessorMetadata(getClassType())
-		.withPrettyName("Global Static Time Variant Modulator")
-		.withDescription("Captures the current value of a global TimeVariantModulator at voice start, creating a constant per-voice modulation based on the LFO/envelope state at note-on.")
-		.withType<hise::VoiceStartModulator>()
-		.withComplexDataInterface(ExternalData::DataType::Table)
-		.withParameter(ProcessorMetadata::ParameterMetadata(GlobalModulator::Parameters::UseTable)
-			.withId("UseTable")
-			.withDescription("Enables a lookup table to transform the incoming modulation value")
-			.asToggle()
-			.withDefault(0.0f))
-		.withParameter(ProcessorMetadata::ParameterMetadata(GlobalModulator::Parameters::Inverted)
-			.withId("Inverted")
-			.withDescription("Inverts the modulation signal (1 - value)")
-			.asToggle()
-			.withDefault(0.0f));
 }
 
 
@@ -496,26 +462,9 @@ GlobalModulator(mc),
 inputValue(1.0f),
 currentValue(1.0f)
 {
+	parameterNames.add("UseTable");
+	parameterNames.add("Inverted");
 	updateParameterSlots();
-}
-
-hise::ProcessorMetadata GlobalTimeVariantModulator::createMetadata()
-{
-	return ProcessorMetadata(getClassType())
-		.withPrettyName("Global Time Variant Modulator")
-		.withDescription("Shares a global TimeVariantModulator signal across multiple targets, allowing real-time continuous modulation from a single source.")
-		.withType<hise::TimeVariantModulator>()
-		.withComplexDataInterface(ExternalData::DataType::Table)
-		.withParameter(ProcessorMetadata::ParameterMetadata(GlobalModulator::Parameters::UseTable)
-			.withId("UseTable")
-			.withDescription("Enables a lookup table to transform the incoming modulation value")
-			.asToggle()
-			.withDefault(0.0f))
-		.withParameter(ProcessorMetadata::ParameterMetadata(GlobalModulator::Parameters::Inverted)
-			.withId("Inverted")
-			.withDescription("Inverts the modulation signal (1 - value)")
-			.asToggle()
-			.withDefault(0.0f));
 }
 
 void GlobalTimeVariantModulator::restoreFromValueTree(const ValueTree &v)
@@ -628,27 +577,9 @@ GlobalEnvelopeModulator::GlobalEnvelopeModulator(MainController *mc, const Strin
 	Modulation(m),
 	GlobalModulator(mc)
 {
+	parameterNames.add("UseTable");
+	parameterNames.add("Inverted");
 	updateParameterSlots();
-}
-
-hise::ProcessorMetadata GlobalEnvelopeModulator::createMetadata()
-{
-	return EnvelopeModulator::createBaseMetadata()
-		.withId(getClassType())
-		.withPrettyName("Global Envelope Modulator")
-		.withDescription("Connects to a global EnvelopeModulator in a GlobalModulatorContainer, allowing envelope modulation to be shared across multiple targets.")
-		.withType<hise::EnvelopeModulator>()
-		.withComplexDataInterface(ExternalData::DataType::Table)
-		.withParameter(ProcessorMetadata::ParameterMetadata(EnvelopeModulator::Parameters::numParameters + GlobalModulator::Parameters::UseTable)
-			.withId("UseTable")
-			.withDescription("Enables a lookup table to transform the incoming modulation value")
-			.asToggle()
-			.withDefault(0.0f))
-		.withParameter(ProcessorMetadata::ParameterMetadata(EnvelopeModulator::Parameters::numParameters + GlobalModulator::Parameters::Inverted)
-			.withId("Inverted")
-			.withDescription("Inverts the modulation signal (1 - value)")
-			.asToggle()
-			.withDefault(0.0f));
 }
 
 void GlobalEnvelopeModulator::restoreFromValueTree(const ValueTree &v)
@@ -677,14 +608,6 @@ hise::ProcessorEditorBody * GlobalEnvelopeModulator::createEditor(ProcessorEdito
 
 void GlobalEnvelopeModulator::setInternalAttribute(int parameterIndex, float newValue)
 {
-	if(parameterIndex < EnvelopeModulator::Parameters::numParameters)
-	{
-		EnvelopeModulator::setInternalAttribute(parameterIndex, newValue);
-		return;
-	}
-
-	parameterIndex -= EnvelopeModulator::Parameters::numParameters;
-
 	switch (parameterIndex)
 	{
 	case UseTable:			useTable = (newValue > 0.5f); break;
@@ -695,13 +618,6 @@ void GlobalEnvelopeModulator::setInternalAttribute(int parameterIndex, float new
 
 float GlobalEnvelopeModulator::getAttribute(int parameterIndex) const
 {
-	if(parameterIndex < EnvelopeModulator::Parameters::numParameters)
-	{
-		return EnvelopeModulator::getAttribute(parameterIndex);
-	}
-
-	parameterIndex -= EnvelopeModulator::Parameters::numParameters;
-
 	switch (parameterIndex)
 	{
 	case UseTable:			return useTable ? 1.0f : 0.0f;
@@ -714,19 +630,11 @@ float GlobalEnvelopeModulator::startVoice(int voiceIndex)
 {
 	if (isConnected())
 	{
-		auto ownerSynth = static_cast<ModulatorSynth*>(getParentProcessor(true));
-		auto ownerVoice = static_cast<ModulatorSynthVoice*>(ownerSynth->getVoice(voiceIndex));
-		currentEvents[voiceIndex] = ownerVoice->getCurrentHiseEvent();
-
-		envelopeIndex = getConnectedContainer()->getEnvelopeIndex(getOriginalModulator());
-
 		return 0.0f;
 	}
 	else
 	{
 		active[voiceIndex] = true;
-		currentEvents[voiceIndex] = HiseEvent();
-		
 		return getInitialValue();
 	}
 }
@@ -746,10 +654,7 @@ bool GlobalEnvelopeModulator::isPlaying(int voiceIndex) const
 {
 	if (isConnected())
 	{
-		auto currentEvent = currentEvents[voiceIndex];
-		return getConnectedContainer()->isEnvelopePlaying(envelopeIndex, currentEvent);
-
-		//return static_cast<const EnvelopeModulator*>(getOriginalModulator())->isPlaying(voiceIndex);
+		return static_cast<const EnvelopeModulator*>(getOriginalModulator())->isPlaying(voiceIndex);
 	}
 	else
 	{
@@ -767,8 +672,6 @@ void GlobalEnvelopeModulator::calculateBlock(int startSample, int numSamples)
 	if (isConnected())
 	{
 		auto voiceIndex = polyManager.getCurrentVoice();
-		auto currentEvent = currentEvents[voiceIndex];
-
 
 		if (static_cast<ModulatorSynth*>(getParentProcessor(true))->isInGroup())
 		{
@@ -779,7 +682,7 @@ void GlobalEnvelopeModulator::calculateBlock(int startSample, int numSamples)
 		
 		if (useTable)
 		{
-			const float *data = getConnectedContainer()->getEnvelopeValuesForModulator(envelopeIndex, startSample, currentEvent);
+			const float *data = getConnectedContainer()->getEnvelopeValuesForModulator(getOriginalModulator(), startSample, voiceIndex);
 
 			if (data != nullptr)
 			{
@@ -805,17 +708,10 @@ void GlobalEnvelopeModulator::calculateBlock(int startSample, int numSamples)
 
 				return;
 			}
-			else
-			{
-				auto v = table->getInterpolatedValue(0.0f, dontSendNotification);
-
-				FloatVectorOperations::fill(internalBuffer.getWritePointer(0, startSample), v, numSamples);
-				setOutputValue(v);
-			}
 		}
 		else
 		{
-			if (auto src = getConnectedContainer()->getEnvelopeValuesForModulator(envelopeIndex, startSample, currentEvent))
+			if (auto src = getConnectedContainer()->getEnvelopeValuesForModulator(getOriginalModulator(), startSample, voiceIndex))
 			{
 				FloatVectorOperations::copy(internalBuffer.getWritePointer(0, startSample), src, numSamples);
 				//invertBuffer(startSample, numSamples);
@@ -823,11 +719,6 @@ void GlobalEnvelopeModulator::calculateBlock(int startSample, int numSamples)
 				setOutputValue(internalBuffer.getSample(0, startSample));
 
 				return;
-			}
-			else
-			{
-				FloatVectorOperations::fill(internalBuffer.getWritePointer(0, startSample), 0.0f, numSamples);
-				setOutputValue(0.0f);
 			}
 		}
 	}
@@ -839,27 +730,6 @@ void GlobalEnvelopeModulator::calculateBlock(int startSample, int numSamples)
 	}
 
 	
-}
-
-NoGlobalsConstrainer::NoGlobalsConstrainer()
-{
-	illegalTypes.add(GlobalEnvelopeModulator::getClassType());
-	illegalTypes.add(GlobalVoiceStartModulator::getClassType());
-	illegalTypes.add(GlobalTimeVariantModulator::getClassType());
-	illegalTypes.add(GlobalStaticTimeVariantModulator::getClassType());
-}
-
-hise::ProcessorMetadata::WildcardFilterList NoGlobalsConstrainer::getWildcard()
-{
-	return {
-		{
-			ProcessorMetadataIds::Modulator,
-			makeNegativeFilterWildcard<GlobalEnvelopeModulator,
-									   GlobalVoiceStartModulator,
-									   GlobalTimeVariantModulator,
-									   GlobalStaticTimeVariantModulator>()
-		}
-	};
 }
 
 } // namespace hise

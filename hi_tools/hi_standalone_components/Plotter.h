@@ -51,7 +51,6 @@ class ScriptContentComponent;
 */
 class Plotter    : public Component,
 				   public RingBufferComponentBase,
-				   public SimpleRingBuffer::WriterBase,
 				   public SettableTooltipClient
 {
 public:
@@ -108,10 +107,6 @@ public:
 
 private:
 	
-	// HACK: We need another ref-counted pointer to the ring buffer because a single
-	// reference alone will not cause the readBuffer to be transformed.
-	SimpleRingBuffer::Ptr rb2;
-
 	hise::SimpleReadWriteLock deleteLock;
 
 	CleanupFunction cleanupFunction;
@@ -121,6 +116,7 @@ private:
 	void rebuildPath();
 
 	AudioSampleBuffer displayBuffer;
+
 	Path drawPath;
 
 	Point<int> popupPosition;

@@ -57,6 +57,10 @@ struct DspHelpers
 
 	/** Returns a ParameterCallback with the given range. */
 
+#if 0
+	static ParameterCallback getFunctionFrom0To1ForRange(InvertableParameterRange r, const ParameterCallback& originalFunction);
+#endif
+
 	forcedinline static double findPeak(const float* data, int numSamples)
 	{
 		auto r = FloatVectorOperations::findMinAndMax(data, numSamples);

@@ -62,9 +62,7 @@ class StereoEffect: public VoiceEffectProcessor
 {
 public:
 
-	SET_PROCESSOR_NAME("StereoFX", "Stereo FX", "")
-
-	static ProcessorMetadata createMetadata();
+	SET_PROCESSOR_NAME("StereoFX", "Stereo FX", "A polyphonic stereo panner.");
 
 	enum InternalChains
 	{
@@ -75,8 +73,8 @@ public:
 	/** The parameters */
 	enum Parameters
 	{
-		Pan = 0,
-		Width
+		Pan = 0, ///< the balance of the effect. If you want to modulate this parameter, set it to the biggest value and add Modulators to the Chain.
+		Width ///< the stereo width using a M/S matrix
 	};
 
 	enum EditorStates
@@ -87,12 +85,10 @@ public:
 
 	StereoEffect(MainController *mc, const String &uid, int numVoices);;
 
-	const bool metadataInitialised = false;
-
 	float getAttribute(int parameterIndex) const override;
 	void setInternalAttribute(int parameterIndex, float newValue) override;;
-	ModulationDisplayValue::QueryFunction::Ptr getModulationQueryFunction(int parameterIndex) const override;
-
+	float getDefaultValue(int parameterIndex) const override;;
+	
 	void restoreFromValueTree(const ValueTree &v) override;;
 	ValueTree exportAsValueTree() const override;
 

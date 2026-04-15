@@ -126,22 +126,11 @@ PopupIncludeEditor::PopupIncludeEditor(JavascriptProcessor *s, const File &fileT
 
 	addEditor(externalFile->getFileDocument(), isJavascript);
 
-	
-
-	
+	if (externalFile != nullptr && !isJavascript)
+		externalFile->getRuntimeErrorBroadcaster().addListener(*this, runTimeErrorsOccured);
 
 	addButtonAndCompileLabel();
 	refreshAfterCompilation(JavascriptProcessor::SnippetResult(s->getLastErrorMessage(), 0));
-
-	if (externalFile != nullptr && !isJavascript)
-		externalFile->getRuntimeErrorBroadcaster().addListener(*this, runTimeErrorsOccured);
-	if(isJavascript)
-	{
-		jp->runtimeErrorBroadcaster.addListener(*this, [](PopupIncludeEditor& e, const String& errorMessage)
-		{
-			e.setError(errorMessage.isEmpty() ? Result::ok() : Result::fail(errorMessage));
-		});
-	}
 
 	for (int i = 0; i < jp->getNumWatchedFiles(); i++)
 	{
@@ -171,34 +160,6 @@ PopupIncludeEditor::PopupIncludeEditor(JavascriptProcessor* s, const Identifier 
 	addEditor(d, true);
 	addButtonAndCompileLabel();
 
-	jp->runtimeErrorBroadcaster.addListener(*this, [](PopupIncludeEditor& e, const String& errorMessage)
-	{
-		if(errorMessage.isNotEmpty())
-		{
-			auto m = errorMessage.upToFirstOccurrenceOf("{{", false, false);
-			auto encodedState = errorMessage.fromFirstOccurrenceOf("{{", false, false).upToFirstOccurrenceOf("}}", false, false);
-			auto pId = HiseJavascriptEngine::RootObject::CodeLocation::Helpers::getProcessorId(encodedState);
-
-			DebugableObject::Location loc;
-			loc.charNumber = HiseJavascriptEngine::RootObject::CodeLocation::Helpers::getCharNumberFromBase64String(encodedState);
-			loc.fileName = HiseJavascriptEngine::RootObject::CodeLocation::Helpers::getFileName(encodedState);
-			if(loc.fileName.isEmpty())
-				loc.fileName = "onInit";
-
-			if(e.callback.toString() == loc.fileName)
-			{
-				CodeDocument::Position pos(e.doc->getCodeDocument(), loc.charNumber);
-
-				auto line = pos.getLineNumber() + 1;
-				auto col = pos.getIndexInLine();
-
-				String mclError = "Line ";
-				mclError << line << "(" << col << "): " << m;
-				e.editor->editor.setError(mclError);
-			}
-		}
-	});
-
     dynamic_cast<Processor*>(jp.get())->getMainController()->addScriptListener(this);
     
 	refreshAfterCompilation(JavascriptProcessor::SnippetResult(s->getLastErrorMessage(), 0));
@@ -210,14 +171,9 @@ struct JavascriptLanguageManager : public mcl::LanguageManager
 		jp(jp_),
         callback(callback_)
 	{
-		jp->heatmapManager.heatmapBroadcaster.addListener(ed, [](mcl::TextEditor& ed, DebugInformationBase::Ptr info, const std::map<int, double>* heatmap)
-		{
-			ed.setHeatMap(info, heatmap);
-		});
-
         jp->inplaceBroadcaster.addListener(ed, [](mcl::TextEditor& ed, Identifier, int)
         {
-			ed.rebuildInplaceDebugValues();
+            ed.repaint();
         });
     };
 
@@ -230,15 +186,15 @@ struct JavascriptLanguageManager : public mcl::LanguageManager
 
     Identifier getLanguageId() const override { return mcl::LanguageIds::HiseScript; }
     
-    bool getInplaceDebugValues(InplaceDebugValue::List& values) const override
+    bool getInplaceDebugValues(Array<InplaceDebugValue>& values) const override
     {
-		auto sn = jp->getSnippetOrExternalFile(callback);
+		auto sn = jp->getSnippet(callback);
 		
 		for(auto& ip: jp->inplaceValues)
 		{
-			ip->init();
+			ip.init();
 
-			if(ip->location.getOwner() == sn)
+			if(ip.location.getOwner() == sn)
 			{
 				values.add(ip);
 			}
@@ -286,8 +242,6 @@ struct JavascriptLanguageManager : public mcl::LanguageManager
 			ADD_HS_SNIPPET("for (...)", "for($LOOP_VAR$ = 0; $LOOP_VAR$ < 10; $LOOP_VAR$++)\n{\n\t$// loop body$\n}",
 				           "A simple for loop");
 			ADD_HS_SNIPPET("tr (...)", "Console.print(trace($data$));", "A shortcut for printing something to the console using `trace`");
-			ADD_HS_SNIPPET("smp (...)", "Console.sample($ID$, $VALUE$);", "A shortcut for the debug session sampling command");
-			ADD_HS_SNIPPET("pr (...)", "..if(PROFILE):profile(\"$TEXT$\");", "A shortcut for adding scoped profiling code");
 
 			ADD_HS_SNIPPET("inline1 (...)", "inline function $functionName$($args1$)\n{\n\t$// body$\n};",
 				           "A shortcut for a inline function definition with a single argument");
@@ -421,7 +375,53 @@ void PopupIncludeEditor::addButtonAndCompileLabel()
 void PopupIncludeEditor::refreshAfterCompilation(const JavascriptProcessor::SnippetResult& r)
 {
     checkUnreferencedExternalFile();
-	setError(r.r);
+    
+	bottomBar->setError(r.r.getErrorMessage());
+
+	if (auto asmcl = dynamic_cast<mcl::FullEditor*>(editor.get()))
+	{
+		if (!r.r.wasOk())
+		{
+			auto errorMessage = r.r.getErrorMessage();
+
+			auto secondLine = errorMessage.fromFirstOccurrenceOf("\n", false, false).substring(1).trim();
+
+			auto fileName = getFile().getFileName();
+
+			bool isSameFile = true;
+
+			if (!secondLine.startsWith(callback.toString()))
+				isSameFile = false;
+
+			if(fileName.isNotEmpty() && secondLine.contains(fileName))
+				isSameFile = true;
+
+			if (fileName.isEmpty() && secondLine.contains(".js"))
+				isSameFile = false;
+
+			if (secondLine.isEmpty())
+				isSameFile = true;
+
+			if (!isSameFile)
+			{
+				asmcl->editor.clearWarningsAndErrors();
+				return;
+			}
+
+			auto message = errorMessage.upToFirstOccurrenceOf("{", false, false);
+			auto line = errorMessage.fromFirstOccurrenceOf("Line ", false, false).getIntValue();
+			auto col = errorMessage.fromFirstOccurrenceOf("column ", false, false).getIntValue();
+
+			String mclError = "Line ";
+			mclError << line << "(" << col << "): " << message;
+
+			asmcl->editor.setError(mclError);
+		}
+		else
+		{
+			asmcl->editor.clearWarningsAndErrors();
+		}
+	}
 }
 
 PopupIncludeEditor::~PopupIncludeEditor()
@@ -478,14 +478,7 @@ bool PopupIncludeEditor::keyPressed(const KeyPress& key)
 		jassertfalse;
 		return true;
 	}
-
-#if USE_BACKEND
-	if (TopLevelWindowWithKeyMappings::matches(this, key, TextEditorShortcuts::shadow_parse))
-	{
-		shadowParse();
-		return true;
-	}
-#endif
+	
 
 	return false;
 }
@@ -605,10 +598,6 @@ void PopupIncludeEditor::initKeyPresses(Component* root)
     TopLevelWindowWithKeyMappings::addShortcut(root, cat, TextEditorShortcuts::goto_undo, "Undo Goto", KeyPress(KeyPress::F12Key, ModifierKeys::commandModifier, 0));
     
     TopLevelWindowWithKeyMappings::addShortcut(root, cat, TextEditorShortcuts::goto_redo, "Redo Goto", KeyPress(KeyPress::F12Key, ModifierKeys::commandModifier | ModifierKeys::shiftModifier, 0));
-
-#if USE_BACKEND
-	TopLevelWindowWithKeyMappings::addShortcut(root, cat, TextEditorShortcuts::shadow_parse, "Shadow Parse", KeyPress(KeyPress::F7Key));
-#endif
 }
 
 File PopupIncludeEditor::getFile() const
@@ -650,23 +639,12 @@ void PopupIncludeEditor::compileInternal()
 			Component::callRecursive<ScriptContentComponent>(top, [&](ScriptContentComponent* c)
 			{
 				c->css.updateIsolatedCollection(fileName, css);
-				c->css.clearCache();
 
 				using BD = ScriptingApi::Content::ScriptMultipageDialog::Backdrop;
 
-				Component::callRecursive<Component>(c, [&](Component* child)
+				Component::callRecursive<BD>(c, [&](BD* mp)
 				{
-					if(auto bd = dynamic_cast<BD*>(c))
-					{
-						bd->create(getEditor()->editor.getDocument().getAllContent());
-					}
-					else if(auto fb = dynamic_cast<simple_css::FlexboxComponent*>(child))
-					{
-						fb->setCSS(c->css);
-					}
-
-					child->resized();
-					child->repaint();
+					mp->create(getEditor()->editor.getDocument().getAllContent());
 					return false;
 				});
 
@@ -700,92 +678,6 @@ void PopupIncludeEditor::compileInternal()
 		asmcl->clearWarningsAndErrors();
 	}
 }
-
-#if USE_BACKEND
-void PopupIncludeEditor::shadowParse()
-{
-	if (externalFile == nullptr)
-		return;
-
-	auto mc = dynamic_cast<Processor*>(jp.get())->getMainController();
-	mc->saveAllExternalFiles();
-
-	auto code = externalFile->getFile().loadFileAsString();
-	auto fileName = externalFile->getFile().getFullPathName();
-
-	Component::SafePointer<PopupIncludeEditor> safeThis(this);
-
-	jp->shadowParseFile(code, fileName, [safeThis](const JavascriptProcessor::DiagnosticList& diagnostics)
-	{
-		if (safeThis.getComponent() == nullptr)
-			return;
-
-		auto& ed = safeThis->editor->editor;
-		ed.clearWarningsAndErrors();
-
-		using Severity = ApiClass::DiagnosticResult::Severity;
-
-		auto p = dynamic_cast<Processor*>(safeThis->jp.get());
-
-		int numWarnings = 0;
-		int numErrors = 0;
-
-		for (const auto& d : diagnostics)
-		{
-			auto consoleMsg = d.toConsoleString(p);
-
-			String editorMsg;
-			editorMsg << "Line " << d.line << "(" << d.col << "): " << d.message;
-
-			if (d.severity == Severity::Error)
-			{
-				ed.setError(editorMsg);
-				debugError(p, consoleMsg);
-				numErrors++;
-			}
-			else if (d.severity == Severity::Hint)
-			{
-				// Hints go to console only — no editor marker
-				debugToConsole(p, consoleMsg);
-			}
-			else
-			{
-				ed.addWarning(editorMsg, true);
-				debugToConsole(p, consoleMsg);
-				numWarnings++;
-			}
-		}
-
-		// Update bottom bar with summary
-		String summary;
-
-		if (numErrors == 0 && numWarnings == 0)
-			summary = "Shadow parse OK";
-		else
-		{
-			if (numWarnings > 0)
-				summary << String(numWarnings) << " warning" << (numWarnings > 1 ? "s" : "");
-
-			if (numErrors > 0)
-			{
-				if (numWarnings > 0)
-					summary << ", ";
-
-				summary << String(numErrors) << " error" << (numErrors > 1 ? "s" : "");
-			}
-		}
-
-		debugToConsole(p, "Shadow parse: " + summary);
-
-		// setError("") shows "Compiled OK", setError(text) shows text in error style
-		// For warnings-only we still want to show the count, so pass it as "error" text
-		if (numErrors > 0 || numWarnings > 0)
-			safeThis->bottomBar->setError(summary);
-		else
-			safeThis->bottomBar->setError("");
-	});
-}
-#endif
 
 void PopupIncludeEditor::scriptWasCompiled(JavascriptProcessor* p)
 {
@@ -834,14 +726,7 @@ void PopupIncludeEditor::addEditor(CodeDocument& d, bool isJavascript)
 	auto& ed = getEditor()->editor;
 
 	if (isJavascript)
-	{
-		auto callbackToUse = callback;
-
-		if(callbackToUse.isNull() && externalFile != nullptr)
-			callbackToUse = Identifier(externalFile->getFile().getFileName());
-
-		ed.setLanguageManager(new JavascriptLanguageManager(jp, callbackToUse, ed));
-	}
+		ed.setLanguageManager(new JavascriptLanguageManager(jp, callback, ed));
 	else
 	{
 		if(t == FileTypes::GLSL)
@@ -876,15 +761,10 @@ void PopupIncludeEditor::addEditor(CodeDocument& d, bool isJavascript)
 		auto& tp = mc->getJavascriptThreadPool();
 		tp.addSleepListener(this);
 
-		auto jp_ = jp;
-
-		getEditor()->editor.onFocusChange = [mc, asComponent, jp_](bool isFocused, Component::FocusChangeType t)
+		getEditor()->editor.onFocusChange = [mc, asComponent](bool isFocused, Component::FocusChangeType t)
 		{
 			if (isFocused)
-			{
-				jp_->checkOnFocusGain();
 				mc->setLastActiveEditor(CommonEditorFunctions::as(asComponent), CommonEditorFunctions::getCaretPos(asComponent));
-			}
 		};
         
         getEditor()->editor.setGotoFunction(BIND_MEMBER_FUNCTION_2(::hise::PopupIncludeEditor::jumpToFromShortcut));

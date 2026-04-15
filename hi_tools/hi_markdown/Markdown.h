@@ -99,9 +99,7 @@ public:
 		virtual String getContent(const MarkdownLink& url) = 0;
 		virtual LinkResolver* clone(MarkdownParser* parent) const = 0;
 		virtual Identifier getId() const = 0;
-
-		virtual void dumpRAGFile() {};
-
+		
 		virtual MarkdownLink resolveURL(const MarkdownLink& url) { return url; }
 
 		virtual File getFileToEdit(const MarkdownLink& url) 
@@ -215,7 +213,7 @@ public:
 
 	HyperLink getHyperLinkForEvent(const MouseEvent& event, Rectangle<float> area);
 
-	static void createDatabaseEntriesForFile(File root, MarkdownDataBase::Item* item, File f, Colour c);
+	static void createDatabaseEntriesForFile(File root, MarkdownDataBase::Item& item, File f, Colour c);
 
 	struct SnippetTokeniser : public CodeTokeniser
 	{
@@ -370,12 +368,6 @@ protected:
 
 	String markdownCode;
 
-protected:
-
-	MarkdownHeader header;
-
-	MarkdownLink lastLink;
-
 private:
 
 	bool containsLinks = false;
@@ -386,7 +378,9 @@ private:
 
 	friend class JavascriptCodeEditor;
 	
-	
+	MarkdownHeader header;
+
+	MarkdownLink lastLink;
 
     class Iterator
 	{

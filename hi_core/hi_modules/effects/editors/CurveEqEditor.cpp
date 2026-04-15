@@ -30,9 +30,7 @@ CurveEqEditor::CurveEqEditor (ProcessorEditor *p)
     addAndMakeVisible (typeSelector = new FilterTypeSelector());
     typeSelector->setName ("new component");
 
-    auto fn = eq->getOrCreateProcessorFilterStatistics();
-
-    addAndMakeVisible (dragOverlay = new FilterDragOverlay(eq, fn.get(), false));
+    addAndMakeVisible (dragOverlay = new FilterDragOverlay(eq));
     dragOverlay->setName ("new component");
 
 	dragOverlay->addListener(this);
@@ -121,14 +119,10 @@ void CurveEqEditor::filterSelectorChanged(FilterTypeSelector*)
 	freqSlider->setMode(HiSlider::Frequency);
 
 	gainSlider->setup(getProcessor(), -1, "Gain");
-    gainSlider->setMode(HiSlider::Decibel, {-24.0, 24.0, 0.0});
+	gainSlider->setMode(HiSlider::Decibel, -24.0, 24.0, 0.0);
 
 	qSlider->setup(getProcessor(), -1, "Q");
-
-    NormalisableRange<double> qr(0.1, 8.0, 0.0);
-    qr.setSkewForCentre(1.0);
-
-    qSlider->setMode(HiSlider::Linear, qr);
+	qSlider->setMode(HiSlider::Linear, 0.1, 8.0, 1.0);
 
 	enableBandButton->setup(getProcessor(), -1, "Enable Band");
 
@@ -179,7 +173,7 @@ void CurveEqEditor::buttonClicked (Button* buttonThatWasClicked)
 		{
 			auto pIndex = CurveEq::BandParameter::numBandParameters * currentlySelectedFilterBand + CurveEq::BandParameter::Enabled;
 
-			eq->setAttribute(pIndex, enableBandButton->getToggleState(), sendNotificationAsync);
+			eq->setAttribute(pIndex, enableBandButton->getToggleState(), sendNotification);
 		}
     }
 

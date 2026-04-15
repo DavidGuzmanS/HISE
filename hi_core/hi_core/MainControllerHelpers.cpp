@@ -40,9 +40,8 @@ mpeData(mc_),
 mc(mc_),
 ccName("MIDI CC")
 {
-	filterChannels = HISE_GET_PREPROCESSOR(mc, HISE_USE_MIDI_CHANNELS_FOR_AUTOMATION);
-
 	tempBuffer.ensureSize(2048);
+
 	clear(sendNotification);
 }
 
@@ -76,34 +75,26 @@ void MidiControllerAutomationHandler::deactivateMidiLearning()
 	unlearnedData = AutomationData();
 }
 
-void MidiControllerAutomationHandler::setUnlearndedMidiControlNumber(Key k, NotificationType notifyListeners)
+void MidiControllerAutomationHandler::setUnlearndedMidiControlNumber(int ccNumber, NotificationType notifyListeners)
 {
 	jassert(isLearningActive());
 
-	if (!shouldAddControllerToPopup(k.ccNumber))
+	if (!shouldAddControllerToPopup(ccNumber))
 	{
 		return;
 	}
 
 	ScopedLock sl(mc->getLock());
 
-	unlearnedData.k = k;
+	unlearnedData.ccNumber = ccNumber;
 
 	if (exclusiveMode)
 	{
-		if(filterChannels)
-		{
-			createIterator().removeMatches(k);
-		}
-		else
-		{
-			automationData[k].clear();
-		}
-
-		automationData[k].push_back(unlearnedData);
+		automationData[ccNumber].clearQuick();
+		automationData[ccNumber].add(unlearnedData);
 	}
 	else
-		automationData[k].push_back(unlearnedData);
+		automationData[ccNumber].addIfNotAlreadyThere(unlearnedData);
 
 	unlearnedData = AutomationData();
 
@@ -113,22 +104,20 @@ void MidiControllerAutomationHandler::setUnlearndedMidiControlNumber(Key k, Noti
 		sendChangeMessage();
 }
 
-MidiControllerAutomationHandler::Key MidiControllerAutomationHandler::getMidiControllerNumber(Processor *interfaceProcessor, int attributeIndex) const
+int MidiControllerAutomationHandler::getMidiControllerNumber(Processor *interfaceProcessor, int attributeIndex) const
 {
-	if(!anyUsed)
-		return {};
-
-	auto iter = createIterator();
-
-	AutomationData a;
-
-	while(iter.next(&a))
+	for (int i = 0; i < 128; i++)
 	{
-		if(a.processor == interfaceProcessor && a.attribute == attributeIndex)
-			return iter.getCurrentKey();
+		for (auto& a : automationData[i])
+		{
+			if (a.processor == interfaceProcessor && a.attribute == attributeIndex)
+			{
+				return i;
+			}
+		}
 	}
 
-	return {};
+	return -1;
 }
 
 void MidiControllerAutomationHandler::refreshAnyUsedState()
@@ -139,25 +128,28 @@ void MidiControllerAutomationHandler::refreshAnyUsedState()
 	ignoreUnused(suspender);
 
 	anyUsed = false;
-	auto iter = createIterator();
-	AutomationData a;
 
-	while(iter.next(&a))
+	for (int i = 0; i < 128; i++)
 	{
-		if(a.used)
+		for (auto& a : automationData[i])
 		{
-			anyUsed = true;
-			return;
+			if (a.used)
+			{
+				anyUsed = true;
+				return;
+			}
 		}
 	}
 }
 
 void MidiControllerAutomationHandler::clear(NotificationType notifyListeners)
 {
-	filterChannels = HISE_GET_PREPROCESSOR(mc, HISE_USE_MIDI_CHANNELS_FOR_AUTOMATION);
+	for (int i = 0; i < 128; i++)
+	{
+		automationData[i].clearQuick();
+	};
 
-	automationData.clear();
-	unlearnedData = {};
+	unlearnedData = AutomationData();
 
 	anyUsed = false;
 	
@@ -171,13 +163,17 @@ void MidiControllerAutomationHandler::removeMidiControlledParameter(Processor *i
 		AudioThreadGuard audioGuard(&(mc->getKillStateHandler()));
 		LockHelpers::SafeLock sl(mc, LockHelpers::Type::AudioLock);
 
-		auto iter = createIterator();
-		AutomationData a;
-
-		while(iter.next(&a))
+		for (int i = 0; i < 128; i++)
 		{
-			if(a.processor == interfaceProcessor && a.attribute == attributeIndex)
-				iter.eraseCurrentElement();
+			for (int j = 0; j < automationData[i].size(); j++)
+			{
+				auto a = automationData[i][j];
+
+				if (a.processor == interfaceProcessor && a.attribute == attributeIndex)
+				{
+					automationData[i].remove(j--);
+				}
+			}
 		}
 	}
 
@@ -200,6 +196,8 @@ textConverter({})
 
 }
 
+
+
 void MidiControllerAutomationHandler::AutomationData::clear()
 {
 	processor = nullptr;
@@ -207,11 +205,12 @@ void MidiControllerAutomationHandler::AutomationData::clear()
 	parameterRange = NormalisableRange<double>();
 	fullRange = NormalisableRange<double>();
 	macroIndex = -1;
-	k = {};
+	ccNumber = -1;
 	inverted = false;
 	used = false;
 	textConverter = {};
 }
+
 
 
 bool MidiControllerAutomationHandler::AutomationData::operator==(const AutomationData& other) const
@@ -221,16 +220,7 @@ bool MidiControllerAutomationHandler::AutomationData::operator==(const Automatio
 
 void MidiControllerAutomationHandler::AutomationData::restoreFromValueTree(const ValueTree &v)
 {
-	auto ch = (int)v.getProperty("Channel", -1);
-
-	// it's stored as based-one channel for consistency so we have to subtract that.
-	if(ch != -1)
-		ch -= 1;
-
-	auto ccNumber = v.getProperty("Controller", 1);;
-
-	k = { ch, ccNumber };
-
+	ccNumber = v.getProperty("Controller", 1);;
 	processor = ProcessorHelpers::getFirstProcessorWithName(mc->getMainSynthChain(), v.getProperty("Processor"));
 	macroIndex = v.getProperty("MacroIndex");
 
@@ -316,8 +306,7 @@ juce::ValueTree MidiControllerAutomationHandler::AutomationData::exportAsValueTr
 {
 	ValueTree cc("Controller");
 
-	cc.setProperty("Controller", (int)k.ccNumber, nullptr);
-	cc.setProperty("Channel", (int)k.getMidiChannelBasedOne(), nullptr);
+	cc.setProperty("Controller", ccNumber, nullptr);
 	cc.setProperty("Processor", processor->getId(), nullptr);
 	cc.setProperty("MacroIndex", macroIndex, nullptr);
 	cc.setProperty("Start", parameterRange.start, nullptr);
@@ -680,24 +669,20 @@ bool MidiControllerAutomationHandler::MPEData::contains(MPEModulator* mod) const
 
 ValueTree MidiControllerAutomationHandler::exportAsValueTree() const
 {
-	{
-		SimpleReadWriteLock::ScopedReadLock sl(unloadLock);
-
-		if (unloadedData.isValid())
-			return unloadedData.createCopy();
-	}
+	if (unloadedData.isValid())
+		return unloadedData;
 
 	ValueTree v("MidiAutomation");
 
-	auto iter = createIterator();
-
-	AutomationData a;
-	while(iter.next(&a))
+	for (int i = 0; i < 128; i++)
 	{
-		if (a.used && a.processor != nullptr)
+		for (auto& a : automationData[i])
 		{
-			auto cc = a.exportAsValueTree();
-			v.addChild(cc, -1, nullptr);
+			if (a.used && a.processor != nullptr)
+			{
+				auto cc = a.exportAsValueTree();
+				v.addChild(cc, -1, nullptr);
+			}
 		}
 	}
 
@@ -715,15 +700,15 @@ void MidiControllerAutomationHandler::restoreFromValueTree(const ValueTree &v)
 		ValueTree cc = v.getChild(i);
 
 		int controller = cc.getProperty("Controller", 1);
-		int8 channel = (int)cc.getProperty("Channel", -1);
 
-		Key k(channel, controller);
+		auto& aArray = automationData[controller];
 
 		AutomationData a;
 		a.mc = mc;
+
 		a.restoreFromValueTree(cc);
 
-		automationData[k].push_back(std::move(a));
+		aArray.addIfNotAlreadyThere(a);
 	}
 
     if(mc->getUserPresetHandler().isInternalPresetLoad())
@@ -799,13 +784,6 @@ MidiControllerAutomationHandler::MPEData& MidiControllerAutomationHandler::getMP
 const MidiControllerAutomationHandler::MPEData& MidiControllerAutomationHandler::getMPEData() const
 { return mpeData; }
 
-MidiControllerAutomationHandler::Container<MidiControllerAutomationHandler::AutomationData>::Iterator
-MidiControllerAutomationHandler::createIterator() const
-{
-	auto useChannels = HISE_GET_PREPROCESSOR(mc, HISE_USE_MIDI_CHANNELS_FOR_AUTOMATION);
-	return automationData.createIterator(!useChannels);
-}
-
 void MidiControllerAutomationHandler::setUnloadedData(const ValueTree& v)
 {
 	unloadedData = v;
@@ -813,14 +791,9 @@ void MidiControllerAutomationHandler::setUnloadedData(const ValueTree& v)
 
 void MidiControllerAutomationHandler::loadUnloadedData()
 {
-	{
-		SimpleReadWriteLock::ScopedReadLock sl(unloadLock);
+	if(unloadedData.isValid())
+		restoreFromValueTree(unloadedData);
 
-		if(unloadedData.isValid())
-			restoreFromValueTree(unloadedData);
-	}
-
-	SimpleReadWriteLock::ScopedWriteLock sl(unloadLock);
 	unloadedData = {};
 }
 
@@ -849,16 +822,7 @@ bool MidiControllerAutomationHandler::isMappable(int controllerValue) const
 		if (!exclusiveMode)
 			return shouldAddControllerToPopup(controllerValue);
 		else
-		{
-			auto empty = true;
-
-			for(int i = 0; i < Key::MaxChannel + 1; i++)
-			{
-				empty &= automationData.getChannelData(i)[controllerValue].empty();
-			}
-
-			return shouldAddControllerToPopup(controllerValue) && empty;
-		}
+			return shouldAddControllerToPopup(controllerValue) && automationData[controllerValue].isEmpty();
 	}
 		
 	return false;
@@ -913,22 +877,21 @@ void MidiControllerAutomationHandler::handleParameterData(MidiBuffer &b)
 
 	int samplePos;
 
-	
-
 	while (mb.getNextEvent(m, samplePos))
 	{
 		bool consumed = false;
 
 		if (m.isController())
 		{
-			Key k(m, !filterChannels);
-			
+			const int number = m.getControllerNumber();
+
 			if (isLearningActive())
 			{
-				setUnlearndedMidiControlNumber(k, sendNotification);
+				setUnlearndedMidiControlNumber(number, sendNotification);
 			}
 
 			HiseEvent he(m);
+
 			consumed = handleControllerMessage(he);
 		}
 
@@ -942,14 +905,11 @@ void MidiControllerAutomationHandler::handleParameterData(MidiBuffer &b)
 
 bool MidiControllerAutomationHandler::handleControllerMessage(const HiseEvent& e)
 {
-	if(!anyUsed)
-		return false;
+	auto number = e.getControllerNumber();
 
-	Key k(e, !filterChannels);
-	
     bool thisConsumed = false;
-
-	auto f = [&](AutomationData& a)
+    
+	for (auto& a : automationData[number])
 	{
 		if (a.used && a.processor.get() != nullptr)
 		{
@@ -983,26 +943,15 @@ bool MidiControllerAutomationHandler::handleControllerMessage(const HiseEvent& e
 					}
 					else
 					{
-						a.processor->setAttribute(a.attribute, snappedValue, sendNotificationSync);
+						a.processor->setAttribute(a.attribute, snappedValue, sendNotificationAsync);
 					}
 
 					a.lastValue = snappedValue;
 				}
 			}
 
-			return consumeEvents;
+            thisConsumed |= consumeEvents;
 		}
-
-		return false;
-	};
-
-	for (auto& a : automationData[k])
-		thisConsumed |= f(a);
-
-	if(!k.isOmni()) // check the omni assignments
-	{
-		for(auto& a: automationData[k.asOmni()])
-			thisConsumed |= f(a);
 	}
 
 	return thisConsumed;
@@ -1010,47 +959,74 @@ bool MidiControllerAutomationHandler::handleControllerMessage(const HiseEvent& e
 
 hise::MidiControllerAutomationHandler::AutomationData MidiControllerAutomationHandler::getDataFromIndex(int index) const
 {
-	if(!anyUsed)
-		return {};
+	int currentIndex = 0;
 
-	return createIterator().getDataFromIndex(index);
-}
+	for (int i = 0; i < 128; i++)
+	{
+		for (const auto& a: automationData[i])
+		{
+			if (index == currentIndex)
+				return AutomationData(a);
 
-int MidiControllerAutomationHandler::getIndexForKey(Key key) const
-{
-	return createIterator().getIndexForKey(key);;
+			currentIndex++;
+		}
+	}
+
+	return AutomationData();
 }
 
 int MidiControllerAutomationHandler::getNumActiveConnections() const
 {
-	if(!anyUsed)
-		return 0;
+	int numActive = 0;
 
-	return createIterator().getNumItems();
+	for (int i = 0; i < 128; i++)
+	{
+		numActive += automationData[i].size();
+	}
+
+	return numActive;
 }
 
 bool MidiControllerAutomationHandler::setNewRangeForParameter(int index, NormalisableRange<double> range)
 {
-	if(!anyUsed)
-		return false;
-	
-	return createIterator().perform(index, [range](AutomationData& d)
+	int currentIndex = 0;
+
+	for (int i = 0; i < 128; i++)
 	{
-		d.parameterRange = range;
-		return true;
-	});
+		for (auto& a : automationData[i])
+		{
+			if (index == currentIndex)
+			{
+				a.parameterRange = range;
+				return true;
+			}
+			
+			currentIndex++;
+		}
+	}
+
+	return false;
 }
 
 bool MidiControllerAutomationHandler::setParameterInverted(int index, bool value)
 {
-	if(!anyUsed)
-		return false;
+	int currentIndex = 0;
 
-	return createIterator().perform(index, [value](AutomationData& d)
+	for (int i = 0; i < 128; i++)
 	{
-		d.inverted = value;
-		return true;
-	});
+		for (auto& a : automationData[i])
+		{
+			if (index == currentIndex)
+			{
+				a.inverted = value;
+				return true;
+			}
+
+			currentIndex++;
+		}
+	}
+
+	return false;
 }
 
 void ConsoleLogger::logMessage(const String &message)
@@ -1058,11 +1034,14 @@ void ConsoleLogger::logMessage(const String &message)
 	if (message.startsWith("!"))
 	{
 		debugError(processor, message.substring(1));
+		
 	}
 	else
 	{
 		debugToConsole(processor, message);
 	}
+
+	
 }
 
 ControlledObject::ControlledObject(MainController *m, bool notifyOnShutdown) :
@@ -1580,9 +1559,10 @@ void AudioRendererBase::initAfterFillingEventBuffer()
 		if ((bufferSize = getMainController()->getMainSynthChain()->getLargestBlockSize()) != 0)
 		{
 			auto numSamplesTill80Ms = getMainController()->getMainSynthChain()->getSampleRate() * 0.08;
+
 			auto numBuffersTill80Ms = roundToInt(numSamplesTill80Ms / (double)bufferSize);
 
-			thisNumThrowAway = jlimit(12, NumThrowAwayBuffers, numBuffersTill80Ms);
+			thisNumThrowAway = jmax(NumThrowAwayBuffers, numBuffersTill80Ms);
 
 			auto& lb = *eventBuffers.getLast();
 			numSamplesToRender = (int)lb.getEvent(lb.getNumUsed() - 1).getTimeStamp();
@@ -1602,15 +1582,14 @@ void AudioRendererBase::initAfterFillingEventBuffer()
 
 			for(auto events: eventBuffers)
 			{
-				//events->subtractFromTimeStamps(-bufferSize * thisNumThrowAway);
+				events->subtractFromTimeStamps(-bufferSize * thisNumThrowAway);
 				events->alignEventsToRaster<HISE_EVENT_RASTER>(numSamplesToRender);
 			}
 			
 			for (int i = 0; i < numChannelsToRender; i++)
 				channels.add(new VariantBuffer(numSamplesToRender));
 
-			ThreadStarters::startHigh(this);
-
+			Thread::startThread(8);
 		}
 	}
 }
@@ -1683,24 +1662,17 @@ bool AudioRendererBase::renderAudio()
 			int numThisTime = jmin<int>(bufferSize, numTodo);
 
 			AudioSampleBuffer ab = getChunk(pos, numThisTime);
+			HiseEventBuffer thisBuffer;
+
+			for(auto events: eventBuffers)
+				events->moveEventsBelow(thisBuffer, pos + numThisTime);
+
+			thisBuffer.subtractFromTimeStamps(pos);
+
 			MidiBuffer mb;
 
-			if(numThrowAway == 0)
-			{
-				HiseEventBuffer thisBuffer;
-
-				for(auto events: eventBuffers)
-					events->moveEventsBelow(thisBuffer, pos + numThisTime);
-
-				thisBuffer.subtractFromTimeStamps(pos);
-
-				for (const auto& e : thisBuffer)
-					mb.addEvent(e.toMidiMesage(), e.getTimeStamp());
-			}
-			else
-			{
-				nirvana.clear();
-			}
+			for (const auto& e : thisBuffer)
+				mb.addEvent(e.toMidiMesage(), e.getTimeStamp());
 
 			auto& bufferToUse = numThrowAway > 0 ? nirvana : ab;
 
@@ -1712,8 +1684,8 @@ bool AudioRendererBase::renderAudio()
 			{
 				--numThrowAway;
 
-				//for(auto events: eventBuffers)
-				//	events->subtractFromTimeStamps(numThisTime);
+				for(auto events: eventBuffers)
+					events->subtractFromTimeStamps(numThisTime);
 			}
 			else
 			{
@@ -1866,7 +1838,6 @@ String OverlayMessageBroadcaster::getOverlayTextMessage(State s) const
 #endif
 
 		break;
-#if HISE_INCLUDE_UNLOCKER_OVERLAY
 	case LicenseNotFound:
 	{
 #if USE_COPY_PROTECTION
@@ -1908,7 +1879,6 @@ String OverlayMessageBroadcaster::getOverlayTextMessage(State s) const
 		return "";
 #endif
 	}
-#endif
 	case State::CustomErrorMessage:
 	case State::CriticalCustomErrorMessage:
 	case State::CustomInformation:
@@ -1933,337 +1903,5 @@ ScopedSoftBypassDisabler::~ScopedSoftBypassDisabler()
 {
 	getMainController()->setAllowSoftBypassRamps(previousState);
 }
-
-#if HI_RUN_UNIT_TESTS
-struct AutomationContainerTest: public UnitTest
-{
-	AutomationContainerTest():
-	  UnitTest("Testing MIDI automation container")
-	{}
-
-    using TestContainer = MidiControllerAutomationHandler::Container<int>;
-	using Key = MidiControllerAutomationHandler::Key;
-
-	void runTest() override
-	{
-		beginTest("testing iterator");
-
-		{
-			TestContainer c;
-
-			c[{ -1, 0 }].push_back(1);
-			c[{ -1, 0 }].push_back(2);
-			c[{ -1, 2 }].push_back(3);
-			c[{ 0, 2 }].push_back(4);
-			
-			expectEquals(c.createIterator(true).getNumItems(), 3, "justOmni iterator doesn't work");
-			expectEquals(c.createIterator(false).getNumItems(), 4, "!justOmni iterator doesn't work");
-
-			int sumOmni = 0;
-			int sum = 0;
-
-			auto iterOmni = c.createIterator(true);
-			auto iter = c.createIterator(false);
-
-			int x;
-
-			while(iterOmni.next(&x))
-				sumOmni += x;
-
-			while(iter.next(&x))
-				sum += x;
-
-			expectEquals(sumOmni, 1 + 2 + 3);
-			expectEquals(sum, 1 + 2 + 3 + 4);
-
-			expect(c.createIterator(true).perform(2, [](int& x)
-			{
-				x = 90;
-				return true;
-			}), "perform doesn't find the element");
-
-			expect(c.createIterator(true).perform(3, [](int& x){ return true; }) == false, "perform at onlyOmni catches filtered values");
-
-			expectEquals(c[{ -1, 2}][0], 90, "perform doesn't work");
-
-			expectEquals(c.createIterator(true).getDataFromIndex(2), 90, "getDataFromIndex doesn't work");
-		}
-
-		beginTest("Key Validity Checks");
-
-        {
-            Key defaultKey;
-            expect(defaultKey.isInvalid());
-            expect(!defaultKey.isValid());
-            expect(!defaultKey.isOmni());
-        }
-
-        {
-            Key validKey(1, 64);
-            expect(validKey.isValid());
-            expect(!validKey.isOmni());
-        }
-
-        {
-            Key omniKey;
-            omniKey.channel = -1;
-            omniKey.ccNumber = 10;
-            expect(omniKey.isValid());
-            expect(omniKey.isOmni());
-        }
-
-        beginTest("Key Matching Logic");
-
-        {
-            Key a(1, 10);
-            Key b(1, 10);
-            Key c(2, 10);
-            Key omni(-1, 10);
-
-            expect(a.matchesOtherKey(b));
-            expect(a.matchesOtherKey(omni));
-            expect(omni.matchesOtherKey(c));
-            expect(!a.matchesOtherKey(Key(1, 11)));
-        }
-
-        beginTest("Container insert and access");
-
-        {
-            MidiControllerAutomationHandler::Container<int> container;
-
-            Key k1(2, 30);
-            container[k1].push_back(42);
-            container[k1].push_back(7);
-
-            expectEquals((int)container[k1].size(), 2);
-            expectEquals(container[k1][0], 42);
-            expectEquals(container[k1][1], 7);
-        }
-
-        beginTest("Container::Iterator - justOmni = false");
-
-        {
-            MidiControllerAutomationHandler::Container<int> container;
-
-            container[Key(0, 1)].push_back(100);
-            container[Key(0, 2)].push_back(200);
-            container[Key(1, 1)].push_back(300);
-
-            auto it = container.createIterator(false);
-            int value;
-            int sum = 0;
-
-            while (it.next(&value))
-                sum += value;
-
-            expectEquals(sum, 100 + 200 + 300);
-            expectEquals(it.getNumItems(), 3);
-        }
-
-        beginTest("Container::Iterator - justOmni = true");
-
-        {
-            MidiControllerAutomationHandler::Container<int> container;
-
-            container[Key(-1, 0)].push_back(999);
-            container[Key(-1, 1)].push_back(888);
-
-            auto it = container.createIterator(true);
-            int count = 0;
-            int value;
-
-            while (it.next(&value))
-                count++;
-
-            expectEquals(count, 2);
-        }
-
-        beginTest("Container::Iterator - erase and getDataFromIndex");
-
-        {
-            MidiControllerAutomationHandler::Container<int> container;
-            Key k(0, 10);
-            container[k].push_back(1);
-            container[k].push_back(2);
-            container[k].push_back(3);
-
-            auto it = container.createIterator(false);
-            it.next(); // 1
-            it.next(); // 2
-            it.eraseCurrentElement(); // Remove 2
-            it.next(); // 3
-
-            auto it2 = container.createIterator(false);
-            int val;
-            it2.next(&val);
-            expectEquals(val, 1);
-            it2.next(&val);
-            expectEquals(val, 3);
-
-            expectEquals(it2.getDataFromIndex(1), 3);
-        }
-
-        beginTest("Container::Iterator - perform()");
-
-        {
-            MidiControllerAutomationHandler::Container<juce::String> container;
-            container[Key(0, 1)].push_back("One");
-            container[Key(0, 1)].push_back("Two");
-
-            auto it = container.createIterator(false);
-
-            bool called = it.perform(1, [](juce::String& str)
-            {
-                return str == "Two";
-            });
-
-            expect(called);
-        }
-
-        beginTest("Container::clear()");
-
-        {
-            MidiControllerAutomationHandler::Container<float> container;
-            container[Key(1, 10)].push_back(3.14f);
-            container[Key(-1, 5)].push_back(2.71f);
-
-            container.clear();
-
-            int total = 0;
-            auto it = container.createIterator(false);
-            float dummy;
-            while (it.next(&dummy))
-                total++;
-
-            expectEquals(total, 0);
-        }
-
-		beginTest("Iterator::next()");
-
-        {
-            MidiControllerAutomationHandler::Container<int> container;
-            Key k(0, 0);
-            container[k].push_back(10);
-            container[k].push_back(20);
-
-            auto it = container.createIterator(false);
-            int val;
-            expect(it.next(&val));
-            expectEquals(val, 10);
-            expect(it.next(&val));
-            expectEquals(val, 20);
-            expect(!it.next()); // No more elements
-        }
-
-        beginTest("Iterator::getCurrentKey() and getPositionInVector()");
-
-        {
-            MidiControllerAutomationHandler::Container<int> container;
-            Key k(1, 2);
-            container[k].push_back(42);
-
-            auto it = container.createIterator(false);
-            it.next();
-
-            Key current = it.getCurrentKey();
-            expectEquals((int)current.channel, 1);
-            expectEquals((int)current.ccNumber, 2);
-            expectEquals(it.getPositionInVector(), 0);
-        }
-
-        beginTest("Iterator::eraseCurrentElement()");
-
-        {
-            MidiControllerAutomationHandler::Container<int> container;
-            Key k(0, 1);
-            container[k] = { 1, 2, 3 };
-
-            auto it = container.createIterator(false);
-            it.next(); // 1
-            it.next(); // 2
-            it.eraseCurrentElement(); // remove 2
-            it.next(); // 3
-
-            auto vec = container[k];
-            expectEquals((int)vec.size(), 2);
-            expectEquals(vec[0], 1);
-            expectEquals(vec[1], 3);
-        }
-
-        beginTest("Iterator::getNumItems()");
-
-        {
-            MidiControllerAutomationHandler::Container<int> container;
-            container[Key(0, 0)].push_back(1);
-            container[Key(0, 1)].push_back(2);
-            container[Key(1, 0)].push_back(3);
-
-            auto it = container.createIterator(false);
-            expectEquals(it.getNumItems(), 3);
-
-            auto itOmni = container.createIterator(true);
-            expectEquals(itOmni.getNumItems(), 0); // No omni keys added
-        }
-
-        beginTest("Iterator::getIndexForKey()");
-
-        {
-            MidiControllerAutomationHandler::Container<int> container;
-            Key k1(1, 1);
-            Key k2(2, 2);
-            Key k3(3, 3);
-
-            container[k1].push_back(10);
-            container[k2].push_back(20);
-            container[k3].push_back(30);
-
-            auto it = container.createIterator(false);
-
-            expectEquals(it.getIndexForKey(k1), 0);
-            expectEquals(it.getIndexForKey(k2), 1);
-            expectEquals(it.getIndexForKey(k3), 2);
-            expectEquals(it.getIndexForKey(Key(9, 9)), -1); // Not present
-        }
-
-        beginTest("Iterator::perform()");
-
-        {
-            MidiControllerAutomationHandler::Container<juce::String> container;
-            container[Key(0, 0)].push_back("Hello");
-            container[Key(1, 1)].push_back("World");
-
-            auto it = container.createIterator(false);
-
-            bool found = it.perform(1, [](juce::String& str)
-            {
-                return str == "World";
-            });
-
-            expect(found);
-
-            bool notFound = it.perform(10, [](juce::String&){ return true; });
-            expect(!notFound);
-        }
-
-        beginTest("Iterator::getDataFromIndex()");
-
-        {
-            MidiControllerAutomationHandler::Container<juce::String> container;
-            container[Key(0, 0)] = { "A", "B" };
-            container[Key(1, 0)] = { "C" };
-
-            auto it = container.createIterator(false);
-
-            expectEquals(it.getDataFromIndex(0), juce::String("A"));
-            expectEquals(it.getDataFromIndex(1), juce::String("B"));
-            expectEquals(it.getDataFromIndex(2), juce::String("C"));
-            expectEquals(it.getDataFromIndex(3), juce::String()); // Returns default
-        }
-
-	}
-};
-
-static AutomationContainerTest autoTest;
-#endif
 
 } // namespace hise

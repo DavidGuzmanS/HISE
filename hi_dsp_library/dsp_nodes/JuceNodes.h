@@ -109,9 +109,6 @@ template <typename T, int NV> struct jwrapper
 protected:
 
 	PolyData<T, NumVoices> objects;
-
-public:
-
 };
 
 /** This template can be used in order to implement a modulation source node from a JUCE processor. 
@@ -389,13 +386,11 @@ template <typename DT, int NV> struct jdelay_base : public base::jwrapper<DT, NV
 			parameter::data p("Limit", nr);
 			registerCallback<0>(p);
 			p.setDefaultValue(nr.rng.end);
-			p.info.textConverter = parameter::pod::Time;
 			d.add(p);
 		}
 		{
 			parameter::data p("DelayTime", nr);
 			registerCallback<1>(p);
-			p.info.textConverter = parameter::pod::Time;
 			p.setDefaultValue(0.0);
 			d.add(p);
 		}

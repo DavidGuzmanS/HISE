@@ -49,7 +49,7 @@ namespace control
 		SN_NODE_ID("cable_pack");
 		SN_GET_SELF_AS_OBJECT(cable_pack);
 		SN_ADD_SET_VALUE(cable_pack);
-		SN_PARAMETER_NOSIGNAL_CONSTRUCTOR(cable_pack, ParameterClass);
+		SN_PARAMETER_NODE_CONSTRUCTOR(cable_pack, ParameterClass);
 		SN_DESCRIPTION("Uses a slider pack to modify a modulation signal");
 
 		void setExternalData(const ExternalData& d, int index) override
@@ -98,10 +98,10 @@ namespace control
 		SN_NODE_ID("sliderbank");
 		SN_GET_SELF_AS_OBJECT(sliderbank);
 		SN_ADD_SET_VALUE(sliderbank);
-		SN_PARAMETER_NOSIGNAL_CONSTRUCTOR(sliderbank, ParameterClass);
+		SN_PARAMETER_NODE_CONSTRUCTOR(sliderbank, ParameterClass);
 		SN_DESCRIPTION("Scale a value with a slider pack and send it to multiple targets");
 
-		void initialise(ObjectWithValueTree* n)
+		void initialise(NodeBase* n)
 		{
 			this->p.initialise(n);
 		}
@@ -214,7 +214,6 @@ namespace control
 
 		file_analyser() :
 			templated_mode(getStaticId(), "file_analysers"),
-			pimpl::no_processing(getStaticId()),
 			pimpl::parameter_node_base<ParameterClass>(getStaticId()),
 			no_mod_normalisation(getStaticId(), {})
 		{};
@@ -223,7 +222,7 @@ namespace control
 
 		SN_EMPTY_CREATE_PARAM;
 
-		void initialise(ObjectWithValueTree* n)
+		void initialise(NodeBase* n)
 		{
 			if constexpr (prototypes::check::initialise<AnalyserType>::value)
 				analyser.initialise(n);
@@ -246,40 +245,16 @@ namespace control
 		AnalyserType analyser;
 	};
 
-	struct input_toggle_base: public mothernode
+	template <typename ParameterClass> struct input_toggle : public pimpl::parameter_node_base<ParameterClass>,
+														     public pimpl::no_mod_normalisation,
+															 public pimpl::no_processing
 	{
-		virtual ~input_toggle_base() {};
-
-		struct Data
-		{
-			bool useValue1 = false;
-			double v1 = 0.0;
-			double v2 = 0.0;
-		};
-
-		virtual const Data& getUIData() const = 0;
-
-	private:
-
-		JUCE_DECLARE_WEAK_REFERENCEABLE(input_toggle_base);
-	};
-
-	template <int NV, typename ParameterClass> struct input_toggle : public input_toggle_base,
-																	 public pimpl::parameter_node_base<ParameterClass>,
-																     public pimpl::no_mod_normalisation,
-																	 public polyphonic_base,
-																	 public pimpl::no_processing
-	{
-		static constexpr int NumVoices = NV;
-
-		SN_POLY_NODE_ID("input_toggle");
+		SN_NODE_ID("input_toggle");
 		SN_GET_SELF_AS_OBJECT(input_toggle);
 
 		input_toggle() :
 			pimpl::parameter_node_base<ParameterClass>(getStaticId()),
-			pimpl::no_mod_normalisation(getStaticId(), {"Value1", "Value2" }),
-			pimpl::no_processing(getStaticId()),
-		    polyphonic_base(getStaticId(), false)
+			pimpl::no_mod_normalisation(getStaticId(), {"Value1", "Value2" })
 		{};
 
 		SN_DESCRIPTION("Switch between two input values as modulation signal");
@@ -299,49 +274,36 @@ namespace control
 		};
 		SN_PARAMETER_MEMBER_FUNCTION;
 
+		
+
 		void setInput(double input)
 		{
-			for(auto& d: data)
-			{
-				d.useValue1 = input < 0.5;
+			useValue1 = input < 0.5;
 
-				if (this->getParameter().isConnected())
-					this->getParameter().call(d.useValue1 ? d.v1 : d.v2);
-			}
-			
+			if (this->getParameter().isConnected())
+				this->getParameter().call(useValue1 ? v1 : v2);
 		}
 
 		void setValue1(double input)
 		{
-			for(auto& d: data)
-			{
-				d.v1 = input;
+			v1 = input;
 
-				if (d.useValue1)
-				{
-					if (this->getParameter().isConnected())
-						this->getParameter().call(d.v1);
-				}
+			if (useValue1)
+			{
+				if (this->getParameter().isConnected())
+					this->getParameter().call(v1);
 			}
 		}
 
 		void setValue2(double input)
 		{
-			for(auto& d: data)
+			v2 = input;
+
+			if (!useValue1)
 			{
-				d.v2 = input;
-
-				if (!d.useValue1)
-				{
-					if (this->getParameter().isConnected())
-						this->getParameter().call(d.v2);
-				}
+				if (this->getParameter().isConnected())
+					this->getParameter().call(v2);
 			}
-		}
-
-		void prepare(PrepareSpecs ps) override
-		{
-			data.prepare(ps);
 		}
 
 		void createParameters(ParameterDataList& data)
@@ -349,7 +311,6 @@ namespace control
 			{
 				DEFINE_PARAMETERDATA(input_toggle, Input);
 				p.setRange({ 0.0, 1.0, 1.0, 1.0 });
-				p.setParameterValueNames({ "Input 1", "Input 2"});
 				p.setDefaultValue(0.0);
 				data.add(std::move(p));
 			}
@@ -367,9 +328,9 @@ namespace control
 			}
 		}
 
-		const Data& getUIData() const override { return data.getFirst(); }
-
-		PolyData<Data, NV> data;
+		bool useValue1 = false;
+		double v1 = 0.0;
+		double v2 = 0.0;
 
 		JUCE_DECLARE_WEAK_REFERENCEABLE(input_toggle);
 	};
@@ -412,11 +373,6 @@ namespace control
 	{
 	public:
 
-		clock_base(const Identifier& id)
-		{
-			cppgen::CustomNodeProperties::addNodeIdManually(id, PropertyIds::OutsideSignalPath);
-		}
-
 		virtual ~clock_base()
 		{
 			if (tempoSyncer != nullptr)
@@ -448,10 +404,6 @@ namespace control
 	class tempo_sync_base: public clock_base
 	{
 	public:
-
-		tempo_sync_base(const Identifier& id):
-		  clock_base(id)
-		{};
 
 		virtual ~tempo_sync_base() {};
 
@@ -489,7 +441,6 @@ namespace control
 		SN_PARAMETER_MEMBER_FUNCTION;
 
 		tempo_sync() :
-			tempo_sync_base(getStaticId()),
 			polyphonic_base(getStaticId()),
 			no_mod_normalisation(getStaticId(), {})
 		{};
@@ -532,14 +483,12 @@ namespace control
 			{
 				DEFINE_PARAMETERDATA(tempo_sync, Enabled);
 				p.setRange({ 0.0, 1.0, 1.0 });
-				p.setParameterValueNames({ "Off", "On"});
 				p.setDefaultValue(0.0);
 				data.add(std::move(p));
 			}
 			{
 				DEFINE_PARAMETERDATA(tempo_sync, UnsyncedTime);
 				p.setRange({ 0.0, 1000.0, 0.1 });
-				p.info.textConverter = parameter::pod::Time;
 				p.setDefaultValue(200.0);
 				data.add(std::move(p));
 			}
@@ -617,10 +566,6 @@ namespace control
 
 		SN_EMPTY_CREATE_PARAM;
 
-		transport_base(const Identifier& id):
-		  clock_base(id)
-		{};
-
 		static constexpr int NumVoices = NV;
 
 		void prepare(PrepareSpecs ps)
@@ -654,7 +599,6 @@ namespace control
 	public:
 
 		transport():
-		  transport_base<bool, NV>(getStaticId()),
 		  polyphonic_base(getStaticId(), false)
 		{};
 
@@ -678,7 +622,6 @@ namespace control
         static constexpr int NumVoices = NV;
         
 		ppq():
-		  transport_base<double, NV>(getStaticId()),
 		  polyphonic_base(getStaticId(), false)
 		{
 			loopLengthQuarters = TempoSyncer::getTempoFactor(TempoSyncer::Tempo::Quarter);
@@ -758,10 +701,6 @@ namespace control
     {
         static Identifier getStaticId() { return Identifier("pack" + String(NumValues) + "_writer"); };
         
-		pack_writer():
-		  no_processing(getStaticId())
-		{};
-
         SN_GET_SELF_AS_OBJECT(pack_writer);
         
         SN_DESCRIPTION("Writes the values from the parameter sliders into a slider pack");
@@ -824,10 +763,6 @@ namespace control
         
         SN_DESCRIPTION("Dynamically resizes a slider pack");
         
-		pack_resizer():
-		  no_processing(getStaticId())
-		{};
-
         template <int P> void setParameter(double v)
         {
             if(auto sp = dynamic_cast<SliderPackData*>(this->externalData.obj))
@@ -861,7 +796,7 @@ namespace control
 	{
 		SN_NODE_ID("resetter");
 		SN_GET_SELF_AS_OBJECT(resetter);
-		SN_PARAMETER_NOSIGNAL_CONSTRUCTOR(resetter, ParameterClass);
+		SN_PARAMETER_NODE_CONSTRUCTOR(resetter, ParameterClass);
 		SN_DESCRIPTION("Sends an inverted impulse (0,1) to reset gate-like parameters");
 
 		template <int P> void setParameter(double v)
@@ -970,7 +905,7 @@ namespace control
 
 		SN_NODE_ID("midi_cc");
 		SN_GET_SELF_AS_OBJECT(midi_cc);
-		SN_PARAMETER_NOSIGNAL_CONSTRUCTOR(midi_cc, ParameterClass);
+		SN_PARAMETER_NODE_CONSTRUCTOR(midi_cc, ParameterClass);
 		SN_DESCRIPTION("sends a MIDI cc value");
 
 		void createParameters(ParameterDataList& data)
@@ -995,7 +930,9 @@ namespace control
 			}
 		}
 
-		SN_EMPTY_PREPARE;
+		void prepare(PrepareSpecs ps)
+		{
+		}
 
 		void handleHiseEvent(HiseEvent& e)
 		{
@@ -1078,7 +1015,6 @@ namespace control
 		
 		cable_expr() : 
 			pimpl::parameter_node_base<ParameterClass>(getStaticId()),
-			no_processing(getStaticId()),
 			no_mod_normalisation(getStaticId(), { "Value" })
 		{};
 
@@ -1107,7 +1043,6 @@ namespace control
 		SN_ADD_SET_VALUE(voice_bang);
 
 		voice_bang() :
-			no_processing(getStaticId()),
 			pimpl::parameter_node_base<ParameterClass>(getStaticId())
 		{};
 
@@ -1152,7 +1087,6 @@ namespace control
 		SN_ADD_SET_VALUE(normaliser);
 
 		normaliser() :
-			no_processing(getStaticId()),
 			pimpl::parameter_node_base<ParameterClass>(getStaticId())
 		{};
 
@@ -1176,7 +1110,6 @@ namespace control
 
 		unscaler() :
 			pimpl::parameter_node_base<ParameterClass>(getStaticId()),
-			pimpl::no_processing(getStaticId()),
 		    pimpl::no_mod_normalisation(getStaticId(), { "Value" }) 
 		{};
 
@@ -1199,8 +1132,7 @@ namespace control
 		SN_ADD_SET_VALUE(locked_mod);
 
 		locked_mod() :
-			pimpl::parameter_node_base<ParameterClass>(getStaticId()),
-			pimpl::no_processing(getStaticId())
+			pimpl::parameter_node_base<ParameterClass>(getStaticId())
 		{};
 
 		void setValue(double input)
@@ -1222,7 +1154,6 @@ namespace control
 
 		locked_mod_unscaled() :
 			pimpl::parameter_node_base<ParameterClass>(getStaticId()),
-			pimpl::no_processing(getStaticId()),
 		    pimpl::no_mod_normalisation(getStaticId(), { "Value" }) 
 		{};
 
@@ -1253,7 +1184,6 @@ namespace control
 		converter() :
 			pimpl::templated_mode(getStaticId(), "conversion_logic"),
 			pimpl::no_mod_normalisation(getStaticId(), { "Value" }),
-			pimpl::no_processing(getStaticId()),
 			pimpl::parameter_node_base<ParameterClass>(getStaticId())
 		{};
 
@@ -1299,8 +1229,7 @@ namespace control
         SN_ADD_SET_VALUE(random);
 
 		random() :
-			pimpl::parameter_node_base<ParameterClass>(getStaticId()),
-			pimpl::no_processing(getStaticId())
+			pimpl::parameter_node_base<ParameterClass>(getStaticId())
 		{};
 
         void setValue(double)
@@ -1321,7 +1250,7 @@ namespace control
 		SN_DESCRIPTION("Modify a modulation signal using a lookup table");
 
 		SN_ADD_SET_VALUE(cable_table);
-		SN_PARAMETER_NOSIGNAL_CONSTRUCTOR(cable_table, ParameterClass);
+		SN_PARAMETER_NODE_CONSTRUCTOR(cable_table, ParameterClass);
 
 		void setExternalData(const ExternalData& d, int index) override
 		{
@@ -1378,7 +1307,6 @@ namespace control
 		SN_DESCRIPTION("control cloned parameters with a slider pack");
 		
         clone_pack() : 
-			pimpl::no_processing(getStaticId()),
 			pimpl::parameter_node_base<ParameterType>(getStaticId())
 		{
 			cppgen::CustomNodeProperties::setPropertyForObject(*this, PropertyIds::IsCloneCableNode);
@@ -1486,7 +1414,6 @@ namespace control
 
 		clone_cable():
             control::pimpl::parameter_node_base<ParameterType>(getStaticId()),
-			control::pimpl::no_processing(getStaticId()),
             control::pimpl::templated_mode(getStaticId(), "duplilogic")
 		{
 			cppgen::CustomNodeProperties::setPropertyForObject(*this, PropertyIds::IsCloneCableNode);
@@ -1510,7 +1437,7 @@ namespace control
 		};
 		SN_PARAMETER_MEMBER_FUNCTION;
 
-		void initialise(ObjectWithValueTree* n)
+		void initialise(NodeBase* n)
 		{
 			if constexpr (prototypes::check::initialise<LogicType>::value)
 				obj.initialise(n);
@@ -1618,8 +1545,7 @@ namespace control
 		static constexpr bool isPolyphonic()  { return false; }
 
 		clone_forward():
-            control::pimpl::parameter_node_base<ParameterType>(getStaticId()),
-			control::pimpl::no_processing(getStaticId())
+            control::pimpl::parameter_node_base<ParameterType>(getStaticId())
 		{
 			cppgen::CustomNodeProperties::setPropertyForObject(*this, PropertyIds::IsCloneCableNode);
 
@@ -1701,131 +1627,19 @@ namespace control
 		JUCE_DECLARE_WEAK_REFERENCEABLE(clone_forward);
 	};
 
-	template <typename ParameterClass> 
-	struct branch_base: public mothernode,
-						public pimpl::parameter_node_base<ParameterClass>,
-						public pimpl::no_processing
-	{
-		branch_base(const Identifier& id):
-		  mothernode(),
-		  pimpl::parameter_node_base<ParameterClass>(id),
-		  no_processing(id)
-		{}
-		virtual ~branch_base() = default;
-
-		virtual int getUIIndex() const = 0;
-
-		JUCE_DECLARE_WEAK_REFERENCEABLE(branch_base);
-	};
-
-	template <int NV, typename ParameterClass> 
-	struct branch_cable : public branch_base<ParameterClass>,
-					public polyphonic_base
-	{
-		SN_NODE_ID("branch_cable");
-		SN_GET_SELF_AS_OBJECT(branch_cable);
-		SN_DESCRIPTION("Send the incoming value to a single output");
-
-		branch_cable():
-		  branch_base<ParameterClass>(getStaticId()),
-		  polyphonic_base(getStaticId(), false)
-		{}
-
-		enum class Parameters
-		{
-			Index,
-			Value
-		};
-
-		void initialise(ObjectWithValueTree* n) override
-		{
-			this->getParameter().initialise(n);
-		}
-
-		int getUIIndex() const override { return state.getFirst().index; }
-
-		void setValue(double newValue)
-		{
-			int index = -1;
-
-			for(auto& s: state)
-			{
-				index = s.index;
-				s.value = newValue;
-			}
-
-			if(isPositiveAndBelow(index, this->getParameter().getNumParameters()))
-			{
-				this->getParameter().callWithRuntimeIndex(index, newValue);
-			}
-		}
-
-		void setIndex(double newIndex)
-		{
-			auto ni = roundToInt(newIndex);
-
-			double valueToSend = 0.0;
-
-			for(auto& s: state)
-			{
-				s.index = ni;
-				valueToSend = s.value;
-			}
-
-			setValue(valueToSend);
-		}
-
-		void prepare(PrepareSpecs ps)
-		{
-			state.prepare(ps);
-		}
-
-		template <int P> void setParameter(double v)
-		{
-			if constexpr (P == 0)
-				setIndex(v);
-			if constexpr (P == 1)
-				setValue(v);
-		}
-
-		SN_FORWARD_PARAMETER_TO_MEMBER(branch_cable);
-
-		void createParameters(ParameterDataList& data)
-		{
-			{
-				DEFINE_PARAMETERDATA(branch_cable, Value);
-				p.setRange({ 0.0, 1.0 });
-				data.add(std::move(p));
-			}
-			{
-				DEFINE_PARAMETERDATA(branch_cable, Index);
-				p.setRange({ 0.0, 7.0, 1.0 });
-				p.setDefaultValue(0.0);
-				data.add(std::move(p));
-			}
-		}
-
-		struct Data
-		{
-			double value = 0.0;
-			int index = 0;
-		};
-
-		PolyData<Data, NV> state;
-	};
-
+	
 	template <typename ParameterClass, typename FaderClass> struct xfader: public pimpl::parameter_node_base<ParameterClass>,
 																		   public control::pimpl::templated_mode,
 																		   public pimpl::no_processing
 	{
 		SN_NODE_ID("xfader");
 		SN_GET_SELF_AS_OBJECT(xfader);
-		SN_TEMPLATED_MODE_PARAMETER_NOSIGNAL_CONSTRUCTOR(xfader, ParameterClass, "faders");
+		SN_TEMPLATED_MODE_PARAMETER_NODE_CONSTRUCTOR(xfader, ParameterClass, "faders");
 		SN_DESCRIPTION("Apply a crossfade to multiple outputs");
 
 		SN_ADD_SET_VALUE(xfader);
 
-		void initialise(ObjectWithValueTree* n) override
+		void initialise(NodeBase* n) override
 		{
 			this->p.initialise(n);
 			fader.initialise(n);
@@ -2643,7 +2457,6 @@ namespace control
 		
 		multi_parameter() :
 			polyphonic_base(getStaticId(), false),
-			control::pimpl::no_processing(getStaticId()),
 			control::pimpl::parameter_node_base<ParameterType>(getStaticId()) 
 		{};
 
@@ -2744,76 +2557,6 @@ namespace control
 	template <int NV, typename ParameterType> using change = multi_parameter<NV, ParameterType, multilogic::change>;
 	template <int NV, typename ParameterType> using blend = multi_parameter<NV, ParameterType, multilogic::blend>;
 
-	template <typename ParameterClass> struct xy :
-		public pimpl::parameter_node_base<ParameterClass>,
-		public pimpl::no_processing
-	{
-		SN_NODE_ID("xy");
-		SN_DESCRIPTION("A XY-Controller for two parameters");
-		SN_GET_SELF_AS_OBJECT(xy);
-		
-		xy() : 
-		  control::pimpl::parameter_node_base<ParameterClass>(getStaticId()), 
-		  control::pimpl::no_processing(getStaticId()) 
-		{
-			cppgen::CustomNodeProperties::addModOutput(getStaticId(), { "X", "Y" });
-		};
-
-		enum class Parameters
-		{
-			X,
-			Y
-		};
-
-		void initialise(ObjectWithValueTree* n)
-		{
-			this->p.initialise(n);
-
-			if constexpr (!ParameterClass::isStaticList())
-			{
-				this->getParameter().numParameters.storeValue(2, n->getUndoManager());
-				this->getParameter().updateParameterAmount({}, 2);
-			}
-		}
-
-		DEFINE_PARAMETERS
-		{
-			DEF_PARAMETER(X, xy);
-			DEF_PARAMETER(Y, xy);
-		};
-		SN_PARAMETER_MEMBER_FUNCTION;
-
-		void setX(double v)
-		{
-			if (this->getParameter().getNumParameters() > 0)
-				this->getParameter().template call<0>(v);
-		}
-
-		void setY(double v)
-		{
-			if (this->getParameter().getNumParameters() > 1)
-				this->getParameter().template call<1>(v);
-		}
-
-		void createParameters(ParameterDataList& data)
-		{
-			{
-				DEFINE_PARAMETERDATA(xy, X);
-				p.setRange({ 0.0, 1.0 });
-				p.setDefaultValue(0.0);
-				data.add(std::move(p));
-			}
-			{
-				DEFINE_PARAMETERDATA(xy, Y);
-				p.setRange({ -1.0, 1.0 });
-				p.setDefaultValue(0.0);
-				data.add(std::move(p));
-			}
-		}
-
-		JUCE_DECLARE_WEAK_REFERENCEABLE(xy);
-	};
-
 	struct smoothed_parameter_base: public mothernode
 	{
 		virtual ~smoothed_parameter_base() {};
@@ -2864,7 +2607,7 @@ namespace control
 		SN_PARAMETER_MEMBER_FUNCTION;
 
 
-		void initialise(ObjectWithValueTree* n)
+		void initialise(NodeBase* n)
 		{
 			value.initialise(n);
 		}
@@ -2920,14 +2663,12 @@ namespace control
 			{
 				DEFINE_PARAMETERDATA(smoothed_parameter_pimpl, SmoothingTime);
 				p.setRange({ 0.1, 1000.0, 0.1 });
-				p.info.textConverter = parameter::pod::Time;
 				p.setDefaultValue(100.0);
 				data.add(std::move(p));
 			}
 			{
 				DEFINE_PARAMETERDATA(smoothed_parameter_pimpl, Enabled);
 				p.setRange({ 0.0, 1.0, 1.0 });
-				p.setParameterValueNames({ "Off", "On" });
 				p.setDefaultValue(1.0);
 				data.add(std::move(p));
 			}
@@ -2954,8 +2695,6 @@ namespace control
 
 	template <int NV, typename SmootherClass> using smoothed_parameter = smoothed_parameter_pimpl<NV, SmootherClass, true>;
 	template <int NV, typename SmootherClass> using smoothed_parameter_unscaled = smoothed_parameter_pimpl<NV, SmootherClass, false>;
-} // namespace control
-
-
+}
 
 }

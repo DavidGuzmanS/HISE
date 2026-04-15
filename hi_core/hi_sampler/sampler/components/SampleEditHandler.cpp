@@ -40,8 +40,6 @@ SampleEditHandler::SampleEditHandler(ModulatorSampler* sampler_) :
 	noteBroadcaster.enableLockFreeUpdate(sampler->getMainController()->getGlobalUIUpdater());
 	noteBroadcaster.setEnableQueue(true, NUM_POLYPHONIC_VOICES);
 	groupBroadcaster.enableLockFreeUpdate(sampler->getMainController()->getGlobalUIUpdater());
-	complexGroupBroadcaster.enableLockFreeUpdate(sampler->getMainController()->getGlobalUIUpdater());
-	complexGroupEventBroadcaster.setEnableQueue(true);
 	noteBroadcaster.addListener(*this, handleMidiSelection);
 
 	selectionBroadcaster.addListener(*this, updateMainSound);
@@ -144,31 +142,15 @@ void SampleEditHandler::handleMidiSelection(SampleEditHandler& handler, int note
 	{
 		handler.selectedSamplerSounds.deselectAll();
 
-		
+		SelectedItemSet<const ModulatorSamplerSound*> midiSounds;
 
-		if(auto gm = sampler->getComplexGroupManager())
+		ModulatorSampler::SoundIterator sIter(sampler);
+
+		while (auto sound = sIter.getNextSound())
 		{
-			UnorderedStack<ModulatorSynthSound*> soundsToStart;
-			ComplexGroupManager::ScopedPostProcessorDeactivator sppd(*gm);
-
-			HiseEvent no(HiseEvent::Type::NoteOn, noteNumber, velocity, 1);
-			gm->collectSounds(no, soundsToStart);
-
-			for(auto s: soundsToStart)
+			if (sampler->soundCanBePlayed(sound, 1, noteNumber, (float)velocity / 127.0f))
 			{
-				handler.selectedSamplerSounds.addToSelection(dynamic_cast<ModulatorSamplerSound*>(s));
-			}
-		}
-		else
-		{
-			ModulatorSampler::SoundIterator sIter(sampler);
-
-			while (auto sound = sIter.getNextSound())
-			{
-				if (sampler->soundCanBePlayed(sound, 1, noteNumber, (float)velocity / 127.0f))
-				{
-					handler.selectedSamplerSounds.addToSelection(sound.get());
-				}
+				handler.selectedSamplerSounds.addToSelection(sound.get());
 			}
 		}
 
@@ -334,7 +316,7 @@ void SampleEditHandler::updateMainSound(SampleEditHandler& s, ModulatorSamplerSo
 
 bool SampleEditHandler::newKeysPressed(const uint8 *currentNotes)
 {
-	for (int i = 0; i < 128; i++)
+	for (int i = 0; i < 127; i++)
 	{
 		if (currentNotes[i] != 0) return true;
 	}

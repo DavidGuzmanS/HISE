@@ -39,7 +39,7 @@ class WaveformComponent;
                                                                     //[/Comments]
 */
 class SineSynthBody  : public ProcessorEditorBody,
-                       public Slider::Listener,
+                       public SliderListener,
                        public LabelListener,
                        public ButtonListener
 {
