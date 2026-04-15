@@ -3,13 +3,8 @@
 <JUCERPROJECT id="jUHBuI" name="TRIBE" projectType="guiapp" version="4.1.0"
               bundleIdentifier="com.hartinstruments.HISEStandalone" includeBinaryInAppConfig="1"
               companyName="Hart Instruments" companyWebsite="http://hise.audio"
-<<<<<<< HEAD
-              companyCopyright="Hart Instruments" reportAppUsage="0" splashScreenColour="Dark"
-              cppLanguageStandard="17" jucerFormatVersion="1">
-=======
               companyCopyright="Hart Instruments" displaySplashScreen="0" reportAppUsage="0"
               splashScreenColour="Dark" cppLanguageStandard="17" jucerFormatVersion="1">
->>>>>>> parent of 5c45e463a (Merge remote-tracking branch 'upstream/develop' into develop)
   <MAINGROUP id="yomWt4" name="TRIBE">
     <GROUP id="{577963C7-1A49-BB2A-D701-52DC7A5895F7}" name="Source">
       <FILE id="Fw455d" name="ScriptNodeTestSuite.cpp" compile="1" resource="0"
@@ -34,13 +29,8 @@
   <EXPORTFORMATS>
     <XCODE_MAC targetFolder="Builds/MacOSX" smallIcon="ho3qQy" bigIcon="ho3qQy"
                customPList="&lt;?xml version=&quot;1.0&quot; encoding=&quot;UTF-8&quot;?&gt;&#10;&lt;!DOCTYPE plist PUBLIC &quot;-//Apple//DTD PLIST 1.0//EN&quot; &quot;http://www.apple.com/DTDs/PropertyList-1.0.dtd&quot;&gt;&#10;&lt;plist version=&quot;1.0&quot;&gt;&#10;&lt;dict&gt;&#10;&lt;key&gt;NSAppTransportSecurity&lt;/key&gt; &#10;&lt;dict&gt; &#10;&lt;key&gt;NSAllowsArbitraryLoads&lt;/key&gt;&lt;true/&gt;&#10;&lt;/dict&gt;&#10;&lt;/dict&gt;&#10;&lt;/plist&gt;"
-<<<<<<< HEAD
-               extraDefs="HI_ENABLE_EXPANSION_EDITING=1&#10;HISE_ENABLE_EXPANSIONS=1&#10;HISE_SCRIPT_SERVER_TIMEOUT=20000&#10;HISE_INCLUDE_PROFILING_TOOLKIT=1&#10;"
-               extraCompilerFlags="-Wno-reorder -Wno-inconsistent-missing-override -faligned-allocation -Wno-switch -ffp-contract=off"
-=======
                extraDefs="USE_IPP=0&#10;HI_ENABLE_EXPANSION_EDITING=1&#10;HISE_ENABLE_EXPANSIONS=1&#10;HISE_SCRIPT_SERVER_TIMEOUT=20000&#10;NUM_HARDCODED_FX_MODS=8&#10;"
                extraCompilerFlags="-Wno-reorder -Wno-inconsistent-missing-override -faligned-allocation -Wno-switch"
->>>>>>> parent of 5c45e463a (Merge remote-tracking branch 'upstream/develop' into develop)
                xcodeValidArchs="arm64,arm64e" extraLinkerFlags="-rpath $(SRCROOT)/../../../../tools/faust/lib "
                externalLibraries="faust" iosDevelopmentTeamID="">
       <CONFIGURATIONS>
