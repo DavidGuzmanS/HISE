@@ -146,14 +146,14 @@ juce::String MenuReferenceDocGenerator::Resolver::generateIconTable(const String
 	return {};
 }
 
-void MenuReferenceDocGenerator::ItemGenerator::createMenuReference(MarkdownDataBase::Item& parent)
+void MenuReferenceDocGenerator::ItemGenerator::createMenuReference(MarkdownDataBase::Item::Ptr parent)
 {
-	MarkdownDataBase::Item wItem;
-	wItem.url = rootURL.getChildUrl("menu-reference").withRoot(rootDirectory, true);
+	auto wItem = MarkdownDataBase::Item::createNew();
+	wItem->url = rootURL.getChildUrl("menu-reference").withRoot(rootDirectory, true);
 
-	auto f = wItem.url.getMarkdownFile({});
+	auto f = wItem->url.getMarkdownFile({});
 
-	MarkdownParser::createDatabaseEntriesForFile(rootDirectory, wItem, f, parent.c);
+	MarkdownParser::createDatabaseEntriesForFile(rootDirectory, wItem.get(), f, parent->c);
 
 	data->createMenuCommandInfos();
 
@@ -182,23 +182,20 @@ void MenuReferenceDocGenerator::ItemGenerator::createMenuReference(MarkdownDataB
 		createMenu(wItem, s);
 	}
 
-	wItem.sortChildren();
-
-	parent.addChild(std::move(wItem));
+	wItem->sortChildren();
+	parent->addChild(wItem);
 }
 
-void MenuReferenceDocGenerator::ItemGenerator::createMenu(MarkdownDataBase::Item& parent, const String& menuName)
+void MenuReferenceDocGenerator::ItemGenerator::createMenu(MarkdownDataBase::Item::Ptr parent, const String& menuName)
 {
-	MarkdownDataBase::Item menuItem;
-	menuItem.url = parent.url.getChildUrl(menuName);
-	menuItem.url.setType(MarkdownLink::Folder);
-	menuItem.fillMetadataFromURL();
-	menuItem.c = parent.c;
-	menuItem.tocString = menuName;
-	menuItem.keywords.add(menuName);
+	auto menuItem = MarkdownDataBase::Item::createNew();
+	menuItem->url = parent->url.getChildUrl(menuName);
+	menuItem->url.setType(MarkdownLink::Folder);
+	menuItem->fillMetadataFromURL();
+	menuItem->c = parent->c;
+	menuItem->tocString = menuName;
+	menuItem->keywords.add(menuName);
 	
-	
-
 	data->createMenuCommandInfos();
 
 	for (const auto& info : data->commandInfos)
@@ -208,106 +205,58 @@ void MenuReferenceDocGenerator::ItemGenerator::createMenu(MarkdownDataBase::Item
 
 		if (info.categoryName == menuName)
 		{
-			MarkdownDataBase::Item rItem;
+			auto rItem = MarkdownDataBase::Item::createNew();
 
-			rItem.c = menuItem.c;
-			rItem.url = menuItem.url.getChildUrl(info.shortName, true);
-			rItem.tocString = info.shortName;
-			rItem.keywords.add("Menu | " + menuName);
-			rItem.description = info.shortName;
+			rItem->c = menuItem->c;
+			rItem->url = menuItem->url.getChildUrl(info.shortName, true);
+			rItem->tocString = info.shortName;
+			rItem->keywords.add("Menu | " + menuName);
+			rItem->description = info.shortName;
 
-			menuItem.addChild(std::move(rItem));
+			menuItem->addChild(rItem);
 		}
 	}
 
-	parent.addChild(std::move(menuItem));
+	parent->addChild(menuItem);
 }
 
-void MenuReferenceDocGenerator::ItemGenerator::createAndAddWorkspacesItem(MarkdownDataBase::Item& parent)
+
+
+void MenuReferenceDocGenerator::ItemGenerator::createSettingsItem(MarkdownDataBase::Item::Ptr parent)
 {
-	MarkdownDataBase::Item wItem;
-
-	wItem.c = parent.c;
-	wItem.tocString = "Workspaces";
-	wItem.url = parent.url.getChildUrl(wItem.tocString);
-	wItem.url.setType(MarkdownLink::Folder);
-
-	createAndAddWorkspace(wItem, "Main Workspace");
-	createAndAddWorkspace(wItem, "Scripting Workspace");
-	createAndAddWorkspace(wItem, "Sampler Workspace");
-	createAndAddWorkspace(wItem, "Custom Workspace");
-
-	parent.addChild(std::move(wItem));
-}
-
-void MenuReferenceDocGenerator::ItemGenerator::createAndAddWorkspace(MarkdownDataBase::Item& parent, const String& id)
-{
-	MarkdownDataBase::Item wItem;
-
-	wItem.c = parent.c;
-	wItem.tocString = id;
-	wItem.url = parent.url.getChildUrl(id).withRoot(rootDirectory, true);
-	wItem.icon = wItem.url.getHeaderFromFile({}).getIcon();
-
-
-	auto d = wItem.url.getDirectory({});
-
-	Array<File> files;
-
-	d.findChildFiles(files, File::findFiles, true, "*.md");
-
-	for (auto f : files)
-	{
-		if (MarkdownLink::Helpers::isReadme(f))
-			continue;
-
-		MarkdownDataBase::Item i;
-		i.url = { rootDirectory, f.getRelativePathFrom(rootDirectory) };
-
-		MarkdownParser::createDatabaseEntriesForFile(rootDirectory, i, f, wItem.c);
-		wItem.addChild(std::move(i));
-	}
-
-	parent.addChild(std::move(wItem));
-}
-
-void MenuReferenceDocGenerator::ItemGenerator::createSettingsItem(MarkdownDataBase::Item& parent)
-{
-	auto url = parent.url.getChildUrlWithRoot("settings");
+	auto url = parent->url.getChildUrlWithRoot("settings");
 
 	auto f = url.getMarkdownFile({});
 	auto header = url.getHeaderFromFile({});
 
-	MarkdownDataBase::Item sItem(rootDirectory,
+	MarkdownDataBase::Item::Ptr sItem = new MarkdownDataBase::Item(rootDirectory,
 		f,
 		header.getKeywords(),
 		header.getDescription());
 
-	sItem.url = url;
-
-	sItem.tocString << header.getDescription();
-	sItem.c = parent.c;
-	sItem.icon = header.getKeyValue("icon");
+	sItem->url = url;
+	sItem->tocString << header.getDescription();
+	sItem->c = parent->c;
+	sItem->icon = header.getKeyValue("icon");
 
 	createSettingSubMenu(sItem, "Project");
 	createSettingSubMenu(sItem, "Development");
-
 	createSettingSubMenu(sItem, "Audio MIDI");
 	
-	parent.addChild(std::move(sItem));
+	parent->addChild(sItem);
 }
 
-void MenuReferenceDocGenerator::ItemGenerator::createSettingSubMenu(MarkdownDataBase::Item& parent, const String& name)
+void MenuReferenceDocGenerator::ItemGenerator::createSettingSubMenu(MarkdownDataBase::Item::Ptr parent, const String& name)
 {
-	auto url = parent.url.getChildUrlWithRoot(name);
+	auto url = parent->url.getChildUrlWithRoot(name);
 	auto f = url.getMarkdownFile({});
 	auto header = url.getHeaderFromFile({});
 
-	MarkdownDataBase::Item subItem(rootDirectory, f, header.getKeywords(), header.getDescription());
+	MarkdownDataBase::Item::Ptr subItem = new MarkdownDataBase::Item(rootDirectory, f, header.getKeywords(), header.getDescription());
 
-	subItem.url = url;
-	subItem.url.setType(MarkdownLink::MarkdownFile);
-	subItem.tocString << name;
+	subItem->url = url;
+	subItem->url.setType(MarkdownLink::MarkdownFile);
+	subItem->tocString << name;
 
 	auto subId = MarkdownLink::Helpers::getSanitizedFilename(name);
 
@@ -329,33 +278,32 @@ void MenuReferenceDocGenerator::ItemGenerator::createSettingSubMenu(MarkdownData
 		addItemForSettingList(HiseSettings::Midi::getAllIds(), "MIDI", subItem);
 	}
 
-	parent.addChild(std::move(subItem));
+	parent->addChild(subItem);
 }
 
-void MenuReferenceDocGenerator::ItemGenerator::addItemForSettingList(const Array<Identifier>& idList, const String& subName, MarkdownDataBase::Item& parent)
+void MenuReferenceDocGenerator::ItemGenerator::addItemForSettingList(const Array<Identifier>& idList, const String& subName, MarkdownDataBase::Item::Ptr parent)
 {
 	for (auto id : idList)
 	{
-		MarkdownDataBase::Item item;
-		item.keywords.add("Settings | " + subName);
-		
-		item.description = HiseSettings::ConversionHelpers::getUncamelcasedId(id);
-		item.tocString = item.description;
-		item.url = parent.url.getChildUrl(item.description, true);
-		item.c = parent.c;
+		auto item = MarkdownDataBase::Item::createNew();
+		item->keywords.add("Settings | " + subName);
+		item->description = HiseSettings::ConversionHelpers::getUncamelcasedId(id);
+		item->tocString = item->description;
+		item->url = parent->url.getChildUrl(item->description, true);
+		item->c = parent->c;
 
-		parent.addChild(std::move(item));
+		parent->addChild(item);
 	}
 }
 
-hise::MarkdownDataBase::Item MenuReferenceDocGenerator::ItemGenerator::createRootItem(MarkdownDataBase& parent)
+hise::MarkdownDataBase::Item::Ptr MenuReferenceDocGenerator::ItemGenerator::createRootItem(MarkdownDataBase& parent)
 {
-	MarkdownDataBase::Item item;
+	auto item = MarkdownDataBase::Item::createNew();
 
-	item.c = Colours::burlywood;
-	item.url = rootURL;
-	item.icon = "/images/icon_hise";
-	item.fillMetadataFromURL();
+	item->c = Colours::burlywood;
+	item->url = rootURL;
+	item->icon = "/images/icon_hise";
+	item->fillMetadataFromURL();
 
 	auto url = rootURL.getChildUrl("project-management");
 
@@ -363,15 +311,21 @@ hise::MarkdownDataBase::Item MenuReferenceDocGenerator::ItemGenerator::createRoo
 
 	if (f.isDirectory())
 	{
-		MarkdownDataBase::DirectoryItemGenerator fGenerator(f, item.c);
+		MarkdownDataBase::DirectoryItemGenerator fGenerator(f, item->c);
 		auto pItem = fGenerator.createRootItem(parent);
-		item.addChild(std::move(pItem));
+		item->addChild(pItem);
 	}
 
 	if (data->bp->shouldAbort())
 		return item;
 
-	createAndAddWorkspacesItem(item);
+	{
+		auto hi = rootDirectory.getChildFile("working-with-hise/hise-interface");
+		MarkdownDataBase::DirectoryItemGenerator fGenerator(hi, Colours::burlywood);
+		auto pItem = fGenerator.createRootItem(parent);
+		item->addChild(pItem);
+	}
+
 	createMenuReference(item);
 
 	if (data->bp->shouldAbort())
@@ -382,7 +336,7 @@ hise::MarkdownDataBase::Item MenuReferenceDocGenerator::ItemGenerator::createRoo
 	if (data->bp->shouldAbort())
 		return item;
 
-	item.setDefaultColour(colour);
+	item->setDefaultColour(colour);
 
 	return item;
 }

@@ -271,7 +271,7 @@ void FilterBank::reset()
 
 FilterDataObject::CoefficientData FilterBank::getCurrentCoefficients() const noexcept
 {
-	return FilterEffect::getDisplayCoefficients(mode, freqModValue, q, gain * gainModValue, sampleRate);
+	return FilterEffect::getDisplayCoefficients(mode, freqModValue, q * qModValue, gain * gainModValue, sampleRate);
 }
 
 void FilterBank::setQ(double newQ)
@@ -295,6 +295,8 @@ FilterDataObject::CoefficientData FilterEffect::getDisplayCoefficients(FilterBan
 
 	if (srToUse < 1.0)
 		srToUse = 44100.0;
+
+	FloatSanitizers::sanitizeDoubleNumber(frequency);
 
 	frequency = jlimit<double>(20.0, srToUse / 2.0, frequency);
 	gain = jlimit<float>(0.01f, 32.0f, gain);

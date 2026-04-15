@@ -315,6 +315,40 @@ public:
 
 	Array<Selector> getSelectors() const;
 
+	static bool isNonLayoutProperty(const String& propertyName)
+	{
+		auto t = getPropertyType(propertyName);
+
+		switch(t)
+		{
+		case PropertyType::Positioning:
+		case PropertyType::Layout:
+		case PropertyType::Transition:
+		case PropertyType::Undefined:
+			return false;
+		case PropertyType::Transform:
+			case PropertyType::Border:
+			case PropertyType::BorderRadius:
+			case PropertyType::Colour:
+			case PropertyType::Shadow:
+			case PropertyType::Font:
+			case PropertyType::Variable:
+			return true;
+		}
+
+		return false;
+	}
+
+	static bool isPixelValueProperty(const String& propertyName)
+	{
+		auto propType = simple_css::Parser::getPropertyType(propertyName);
+		bool isPixelResolvable = (propType == simple_css::PropertyType::Layout ||
+			propType == simple_css::PropertyType::Positioning ||
+			propType == simple_css::PropertyType::BorderRadius);
+
+		return isPixelResolvable;
+	}
+
 private:
 
 	String getLocation(String::CharPointerType p=String::CharPointerType(nullptr)) const;
@@ -361,6 +395,8 @@ private:
 
 	struct RawClass
 	{
+		operator bool() const { return !selectors.empty(); }
+
 		std::vector<Selector::RawList> selectors;
 		std::vector<RawLine> lines;
 	};

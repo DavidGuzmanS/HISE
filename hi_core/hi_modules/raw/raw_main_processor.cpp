@@ -77,15 +77,6 @@ void MainProcessor::registerCallback(Processor* p, int parameterIndex, const Cal
 		parameters[parameterIndex]->registerCallback(p, f, executionType);
 }
 
-juce::Identifier MainProcessor::getIdentifierForParameterIndex(int parameterIndex) const
-{
-	if (isPositiveAndBelow(parameterIndex, parameters.size()))
-		return parameters[parameterIndex]->getId();
-
-	jassertfalse;
-	return {};
-}
-
 void MainProcessor::setInternalAttribute(int parameterIndex, float newValue)
 {
 	if (isPositiveAndBelow(parameterIndex, parameters.size()))
@@ -148,8 +139,7 @@ MainProcessor::ParameterBase::ParameterBase(MainProcessor* p, const Identifier& 
 	loadFunction = [this](float newValue)
 	{
 		this->update(newValue);
-		jassertfalse;
-		this->p->sendOtherChangeMessage(dispatch::library::ProcessorChangeEvent::Attribute);
+		this->p->sendOtherChangeMessage(dispatch::library::ProcessorChangeEvent::Any);
 	};
 }
 

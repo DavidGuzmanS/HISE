@@ -203,9 +203,10 @@ public:
 		getSampleMap()->suspendInternalTimers(shouldBeSuspended);
 	}
 
-	SET_PROCESSOR_NAME("StreamingSampler", "Sampler", "The main sampler class of HISE.");
+	SET_PROCESSOR_NAME("StreamingSampler", "Sampler", "");
 
-	/** Special Parameters for the ModulatorSampler. */
+	static ProcessorMetadata createMetadata();
+
 	enum Parameters
 	{
 		PreloadSize = ModulatorSynth::numModulatorSynthParameters, 
@@ -223,13 +224,12 @@ public:
 		numModulatorSamplerParameters
 	};
 
-	/** Different behaviour for retriggered notes. */
 	enum RepeatMode
 	{
-		KillNote = 0, ///< kills the note (using the supplied fade time)
-		NoteOff, ///< triggers a note off event before starting the note
-		DoNothing, ///< do nothin (a new voice is started and the old keeps ringing).
-		KillSecondOldestNote, // allow one note to retrigger, but then kill the notes
+		KillNote = 0,
+		NoteOff,
+		DoNothing,
+		KillSecondOldestNote,
 		KillThirdOldestNote
 	};
 
@@ -239,10 +239,9 @@ public:
 		XFade
 	};
 
-	/** Additional modulator chains. */
 	enum InternalChains
 	{
-		SampleStartModulation = ModulatorSynth::numInternalChains, ///< allows modification of the sample start if the sound allows this.
+		SampleStartModulation = ModulatorSynth::numInternalChains,
 		CrossFadeModulation,
 		numInternalChains
 	};
@@ -339,8 +338,6 @@ public:
 
 		operator bool() const { return mode != TimestretchMode::Disabled; }
 	};
-
-	ADD_DOCUMENTATION_WITH_BASECLASS(ModulatorSynth);
 
 	/** Creates a new ModulatorSampler. */
 	ModulatorSampler(MainController *mc, const String &id, int numVoices);;
@@ -446,7 +443,7 @@ public:
 	void preHiseEventCallback(HiseEvent &m) override;
 
 	bool isUsingCrossfadeGroups() const { return crossfadeGroups; }
-	float* calculateCrossfadeModulationValuesForVoice(int voiceIndex, int startSample, int numSamples, int groupIndex);
+	float* calculateCrossfadeModulationValuesForVoice(int voiceIndex, int startSample, int numSamples, ModulatorSamplerSound::Bitmask m);
 	const float *getCrossfadeModValues() const;
 
 	ValueTree parseMetadata(const File& sampleFile);
@@ -456,6 +453,29 @@ public:
 	void setVoiceLimit(int newVoiceLimit) override;
 
 	float getConstantCrossFadeModulationValue() const noexcept;
+
+	float* calculateGroupModulationValuesForVoice(const HiseEvent& e, int voiceIndex, int startSample, int numSamples,
+	                                              ModulatorSamplerSound::Bitmask m, bool firstInVoice)
+	{
+		if(soundCollector == nullptr)
+			return nullptr;
+
+		if(auto gm = getComplexGroupManager())
+			return gm->calculateGroupModulationValuesForVoice(e, voiceIndex, startSample, numSamples, m, firstInVoice);
+
+		return nullptr;
+	}
+
+	float getConstantGroupModulationValue(int voiceIndex, SynthSoundWithBitmask::Bitmask m) const
+	{
+		if(soundCollector == nullptr)
+			return 1.0f;
+
+		if(auto gm = getComplexGroupManager())
+			return gm->getConstantGroupModulationValue(voiceIndex, m);
+		
+		return 1.0f;
+	}
 
 	float getCrossfadeValue(int groupIndex, float inputValue) const;
 
@@ -575,7 +595,18 @@ public:
 
 	void setNumChannels(int numChannels);
 
+	bool setAllowReleaseStart(int eventId, bool shouldAllow);
 
+	void handleSustainPedal(int midiChannel, bool isDown) override;
+
+	void setUseComplexGroupManager(bool shouldUseComplexGroupManager);
+
+	SynthSoundWithBitmask::Bitmask getMaxGroupIndex() const { return getComplexGroupManager() != nullptr ? UINT64_MAX : (uint64)rrGroupAmount; }
+
+	ComplexGroupManager* getComplexGroupManager() const
+	{
+		return dynamic_cast<ComplexGroupManager*>(soundCollector.get());
+	}
 
 	struct ChannelData: RestorableObject
 	{
@@ -608,30 +639,9 @@ public:
 		String suffix;
 	};
 
-	const ChannelData &getChannelData(int index) const
-	{
-		if (index >= 0 && index < getNumMicPositions())
-		{
-			return channelData[index];
-		}
-		else
-		{
-			jassertfalse;
-			return channelData[0];
-		}
-		
-	}
+	const ChannelData &getChannelData(int index) const;
 
-	void setMicEnabled(int channelIndex, bool channelIsEnabled) noexcept
-	{
-		if (channelIndex >= NUM_MIC_POSITIONS || channelIndex < 0) return;
-
-        if(channelData[channelIndex].enabled != channelIsEnabled)
-        {
-            channelData[channelIndex].enabled = channelIsEnabled;
-            asyncPurger.triggerAsyncUpdate(); // will call refreshChannelsForSound asynchronously
-        }
-	}
+	void setMicEnabled(int channelIndex, bool channelIsEnabled) noexcept;
 
 	void refreshChannelsForSounds()
 	{

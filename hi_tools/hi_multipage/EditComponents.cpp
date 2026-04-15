@@ -46,7 +46,7 @@ set vs_args=/p:Configuration="Release" /verbosity:minimal
 set PreferredToolArchitecture=x64
 set VisualStudioVersion=17.0
 
-"%HISE_PATH%\tools\Projucer\Projucer.exe" --resave "%build_path%\%PROJECT%.jucer"
+"%HISE_PATH%\JUCE\Projucer\Projucer.exe" --resave "%build_path%\%PROJECT%.jucer"
 
 echo Compiling 64bit FX plugin %project% ...
 set Platform=X64
@@ -56,13 +56,13 @@ pause
 )";
 #elif JUCE_MAC
 static const char* BatchFile = R"(
-    chmod +x "%HISE_PATH%/tools/Projucer/Projucer.app/Contents/MacOS/Projucer"
+    chmod +x "%HISE_PATH%/JUCE/Projucer/Projucer.app/Contents/MacOS/Projucer"
     cd "`dirname "$0"`"
-    "%HISE_PATH%/tools/Projucer/Projucer.app/Contents/MacOS/Projucer" --resave "%PROJECT%.jucer"
+    "%HISE_PATH%/JUCE/Projucer/Projucer.app/Contents/MacOS/Projucer" --resave "%PROJECT%.jucer"
 
     set -o pipefail
     echo Compiling %PROJECT% ...
-    xcodebuild -project "Builds/MacOSX/%PROJECT%.xcodeproj" -configuration "Release" -jobs "10" | xcpretty
+    xcodebuild -project "Builds/MacOSX/%PROJECT%.xcodeproj" -configuration "Release" -jobs "6" | "%HISE_PATH%/tools/Projucer/xcbeautify"
 )";
 #elif JUCE_LINUX
 static const char* BatchFile = R"(
@@ -172,7 +172,7 @@ START_JUCE_APPLICATION (MainWrapper)
     </GROUP>
   </MAINGROUP>
   <EXPORTFORMATS>
-    <XCODE_MAC targetFolder="Builds/MacOSX" extraDefs="USE_IPP=0&#10;PERFETTO=0&#10;USE_BACKEND=1"
+    <XCODE_MAC targetFolder="Builds/MacOSX" extraDefs="PERFETTO=0&#10;USE_BACKEND=1"
                extraCompilerFlags="-Wno-reorder -Wno-inconsistent-missing-override -mpopcnt -faligned-allocation -Wno-switch"
                xcodeValidArchs="x86_64" smallIcon="%ICON_REF%" bigIcon="%ICON_REF%" iosDevelopmentTeamID="%TEAM_ID%">
       <CONFIGURATIONS>

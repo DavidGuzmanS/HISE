@@ -88,7 +88,7 @@ END_MARKDOWN_CHAPTER()
 
 static bool areMajorWebsitesAvailable()
 {
-	const char* urlsToTry[] = { "http://google.com/generate_204", "https://amazon.com", nullptr };
+	const char* urlsToTry[] = { "https://google.com/generate_204", "https://amazon.com", nullptr };
 
 	for (const char** url = urlsToTry; *url != nullptr; ++url)
 	{
@@ -103,205 +103,6 @@ static bool areMajorWebsitesAvailable()
 	return false;
 }
 
-
-
-class UpdateChecker : public DialogWindowWithBackgroundThread
-{
-public:
-
-	class ScopedTempFile
-	{
-	public:
-
-		ScopedTempFile(const File &f_) :
-			f(f_)
-		{
-			f.deleteFile();
-
-			jassert(!f.existsAsFile());
-
-			f.create();
-		}
-
-		~ScopedTempFile()
-		{
-			jassert(f.existsAsFile());
-
-			jassert(f.deleteFile());
-		}
-
-
-		File f;
-	};
-
-	UpdateChecker() :
-		DialogWindowWithBackgroundThread("Checking for newer version."),
-		updatesAvailable(false)
-	{
-		updatesAvailable = checkUpdate();
-
-		if (updatesAvailable)
-		{
-			filePicker = new FilenameComponent("Download Location", File::getSpecialLocation(File::SpecialLocationType::userDesktopDirectory), false, true, true, "", "", "Choose Download Location");
-			filePicker->setSize(500, 24);
-
-			addCustomComponent(filePicker);
-
-			addBasicComponents();
-
-			showStatusMessage("New build available: " + newVersion + ". Press OK to download file to the selected location");
-		}
-		else
-		{
-			addBasicComponents(false);
-			showStatusMessage("Your HISE build is up to date.");
-		}
-	}
-
-	static bool downloadProgress(void* context, int bytesSent, int totalBytes)
-	{
-		const double downloadedMB = (double)bytesSent / 1024.0 / 1024.0;
-		const double totalMB = (double)totalBytes / 1024.0 / 1024.0;
-		const double percent = downloadedMB / totalMB;
-
-		static_cast<UpdateChecker*>(context)->showStatusMessage("Downloaded: " + String(downloadedMB, 2) + " MB / " + String(totalMB, 2) + " MB");
-
-		static_cast<UpdateChecker*>(context)->setProgress(percent);
-
-		return !static_cast<UpdateChecker*>(context)->threadShouldExit();
-	}
-
-	void run()
-	{
-		auto assets = obj["assets"];
-
-#if JUCE_WINDOWS
-		auto extension = ".exe";
-#elif JUCE_MAC
-		auto extension = ".pkg";
-#else
-		auto extension = "david_has_to_build_it_himself";
-#endif
-
-		URL url;
-
-		if(assets.isArray())
-		{
-			for(auto& a: *assets.getArray())
-			{
-				if(a["name"].toString().endsWith(extension))
-				{
-					url = URL(a["browser_download_url"].toString());
-					break;
-				}
-			}
-		}
-
-		auto downloadFileName = url.getFileName();
-
-		auto stream = url.createInputStream(false, &downloadProgress, this);
-
-		target = File(filePicker->getCurrentFile().getChildFile(downloadFileName));
-
-		if (!target.existsAsFile())
-		{
-			MemoryBlock mb;
-
-			mb.setSize(8192);
-
-			tempFile = new ScopedTempFile(File(target.getFullPathName() + "temp"));
-
-			ScopedPointer<FileOutputStream> fos = new FileOutputStream(tempFile->f);
-
-			const int64 numBytesTotal = stream->getNumBytesRemaining();
-
-			int64 numBytesRead = 0;
-
-			downloadOK = false;
-
-			while (stream->getNumBytesRemaining() > 0)
-			{
-				const int64 chunkSize = (int64)jmin<int>((int)stream->getNumBytesRemaining(), 8192);
-
-				downloadProgress(this, (int)numBytesRead, (int)numBytesTotal);
-
-				if (threadShouldExit())
-				{
-					fos->flush();
-					fos = nullptr;
-
-					tempFile = nullptr;
-					return;
-				}
-
-				stream->read(mb.getData(), (int)chunkSize);
-
-				numBytesRead += chunkSize;
-
-				fos->write(mb.getData(), (size_t)chunkSize);
-			}
-
-			downloadOK = true;
-			fos->flush();
-
-			tempFile->f.copyFileTo(target);
-		}
-	};
-
-	void threadFinished()
-	{
-		if (downloadOK)
-		{
-			PresetHandler::showMessageWindow("Download finished", "Quit the app and run the installer to update to the latest version", PresetHandler::IconType::Info);
-
-			target.revealToUser();
-		}
-	}
-
-private:
-
-	var obj;
-
-	bool checkUpdate()
-	{
-		URL url("https://api.github.com");
-		url = url.withNewSubPath("repos/christophhart/HISE/releases/latest");
-
-		auto response = url.readEntireTextStream();
-
-		obj = JSON::parse(response);
-
-		if(obj.isObject())
-		{
-			newVersion = obj["tag_name"].toString();
-
-			auto thisVersion = "3.4.9";// ProjectInfo::versionString;
-
-			SemanticVersionChecker svs(thisVersion, newVersion);
-
-			return svs.isUpdate();
-		}
-
-		return false;
-		
-	}
-
-	String newVersion;
-
-	bool updatesAvailable;
-
-	File target;
-	ScopedPointer<ScopedTempFile> tempFile;
-
-	bool downloadOK;
-
-	ScopedPointer<FilenameComponent> filePicker;
-	ScopedPointer<TextEditor> changelogDisplay;
-};
-
-
-
-
 void XmlBackupFunctions::restoreAllScripts(ValueTree& v, ModulatorSynthChain *masterChain, const String &newId)
 {
 	static const Identifier pr("Processor");
@@ -309,7 +110,11 @@ void XmlBackupFunctions::restoreAllScripts(ValueTree& v, ModulatorSynthChain *ma
 	static const Identifier id("ID");
 	static const Identifier typ("Type");
 
-	if (v.getType() == Identifier(pr) && v[typ].toString().contains("Script"))
+	auto processorType = v[typ].toString();
+
+	if (v.getType() == Identifier(pr) && 
+		processorType.contains("Script") &&
+		processorType != "ScriptnodeVoiceKiller")
 	{
 		auto fileName = getSanitiziedName(v[id]);
 		const String t = v[scr];
@@ -745,10 +550,10 @@ This will use Loris to separate the noise from the sinusoidal parts of the sampl
 
 	void refreshEnablement()
 	{
-		auto resynthesise = converter->phaseMode != SampleMapToWavetableConverter::PhaseMode::Resample;
+		auto resynthesise = converter->cd.phaseMode != SampleMapToWavetableConverter::PhaseMode::Resample;
 
 		row2->getComponent<ComboBox>("offset")->setEnabled(resynthesise);
-		row2->getComponent<ComboBox>("numSlices")->setEnabled(resynthesise && converter->phaseMode != SampleMapToWavetableConverter::PhaseMode::DynamicPhase);
+		row2->getComponent<ComboBox>("numSlices")->setEnabled(resynthesise && converter->cd.phaseMode != SampleMapToWavetableConverter::PhaseMode::DynamicPhase);
 		row2->getComponent<ComboBox>("sourcelength")->setEnabled(!resynthesise);
 
 		row2->getComponent<ComboBox>("Noise")->setEnabled(resynthesise);
@@ -797,7 +602,7 @@ This will use Loris to separate the noise from the sinusoidal parts of the sampl
 		{
 			cancelCurrentTask();
 
-			converter->phaseMode = (SampleMapToWavetableConverter::PhaseMode)comboBoxThatHasChanged->getSelectedItemIndex();
+			converter->cd.phaseMode = (SampleMapToWavetableConverter::PhaseMode)comboBoxThatHasChanged->getSelectedItemIndex();
 
 			refreshEnablement();
 			
@@ -807,7 +612,7 @@ This will use Loris to separate the noise from the sinusoidal parts of the sampl
 		}
 		if (comboBoxThatHasChanged->getName() == "compression")
 		{
-			converter->useCompression = comboBoxThatHasChanged->getSelectedItemIndex();
+			converter->cd.useCompression = comboBoxThatHasChanged->getSelectedItemIndex();
 			return;
 		}
 		if (comboBoxThatHasChanged->getName() == "samplemap")
@@ -878,7 +683,7 @@ This will use Loris to separate the noise from the sinusoidal parts of the sampl
 		{
 			cancelCurrentTask();
 
-			converter->reverseOrder = comboBoxThatHasChanged->getSelectedItemIndex() == 1;
+			converter->cd.reverseOrder = comboBoxThatHasChanged->getSelectedItemIndex() == 1;
 		}
         
 		refreshPreview();
@@ -888,7 +693,7 @@ This will use Loris to separate the noise from the sinusoidal parts of the sampl
 	{
 		converter->exportAll();
 
-		if (converter->phaseMode == SampleMapToWavetableConverter::PhaseMode::Resample)
+		if (converter->cd.phaseMode == SampleMapToWavetableConverter::PhaseMode::Resample)
 		{
 			showStatusMessage("Wavetables exported with " + String(converter->cycleLength) + " cycle length");
 		}
@@ -2072,10 +1877,17 @@ public:
 
 		void apply(const Identifier& id)
 		{
+			auto value = propertyData.getProperty(id);
+
+			if (id == SampleIds::SampleStart)
+				addDelta(-int(value), { SampleIds::SampleEnd, SampleIds::LoopStart, SampleIds::LoopEnd });
+
 			for (auto f : sampleFiles)
-			{
+			{									
 				apply(id, f);
 			}
+			
+			propertyData.removeProperty(id, nullptr);
 		}
 
 		void apply(const Identifier& id, File& fileToUse)
@@ -2131,8 +1943,6 @@ public:
 				for (int i = 0; i < numChannels; i++)
 					FloatVectorOperations::copy(nb.getWritePointer(i), ob.getReadPointer(i, offset), nb.getNumSamples());
 
-				addDelta(-offset, { SampleIds::SampleEnd, SampleIds::LoopStart, SampleIds::LoopEnd });
-
 				std::swap(nb, ob);
 			}
 			else if (id == SampleIds::LoopXFade)
@@ -2149,7 +1959,6 @@ public:
 
 				for (int i = 0; i < numChannels; i++)
 					ob.addFromWithRamp(i, fadeOutStart, ob.getReadPointer(i, fadeInStart), xfadeSize, 0.0f, 1.0f);
-
 			}
 			else if (id == SampleIds::SampleEnd)
 			{
@@ -2290,7 +2099,6 @@ public:
 				}
 			}
 
-			propertyData.removeProperty(id, nullptr);
 			hlac::CompressionHelpers::dump(ob, fileToUse.getFullPathName(), sampleRate, bitDepth);
 		}
 

@@ -173,8 +173,15 @@ public:
         
         void addConvolverToBeDeleted(MultithreadedConvolver::Ptr c)
         {
-            SpinLock::ScopedLockType sl(deleteLock);
-            soonToBeDeleted.add(c);
+			{
+				SpinLock::ScopedLockType sl(deleteLock);
+				soonToBeDeleted.add(c);
+			}
+
+			if(!isThreadRunning() && !currentlyRendering)
+			{
+				soonToBeDeleted.clear();
+			}
         }
         
 		bool isBusy() const { return currentlyRendering; }
@@ -243,7 +250,7 @@ public:
                 backgroundThread->numRegisteredConvolvers++;
             
             if (backgroundThread != nullptr && !backgroundThread->isThreadRunning())
-                backgroundThread->startThread(10);
+                ThreadStarters::startRealtime(backgroundThread);
         }
 	}
 
@@ -305,7 +312,7 @@ protected:
 	bool nonRealtime = false;
 	bool processingEnabled = true;
 
-	audiofft::ImplementationType currentType = audiofft::ImplementationType::numImplementationTypes;
+	audiofft::ImplementationType currentType = audiofft::ImplementationType::BestAvailable;
 
 	MultithreadedConvolver::Ptr createNewEngine(audiofft::ImplementationType fftType);
 

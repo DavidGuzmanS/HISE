@@ -319,6 +319,20 @@ public:
 		/** Returns the downsampling factor for the modulation signal (default is 8). */
 		double getControlRateDownsamplingFactor() const;
 
+		/** Uses one of the inbuilt text converters to prettify a numeric value. */
+		String getTextForValue(double value, String converterMode)
+		{
+			auto vtc = ValueToTextConverter::createForMode(converterMode);
+			return vtc.getTextForValue(value);
+		}
+
+		/** Uses one of the inbuilt text converts to parse a text string to a numeric value. */
+		double getValueForText(String text, String convertedMode)
+		{
+			auto vtc = ValueToTextConverter::createForMode(convertedMode);
+			return vtc.getValueForText(text);
+		}
+
 		/** Iterates the given sub-directory of the Samples folder and returns a list with all references to audio files. */
 		var getSampleFilesFromDirectory(const String& relativePathFromSampleFolder, bool recursive);
 
@@ -369,6 +383,12 @@ public:
 
 		/** Creates a broadcaster that can send messages to attached listeners. */
 		var createBroadcaster(var defaultValues);
+
+        /** Creates a BX Licenser object (requires the proprietary SDK). */
+        var createBXLicenser();
+
+		/** Creates a NKS manager object (requires the proprietary SDK). */
+		var createNKSManager(); 
 
 		/** Creates a reference to the DSP network of another script processor. */
 		var getDspNetworkReference(String processorId, String id);
@@ -556,6 +576,9 @@ public:
 		/** Returns the current preload message if there is one. */
 		String getPreloadMessage();
 
+		/** Sets the preload message. */
+		void setPreloadMessage(String message);
+
 		/** Returns the current Zoom Level. */
 		var getZoomLevel() const;
 
@@ -586,8 +609,8 @@ public:
 		/** Allows access to the data of the host (playing status, timeline, etc...). */
 		DynamicObject *getPlayHead();
 
-		/** Checks if the given CC number is used for parameter automation and returns the index of the control. */
-		int isControllerUsedByAutomation(int controllerNumber);
+		/** Checks if the given CC number (single number) or channel / CC number (JS Array: [channel, CC]) is used for parameter automation and returns the index of the control. */
+		int isControllerUsedByAutomation(var controllerNumber);
 
 		/** Creates a MIDI List object. */
     ScriptingObjects::MidiList *createMidiList();
@@ -637,9 +660,6 @@ public:
 		/** Imports a JSON file as object. */
 		var loadFromJSON(String fileName);
 
-		/** Displays the progress (0.0 to 1.0) in the progress bar of the editor. */
-		void setCompileProgress(var progress);
-
 		/** Matches the string against the regex token. */
 		bool matchesRegex(String stringToMatch, String regex);
 
@@ -655,6 +675,7 @@ public:
 		/** Returns the width of the string for the given font properties. */
 		float getStringWidth(String text, String fontName, float fontSize, float fontSpacing);
 
+        /** Returns a number as string in hexadecimal format (0xFFFFFFFF). */
 		String intToHexString(int value);
 
 		/** Signals that the application should terminate. */
@@ -816,6 +837,9 @@ public:
 		/** Returns enabled state of midi channel (0 = All channels). */
 		bool isMidiChannelEnabled(int index);
 
+		/** Returns true (on Windows) if IPP is enabled or (optionally) if the plugin is running on macOS. */
+		bool isIppEnabled(bool returnTrueIfMacOS);
+
 		/** Returns an array of the form [width, height]. */
 		var getUserDesktopSize();
 
@@ -888,6 +912,9 @@ public:
 
 		/** Sets the volume of a particular group (use -1 for active group). Only works with disabled crossfade tables. */
 		void setRRGroupVolume(int groupIndex, int gainInDecibels);
+
+		/** Enable / disables the release start feature for the given event. */
+		bool setAllowReleaseStart(int eventId, bool shouldBeAllowed);
 
 		/** Returns the currently (single) active RR group. */
 		int getActiveRRGroup();
@@ -1038,6 +1065,9 @@ public:
 		/** Clears the current samplemap. */
 		bool clearSampleMap();
 
+		/** Returns an object that can be used to control the complex group management of this sampler. */
+		var getComplexGroupManager();
+
 		// ============================================================================================================
 
 		struct Wrapper;
@@ -1181,7 +1211,7 @@ public:
 
 
 		/** Sends a controller event to the synth. */
-		void sendController(int controllerNumber, int controllerValue);
+		void sendController(int number, int value);
 
 		/** The same as sendController (for backwards compatibility) */
 		void sendControllerToChildSynths(int controllerNumber, int controllerValue);
@@ -1267,6 +1297,9 @@ public:
 
 		/** Creates a reference to the routing matrix of the given processor. */
 		ScriptRoutingMatrix* getRoutingMatrix(const String& processorId);
+
+		/** Creates a object to control the wavetable synthesiser features. */
+		ScriptingObjects::ScriptWavetableController* getWavetableController(const String& processorId);
 
 		/** Returns the index of the Modulator in the chain with the supplied chainId */
 		int getModulatorIndex(int chainId, const String &id) const;
@@ -1386,11 +1419,23 @@ public:
 		/** Throws an error message if the value is a string. */
 		void assertNoString(var value);
 
+		/** Throws the given error message if the condition isn't met. */
+		void assertWithMessage(bool condition, String errorMessage);
+
 		/** Throws an error message if the value is not a legal number (eg. string or array or infinity or NaN). */
 		void assertLegalNumber(var value);
 
 		/** Throws an assertion in the attached debugger. */
 		void breakInDebugger();
+
+		/** Starts a sampling session with the given ID. */
+		void startSampling(const String& sessionId);
+
+		/** Synchronously tests a callback of a given object for automated testing cycles. */
+		void testCallback(var obj, String callbackId, var argList);
+
+		/** Stores the current state of the given data into the current sampling session. */
+		void sample(const String& label, var dataToSample);
 
 		struct Wrapper;
 
@@ -1401,6 +1446,11 @@ public:
 		}
 
 private:
+	
+		bool warnIfNoSession = true;
+
+		ProfileCollection consoleProfile;
+		ProfileCollection::ID pLog;
 
 		Identifier id;
 		int lineNumber;
@@ -1491,6 +1541,12 @@ private:
 		/** Enables a high precision grid timer. */
 		void setEnableGrid(bool shouldBeEnabled, int tempoFactor);
 
+		/** Adds a multiplier to slow down the grid callbacks for this transport handler. */
+		void setLocalGridMultiplier(int factor);
+
+		/** Bypasses the grid callback for this transport handler. */
+		void setLocalGridBypassed(bool shouldBeBypassed);
+
         /** Sets the internal clock to stop when the external clock was stopped. */
         void stopInternalClockOnExternalStop(bool shouldStop);
         
@@ -1512,6 +1568,15 @@ private:
 		/** This will return true if the DAW is currently bouncing the audio to a file. You can use this in the transport change callback to modify your processing chain. */
 		bool isNonRealtime() const;
 
+		/** Returns the number of samples for the current grid duration. */
+		double getGridLengthInSamples() const;
+
+		/** Returns whether the transport has been started. */
+		bool isPlaying() const;
+
+		/** Returns the current grid position. */
+		int getGridPosition(int timestamp) const;
+
 	private:
 
 		static void onBypassUpdate(TransportHandler& handler, bool state);
@@ -1531,6 +1596,11 @@ private:
 		int gridIndex = 0;
 		int gridTimestamp = 0;
 		bool firstGridInPlayback = false;
+		int localGridMultiplier = 1;
+		int localBitShift = 0;
+		bool nextLocalIsFirst = false;
+		bool localBypassed = false;
+		int lastGridIndex = -1;
 
 		struct Wrapper;
 
@@ -1638,7 +1708,7 @@ private:
 		void setServerCallback(var callback);
 
 		/** Checks if given email address is valid - not fool proof. */
-    bool isEmailAddress(String email);
+		bool isEmailAddress(String email);
 		
 		void queueChanged(int numItems) override
 		{
@@ -1658,6 +1728,22 @@ private:
 		{
 			return globalServer.getWithParameters(subURL, parameters);
 		}
+
+#if USE_BACKEND
+		// Compose base URL check + callback arg count validation for callWithGET/callWithPOST/downloadFile
+		template <int E, int I> static ApiClass::DiagnosticResult checkBaseURLAndCallbackArgs(ApiClass* c, const Identifier& fName,  const Array<var>& args)
+		{
+			if (auto s = dynamic_cast<Server*>(c))
+			{
+				if (!s->globalServer.isBaseURLDefined())
+					return DiagnosticResult::fail("setBaseURL not called");
+
+				return WeakCallbackHolder::checkCallbackNumArgs<E, I>(c, fName, args);
+			}
+
+			return DiagnosticResult::fail("not a Server object");
+		};
+#endif
 
 	private:
 
@@ -1691,6 +1777,7 @@ private:
 			Downloads,
 			Applications,
 			Temp,
+			Music,
 			numSpecialLocations
 		};
 
@@ -1725,6 +1812,12 @@ private:
 		/** Opens a file browser to choose a directory. */
 		void browseForDirectory(var startFolder, var callback);
 
+		/** Opens a file browser to select multiple directories. */
+		void browseForMultipleDirectories(var startFolder, var callback);
+
+		/** Opens a file browser to select multiple files (to open). */
+		void browseForMultipleFiles(var startFolder, String wildcard, var callback);
+
 		/** Returns a unique machine ID that can be used to identify the computer. */
 		String getSystemId();
 		
@@ -1747,9 +1840,13 @@ private:
 
 		ProcessorWithScriptingContent* p;
 
+		static File getFileFromVar(const var& fileObjectDirectoryConstantOrAbsolutePath, MainController* mc);
+
 	private:
 
-		void browseInternally(File startFolder, bool forSaving, bool isDirectory, String wildcard, var callback);
+		void browseInternally(File startFolder, bool forSaving, bool isDirectory, String wildcard, var callback, bool multiple);
+
+		static File getFileStatic(SpecialLocations l, MainController* mc);
 
 		File getFile(SpecialLocations l);
 
@@ -1789,7 +1886,10 @@ private:
 		/** Returns true if the given thread is currently locked. */
         bool isLocked(int thread) const;
 
-		/** Returns the name of the given string (for debugging purposes only!). */
+		/** Starts a profiling session and calls the finishCallback when ready. */
+        void startProfiling(var options, var finishCallback);
+
+        /** Returns the name of the given string (for debugging purposes only!). */
 		String toString(int thread) const;
 
 		/** Returns the name of the current thread (for debugging purposes only!). */
@@ -1803,6 +1903,8 @@ private:
 
     private:
 
+		WeakCallbackHolder threadProfileCallback;
+
 		using TargetThreadId = MainController::KillStateHandler::TargetThread;
 		using LockId = LockHelpers::Type;
 
@@ -1815,6 +1917,7 @@ private:
         struct Wrapper;
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(Threads);
+		JUCE_DECLARE_WEAK_REFERENCEABLE(Threads);
     };
 
 	class Colours: public ApiClass
@@ -1859,6 +1962,12 @@ private:
 
 		/** Linear interpolation between two colours. */
 		int mix(var colour1, var colour2, float alpha);
+		
+		/** Converts a colour to a [h, s, l, a] array. */
+		var toHsl(var colour);
+
+		/** Converts a colour from a [h, s, l, a] float array to a uint32 value. */
+		int fromHsl(var hsl);
 
 		// ============================================================================================================
 

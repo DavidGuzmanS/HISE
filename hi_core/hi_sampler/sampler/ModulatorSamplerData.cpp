@@ -42,12 +42,16 @@ SampleMap::SampleMap(ModulatorSampler *sampler_):
 	currentPool(nullptr),
 	sampleMapId(Identifier()),
 	data("samplemap"),
+	sampleMapSource(new DebugSession::ProfileDataSource()),
 	mode(data, Identifier("SaveMode"), nullptr, 0)
 #if HISE_SAMPLER_ALLOW_RELEASE_START
 	, releaseStartOptions(new StreamingHelpers::ReleaseStartOptions())
 #endif
 {
 	data.addListener(this);
+
+	PROFILE_ONLY(sampleMapSource->sourceType = DebugSession::ProfileDataSource::SourceType::BackgroundTask);
+	
 
 	changeWatcher = new ChangeWatcher(data);
 
@@ -150,6 +154,14 @@ void SampleMap::clear(NotificationType n)
 	{
 		sampler->sendOtherChangeMessage(dispatch::library::ProcessorChangeEvent::Custom);
 		getCurrentSamplePool()->sendChangeMessage();
+
+		if (storeComplexLayers)
+		{
+			if(auto g = sampler->getComplexGroupManager())
+			{
+				g->getDataTree().removeAllChildren(nullptr);
+			}
+		}
 	}
 
 	if (n != dontSendNotification)
@@ -524,7 +536,7 @@ void SampleMap::valueTreeChildAdded(ValueTree& parentTree, ValueTree& childWhich
 {
 	static const Identifier sa("sample");
 
-	if (parentTree.getType() == sa)
+	if (parentTree.getType() == sa || childWhichHasBeenAdded.getType() == groupIds::Layers)
 	{
 		return;
 	}
@@ -601,6 +613,9 @@ void SampleMap::sendSampleAddedMessage()
 
 void SampleMap::valueTreeChildRemoved(ValueTree& /*parentTree*/, ValueTree& child, int /*indexFromWhichChildWasRemoved*/)
 {
+	if(child.getType() == groupIds::Layers)
+		return;
+
 	auto f = [child](Processor* s)
 	{
 		auto sampler = static_cast<ModulatorSampler*>(s);
@@ -752,7 +767,27 @@ bool SampleMap::save(const File& fileToUse)
 
 	}
 
-	auto xml = data.createXml();
+	std::unique_ptr<XmlElement> xml;
+
+	auto c = data.getChildWithName(groupIds::Layers);
+
+	if(c.isValid())
+		data.removeChild(c, nullptr);
+
+	if (storeComplexLayers && sampler->getComplexGroupManager() != nullptr)
+	{
+		auto copy = data.createCopy();
+		copy.addChild(sampler->getComplexGroupManager()->getDataTree().createCopy(), -1, nullptr);
+		xml = copy.createXml();
+	}
+	else
+	{
+		
+
+		xml = data.createXml();
+
+	}
+
 	f.replaceWithText(xml->createDocument(""));
 
 	PoolReference ref(getSampler()->getMainController(), f.getFullPathName(), FileHandlerBase::SubDirectories::SampleMaps);
@@ -818,6 +853,29 @@ void SampleMap::setNewValueTree(const ValueTree& v)
 
 	sampler->deleteAllSounds();
 	notifier.sendSampleAmountChangeMessage(sendNotificationAsync);
+
+	auto layers = v.getChildWithName(groupIds::Layers);
+
+	if(storeComplexLayers || layers.isValid())
+	{
+		storeComplexLayers = true;
+		
+		sampler->setUseComplexGroupManager(layers.isValid());
+
+		if(auto g = sampler->getComplexGroupManager())
+		{
+			ComplexGroupManager::ScopedUpdateDelayer sds(*g);
+
+			g->getDataTree().removeAllChildren(nullptr);
+
+			for(auto c: layers)
+				g->getDataTree().addChild(c.createCopy(), -1, nullptr);
+
+#if USE_BACKEND
+			sampler->getSampleEditHandler()->complexGroupBroadcaster.sendMessage(sendNotificationAsync, {});
+#endif
+		}
+	}
 
 	data = v;
 	data.addListener(this);
@@ -941,6 +999,9 @@ juce::String SampleMap::checkReferences(MainController* mc, ValueTree& v, const 
 
 void SampleMap::load(const PoolReference& reference)
 {
+	PROFILE_ONLY(sampleMapSource->name = getSampler()->getId() + ".loadSampleMap()");
+	DebugSession::ProfileDataSource::ScopedProfiler sp(sampleMapSource, &sampler->getMainController()->getDebugSession());
+		
 	LockHelpers::freeToGo(sampler->getMainController());
 
 	ScopedValueSetter<bool> iterationAborter(sampler->getIterationFlag(), true);
@@ -1027,7 +1088,7 @@ void RoundRobinMap::addSample(const ModulatorSamplerSound *sample)
 	Range<int> veloRange = sample->getVelocityRange();
 	Range<int> noteRange = sample->getNoteRange();
 
-	char thisGroup = (char)sample->getRRGroup();
+	char thisGroup = (char)sample->getBitmask();
 
 	for (int i = noteRange.getStart(); i < noteRange.getEnd(); i++)
 	{

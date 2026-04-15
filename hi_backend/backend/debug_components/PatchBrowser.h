@@ -265,10 +265,8 @@ private:
 		{
 			if (auto p = getProcessor())
 			{
-				if (p->getId() != l->getText())
-				{
-					p->setId(l->getText(), sendNotification);
-				}
+				ProcessorHelpers::changeDisplayName(p, l->getText());
+				
 			}
 		}
 
@@ -308,11 +306,11 @@ private:
 			dynamic_cast<Component*>(this)->repaint();
 		}
 
-		void onNameOrColourUpdate(dispatch::library::Processor* p)
+		void onNameOrColourUpdate(dispatch::library::Processor* )
 		{
 			colour = getProcessor()->getColour();
 			id = getProcessor()->getId();
-			idLabel.setText(id, dontSendNotification);
+			idLabel.setText(ProcessorHelpers::getDisplayName(getProcessor()), dontSendNotification);
 
 			dynamic_cast<Component*>(this)->repaint();
 		}
@@ -412,6 +410,11 @@ private:
 		void resetDragState();
 		void toggleShowChains();
 
+		bool isParentFolded() const;
+
+		/** Override to hide Collection if parent is folded */
+		int getHeightForCollection() const override;
+
 		void setInPopup(bool isInPopup)
 		{
 			if (inPopup != isInPopup)
@@ -498,6 +501,7 @@ private:
 		}
         
         Rectangle<int> bypassArea;
+		float heatmapAlpha = 0.0f;
 
 	private:
 
@@ -526,6 +530,7 @@ private:
 
 	ScopedPointer<HiseShapeButton> addButton;
 	ScopedPointer<ShapeButton> foldButton;
+	ScopedPointer<HiseShapeButton> profileButton;
 
 	Array<WeakReference<Processor>> popupProcessors;
 

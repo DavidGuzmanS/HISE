@@ -81,18 +81,19 @@ public:
 
     void restoreFromValueTree(const ValueTree &v) override;
 
+	
+
 protected:
+
+	/** Call this in the constructor of your subclass to update the parameter slots. */
+	void callOnInitAndInitialiseParameters()
+	{
+		onInit();
+		flushContentParameters();
+	}
 
 	void flushContentParameters()
 	{
-		// Don't use that method if you've already added parameter IDs...
-		jassert(parameterNames.isEmpty());
-
-		for(int i = 0; i < Content.getNumComponents(); i++)
-		{
-			parameterNames.add(Content.getComponent(i)->getName());
-		}
-
 		updateParameterSlots(Content.getNumComponents());
 	}
 
@@ -180,8 +181,9 @@ private:
 class LegatoProcessor: public HardcodedScriptProcessor
 {
 public:
+	static ProcessorMetadata createMetadata();
 
-	SET_PROCESSOR_NAME("LegatoWithRetrigger", "Legato with Retrigger", "Enables monophonic mode and retriggers the pressed key if there was a key release. ");
+	SET_PROCESSOR_NAME("LegatoWithRetrigger", "Legato with Retrigger", "");
 
 	LegatoProcessor(MainController *mc, const String &id, ModulatorSynth *ms):
 		HardcodedScriptProcessor(mc, id, ms)
@@ -276,8 +278,9 @@ private:
 class CCSwapper: public HardcodedScriptProcessor
 {
 public:
+	static ProcessorMetadata createMetadata();
 
-	SET_PROCESSOR_NAME("CCSwapper", "CC Swapper", "Swaps two control change numbers.");
+	SET_PROCESSOR_NAME("CCSwapper", "CC Swapper", "");
 
 	CCSwapper(MainController *mc, const String &id, ModulatorSynth *ms):
 		HardcodedScriptProcessor(mc, id, ms)
@@ -309,8 +312,6 @@ public:
 			Message.setControllerNumber(firstCC->getValue());
 		}
 	};
-
-	
 	
 private:
 
@@ -324,11 +325,12 @@ private:
 	@ingroup midiTypes 
 */
 class ReleaseTriggerScriptProcessor: public HardcodedScriptProcessor,
-									 public MidiControllerAutomationHandler::MPEData::Listener
+								 public MidiControllerAutomationHandler::MPEData::Listener
 {
 public:
+	static ProcessorMetadata createMetadata();
 
-	SET_PROCESSOR_NAME("ReleaseTrigger", "Release Trigger", "Allows release trigger functionality with a time variant decrease of the velocity. ");
+	SET_PROCESSOR_NAME("ReleaseTrigger", "Release Trigger", "");
 
 	ReleaseTriggerScriptProcessor(MainController *mc, const String &id, ModulatorSynth *ms):
 		HardcodedScriptProcessor(mc, id, ms)
@@ -363,7 +365,6 @@ public:
 		}
 
 		Content.setHeight(100);
-		Content.setColour(140, 120, 200);
 		Content.setName("Release Trigger");
 
 		enableButton = Content.addButton("TimeAttenuate", 0, 0);
@@ -469,8 +470,9 @@ private:
 class CCToNoteProcessor : public HardcodedScriptProcessor
 {
 public:
+	static ProcessorMetadata createMetadata();
 
-	SET_PROCESSOR_NAME("CC2Note", "MIDI CC to Note Generator", "deprecated");
+	SET_PROCESSOR_NAME("CC2Note", "MIDI CC to Note Generator", "");
 
 	CCToNoteProcessor(MainController *mc, const String &id, ModulatorSynth *ms) :
 		HardcodedScriptProcessor(mc, id, ms)
@@ -498,7 +500,7 @@ public:
 		ccSelector = Content.addComboBox("ccSelector", 309, 15);
 		
 
-		for (int i = 1; i < 127; i++)
+		for (int i = 0; i < 128; i++)
 		{
 			ccSelector->addItem("CC " + String(i));
 		}
@@ -597,8 +599,9 @@ class ChannelFilterScriptProcessor : public HardcodedScriptProcessor,
 	public MidiControllerAutomationHandler::MPEData::Listener
 {
 public:
+	static ProcessorMetadata createMetadata();
 
-	SET_PROCESSOR_NAME("ChannelFilter", "MIDI Channel Filter", "Filters messages that do not fit the given channel.");
+	SET_PROCESSOR_NAME("ChannelFilter", "MIDI Channel Filter", "");
 
 	ChannelFilterScriptProcessor(MainController *mc, const String &id, ModulatorSynth *ms) :
 		HardcodedScriptProcessor(mc, id, ms)
@@ -621,11 +624,13 @@ public:
 		channelNumber = Content.addKnob("channelNumber", 0, 0);
 		channelNumber->set("text", "MIDI Channel");
 		channelNumber->setRange(1, 16, 1);
+		channelNumber->setValue(1);
 
 		mpeStartChannel = Content.addKnob("mpeStart", 150, 0);
 		mpeStartChannel->set("width", 170);
 		mpeStartChannel->set("text", "MPE Start Channel");
 		mpeStartChannel->setRange(2, 16, 1);
+		mpeStartChannel->setValue(2);
 
 		mpeEndChannel = Content.addKnob("mpeEnd", 150 + 190, 0);
 		mpeEndChannel->set("width", 170);
@@ -742,8 +747,9 @@ private:
 class ChannelSetterScriptProcessor : public HardcodedScriptProcessor
 {
 public:
+	static ProcessorMetadata createMetadata();
 
-	SET_PROCESSOR_NAME("ChannelSetter", "MIDI Channel Setter", "Changes the MIDI channel of every incoming message.");
+	SET_PROCESSOR_NAME("ChannelSetter", "MIDI Channel Setter", "");
 
 	ChannelSetterScriptProcessor(MainController *mc, const String &id, ModulatorSynth *ms) :
 		HardcodedScriptProcessor(mc, id, ms)
@@ -760,6 +766,7 @@ public:
 		channelNumber = Content.addKnob("channelNumber", 0, 0);
 		channelNumber->set("text", "MIDI Channel");
 		channelNumber->setRange(1, 16, 1);
+		channelNumber->setValue(1);
 
 		channel = 1;
 	}
@@ -802,8 +809,9 @@ private:
 class MuteAllScriptProcessor : public HardcodedScriptProcessor
 {
 public:
+	static ProcessorMetadata createMetadata();
 
-	SET_PROCESSOR_NAME("MidiMuter", "MidiMuter", "Mutes the incoming note-on messages, but leaves everything else through.");
+	SET_PROCESSOR_NAME("MidiMuter", "MidiMuter", "");
 
 	MuteAllScriptProcessor(MainController *mc, const String &id, ModulatorSynth *ms) :
 		HardcodedScriptProcessor(mc, id, ms)

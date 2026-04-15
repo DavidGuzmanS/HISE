@@ -30,12 +30,11 @@
 *   ===========================================================================
 */
 
-#ifndef MACROCONTROLLEDCOMPONENTS_H_INCLUDED
-#define MACROCONTROLLEDCOMPONENTS_H_INCLUDED
+#pragma once
 
 namespace hise { using namespace juce;
 
-#include <limits>
+
 
 class Processor;
 
@@ -123,6 +122,134 @@ private:
 };
 
 
+struct HisePluginParameterBase: public ControlledObject,
+								public dispatch::ListenerOwner,
+							    public AsyncUpdater
+
+{
+	enum class Type
+	{
+		Macro,
+		CustomAutomation,
+		ScriptControl,
+		NKSWrapper,
+		numTypes
+	};
+
+	HisePluginParameterBase(MainController* mc, int index):
+	  ControlledObject(mc),
+	  autoListener(getMainController()->getRootDispatcher(), *this, BIND_MEMBER_FUNCTION_2(HisePluginParameterBase::onUpdate)),
+	  parameterIndex(index)
+	{}
+
+	virtual ~HisePluginParameterBase()
+	{
+		// If this happens you haven't called cleanup before destroying this plugin parameter!
+		jassert(cleanupCalled);
+	}
+
+	int getHiseParameterIndex() { return parameterIndex; }
+
+	static int defaultSort(HisePluginParameterBase* p1, HisePluginParameterBase* p2)
+	{
+		auto i1 = p1->getHiseParameterIndex();
+		auto i2 = p2->getHiseParameterIndex();
+
+		if(i1 < i2)
+			return -1;
+		if (i1 > i2)
+			return 1;
+
+		return 0;
+	}
+
+	virtual Type getType() const = 0;
+	virtual NormalisableRange<float> getNormalisableRange() const = 0;
+	virtual int getSlotIndex() const = 0;
+	virtual ValueToTextConverter getValueToTextConverter() const = 0;
+	virtual String getHisePluginParameterName() const = 0;
+	virtual String getHisePluginParameterGroupName() const = 0;
+	virtual float getHisePluginParameterNormalisedValue() const = 0;
+
+#if USE_BACKEND
+	virtual HisePluginParameterBase* getWrappedParameter() { return this; }
+#else
+	HisePluginParameterBase* getWrappedParameter() { return this; }
+#endif
+
+	bool matchesIndex(int slotIndex) const { return getSlotIndex() == slotIndex; }
+
+	void onUpdate(int index, float v)
+	{
+		FloatSanitizers::sanitizeFloatNumber(v);
+		v = getNormalisableRange().convertTo0to1(v);
+
+		if(v != parameterValueToSend)
+		{
+			parameterValueToSend = v;
+
+			if(sendToHost)
+				refreshParameterValue();
+		}
+	}
+
+	void refreshParameterValue()
+	{
+		auto mc = getMainController();
+		auto t = mc->getKillStateHandler().getCurrentThread();
+		auto defer = mc->getDeferNotifyHostFlag() || t != MainController::KillStateHandler::TargetThread::MessageThread;
+
+		if(!getMainController()->getPluginParameterUpdateState())
+			return;
+
+		if(defer)
+			triggerAsyncUpdate();
+		else
+			handleAsyncUpdate();
+	}
+
+	void handleAsyncUpdate() override
+	{
+		auto mc = getMainController();
+		
+		ScopedValueSetter<bool> svs(recursive, true);
+		ScopedValueSetter<bool> setter(mc->getPluginParameterUpdateState(), false, true);
+
+		getWrappedParameter()->asJuceParameter()->setValueNotifyingHost(parameterValueToSend);
+	}
+
+    virtual void cleanup() { cleanupCalled = true; }
+    
+	int parameterIndex = -1;
+	float parameterValueToSend = 0.0f;
+	bool recursive = false;
+
+	dispatch::library::CustomAutomationSource::Listener autoListener;
+
+	juce::AudioProcessorParameter* asJuceParameter()
+	{
+		auto typed = dynamic_cast<juce::AudioProcessorParameter*>(this);
+		jassert(typed != nullptr);
+		return typed;
+	}
+
+	void setSendToHost(bool shouldSendToHost)
+	{
+		sendToHost = shouldSendToHost;
+	}
+
+protected:
+
+	bool sendToHost = true;
+
+private:
+
+	bool cleanupCalled = false;
+
+	JUCE_DECLARE_WEAK_REFERENCEABLE(HisePluginParameterBase);
+	JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(HisePluginParameterBase);
+};
+
 /** A base class for all control Components that can be controlled by a MacroControlBroadcaster.
 *	@ingroup macroControl
 *
@@ -139,14 +266,24 @@ public:
 	{
 		using Ptr = ReferenceCountedObjectPtr<ModulationPopupData>;
 
+		ModulationPopupData(const String& targetId_):
+		  targetId(targetId_)
+		{};
+
 		operator bool() const noexcept;
 
-		String modulationId;
-		StringArray sources;
-		std::function<bool(int, bool)> queryFunction;
-		std::function<void(int, bool)> toggleFunction;
-		std::function<void(double)> valueCallback;
-		std::function<void(String)> editCallback;
+		/** Override this method and populate the popup menu for the given target. */
+		virtual void addToPopupMenu(MacroControlledObject* parentComponent, PopupMenu& m) = 0;
+
+		/** Override this method and perform the result if matching and return true if consumed. */
+		virtual bool onPopupMenuResult(MacroControlledObject* parentComponent, int result) = 0;
+
+		String targetId;
+		
+		//std::function<bool(int, bool)> queryFunction;
+		//std::function<void(int, bool)> toggleFunction;
+		//std::function<void(double)> valueCallback;
+		//std::function<void(String)> editCallback;
 	};
 
 	class UndoableControlEvent: public UndoableAction
@@ -230,7 +367,19 @@ public:
 	void setModulationData(ModulationPopupData::Ptr modData);
 
 
-	void onAttributeChange(dispatch::library::Processor* p, uint8 index);
+	void onAttributeChange(dispatch::library::Processor* p, uint16 index);
+
+	juce::AudioProcessorParameter* getConnectedPluginParameter() const;
+
+	void rebuildPluginParameterConnection();
+
+	bool skipHostDisplayUpdate = false;
+
+	void checkMouseClickProfiler(bool isDown);
+
+	Processor* getProcessor();;
+
+	const Processor* getProcessor() const;;
 
 protected:
 
@@ -251,9 +400,7 @@ protected:
 	*/
 	bool checkLearnMode();
 	
-	Processor *getProcessor();;
-
-	const Processor *getProcessor() const;;
+	
 
 	int parameter;
 
@@ -279,7 +426,9 @@ private:
 	String name;
 
 	bool macroControlledComponentEnabled;
-	
+
+	WeakReference<HisePluginParameterBase> connectedPluginParameter;
+
 };
 
 
@@ -288,6 +437,7 @@ private:
 class HiComboBox: public SubmenuComboBox,
 				  public ComboBox::Listener,
 				  public MacroControlledObject,
+				  public ProfiledComponent,
                   public TouchAndHoldComponent
 {
 public:
@@ -311,24 +461,12 @@ public:
     void mouseDown(const MouseEvent &e) override;
 	void mouseDrag(const MouseEvent& e) override;
 
-	ValueToTextConverter getValueToTextConverter() const override
-	{
-		StringArray itemList;
-		itemList.add("Nothing");
+	paintAndProfileChildren(g);
 
-		for(int i = 0; i < getNumItems(); i++)
-			itemList.add(getItemText(i));
+	ValueToTextConverter getValueToTextConverter() const override;
 
-		ValueToTextConverter c;
-		c.active = true;
-		c.itemList = itemList;
 
-		return c;
-	}
-
-	
-    
-    bool customPopup = false;
+	bool customPopup = false;
     
 	NormalisableRange<double> getRange() const override;;
 	
@@ -355,7 +493,8 @@ private:
 class HiToggleButton: public MomentaryToggleButton,
 					  public Button::Listener,
 				      public MacroControlledObject,
-                      public TouchAndHoldComponent
+                      public TouchAndHoldComponent,
+					  public ProfiledComponent
 {
 public:
 
@@ -389,7 +528,8 @@ public:
 	void mouseUp(const MouseEvent& e) override;
 
 	void mouseDrag(const MouseEvent& event) override;
-	
+
+	paintAndProfileChildren(g);
 
 	void touchAndHold(Point<int> downPosition) override;
     
@@ -401,11 +541,7 @@ private:
 
 	var popupData;
 	Rectangle<int> popupPosition;
-
 	Component::SafePointer<Component> currentPopup;
-
-	
-
 	NotificationType notifyEditor;
 	ScopedPointer<LookAndFeel> laf;
 };
@@ -427,6 +563,7 @@ public:
             FineTune,
             ResetToDefault,
             ContextMenu,
+			ScaleModulation,
             numActions
         };
 
@@ -473,6 +610,7 @@ public:
             setFromIntOrArray(Action::ResetToDefault, "ResetToDefault");
             setFromIntOrArray(Action::FineTune, "FineTune");
             setFromIntOrArray(Action::ContextMenu, "ContextMenu");
+			setFromIntOrArray(Action::ScaleModulation, "ScaleModulation");
         }
         
         static uint64 getDefaultFlags(Action a)
@@ -489,6 +627,8 @@ public:
                             ModifierKeys::altModifier;
                 case Action::ContextMenu:
                     return ModifierKeys::rightButtonModifier;
+            case Action::ScaleModulation:
+					return 0;
                 default: return 0;
             }
         }
@@ -555,35 +695,13 @@ public:
     
 	bool enableShiftTextInput = true;
 
-    bool performModifierAction(const MouseEvent& e, bool isDoubleClick)
-    {
-        auto a = modObject.getActionForModifier(e.mods, isDoubleClick);
-        
-        if(a == ModifierObject::Action::TextInput)
-        {
-            onShiftClick(e);
-			return true;
-        }
-        if(a == ModifierObject::Action::ResetToDefault)
-        {
-            if(asSlider()->isDoubleClickReturnEnabled())
-            {
-                auto defaultValue = asSlider()->getDoubleClickReturnValue();
-                asSlider()->setValue(defaultValue, sendNotificationSync);
-                return true;
-            }
-        }
-        if(a == ModifierObject::Action::ContextMenu)
-        {
-            if(auto mco = dynamic_cast<MacroControlledObject*>(this))
-				mco->enableMidiLearnWithPopup();
-            return true;
-        }
-        
-        return false;
-    }
-    
+    bool performModifierAction(const MouseEvent& e, bool isDoubleClick, bool isMouseDown = true);
+
 protected:
+
+	std::function<void(const MouseEvent&)> customPopupFunction;
+
+	std::function<bool(bool, float)> scaleFunction;
 
 	virtual ~SliderWithShiftTextBox();;
 
@@ -618,8 +736,10 @@ protected:
 class HiSlider: public juce::Slider,
 			    public SliderWithShiftTextBox,
 				public MacroControlledObject,
-				public SliderListener,
-				public TouchAndHoldComponent
+				public Slider::Listener,
+				public ProfiledComponent,
+				public TouchAndHoldComponent,
+			    public DragAndDropTarget
 {
 public:
 
@@ -637,9 +757,57 @@ public:
 		numModes
 	};
 
-	static void setRangeSkewFactorFromMidPoint(NormalisableRange<double>& range, const double midPoint);
+	static StringArray getModeList()
+	{
+		return {
+			"Frequency", 
+			"Decibel", 
+			"Time", 
+			"TempoSync", 
+			"Linear", 
+			"Discrete", 
+			"Pan", 
+			"NormalizedPercentage"
+		};
+	}
 
-	static double getMidPointFromRangeSkewFactor(const NormalisableRange<double>& range);
+	struct HoverPopupLookandFeel
+	{
+		virtual ~HoverPopupLookandFeel() = default;
+
+		struct DrawData
+		{
+			Rectangle<float> bounds;
+			int sourceIndex = -1;
+			String sourceName;
+			String targetName;
+			String labelText;
+			Range<double> intensityRange;
+			float intensityValue = 0.0f;
+			scriptnode::modulation::TargetMode targetMode = scriptnode::modulation::TargetMode::Gain;
+
+			bool isHover = false;
+			bool isDown = false;
+		};
+
+		struct PositionData
+		{
+			operator bool() const { return draggers.getNumRectangles() > 0; }
+
+			void fromVar(const var& data);
+			var toVar() const;
+
+			RectangleList<int> draggers;
+			Rectangle<int> labelArea;
+			int margin = 10;
+			SliderStyle s = SliderStyle::RotaryHorizontalVerticalDrag;
+			float sensitivity = 1.0f;
+		};
+
+		virtual PositionData getModulatorDragData(HiSlider& s, const StringArray& sourceList) const;
+		virtual void drawModulationDragBackground(Graphics& g, HiSlider& s, const DrawData& dd, Rectangle<int> labelBounds);
+		virtual void drawModulationDragger(Graphics& g, HiSlider& s, const DrawData& dd);
+	};
 
 	static NormalisableRange<double> getRangeForMode(HiSlider::Mode m);;
 
@@ -654,6 +822,12 @@ public:
 	
 
 	static double getFrequencyFromTextString(const String& t);
+
+	void mouseEnter(const MouseEvent& event) override;
+
+	void mouseExit(const MouseEvent& e) override;
+
+	void showModHoverPopup(bool shouldShow, bool closeOnExit);
 
 	void mouseDown(const MouseEvent &e) override;
 
@@ -679,12 +853,10 @@ public:
 
 	void setMode(Mode m);
 
-
 	/** sets the mode. */
-	void setMode(Mode m, double min, double max, double mid=DBL_MAX, double stepSize=DBL_MAX);;
+	void setMode(Mode m, NormalisableRange<double> nr);
 
 	Mode getMode() const;
-
 
 	/* initialises the slider. You must call this after creation before you use this component! */
 	void setup(Processor *p, int parameter, const String &name) override;
@@ -697,19 +869,25 @@ public:
 
 	bool changePluginParameter(AudioProcessor* p, int parameterIndex);
 
-	bool callWhenSingleMacro(const std::function<bool(AudioProcessor* p, int parameterIndex)>& f);
-
-	/** If the slider represents a modulated attribute (eg. LFO Frequency), this can be used to set the displayed value. 
-	*
-	*	In order to use this functionality, add a timer callback to your editor and update the value using the ModulatorChain's getOutputValue().
-	*/
-	void setDisplayValue(float newDisplayValue);
+	
 
 	bool isUsingModulatedRing() const noexcept;;
 
-	void setIsUsingModulatedRing(bool shouldUseModulatedRing);;
+	void setDisplayValue(float)
+	{
+		// forgot to set this up
+		jassert(isUsingModulatedRing());
+	}
 
 	float getDisplayValue() const;
+
+	NormalisableRange<double> getRange() const override;
+
+	void focusLost(FocusChangeType cause) override
+	{
+		currentHoverPopup = nullptr;
+		Slider::focusLost(cause);
+	}
 
 	void updateValue(NotificationType sendAttributeChange=sendNotification) override;
 
@@ -721,37 +899,98 @@ public:
 
 	void setLookAndFeelOwned(LookAndFeel *fslaf);
 
-	NormalisableRange<double> getRange() const override;;
-
 	static double getSkewFactorFromMidPoint(double minimum, double maximum, double midPoint);
 
 	static String getSuffixForMode(HiSlider::Mode mode, float panValue);
 
+	paintAndProfileChildren(g);
+
+	
+
+	HoverPopupLookandFeel& getHoverPopupLookAndFeel();
+	struct HoverPopup;
+
+	ScopedPointer<Component> currentHoverPopup = nullptr;
+
+	struct ModUpdater: public PooledUIUpdater::SimpleTimer
+	{
+		ModUpdater(HiSlider& s, MainController* mc):
+		 SimpleTimer(mc->getGlobalUIUpdater(), false),
+		 parent(s)
+		{};
+
+		void timerCallback() override;
+		void setUpdateFunction(const ModulationDisplayValue::QueryFunction::Ptr f);;
+		bool canBeDropped(const var& info) const;
+		void onDrop(const var& info);
+
+		bool isUsingExclusiveSourceMode() const { return exclusiveSourceMode; }
+
+		bool exclusiveSourceMode = false;
+		int currentExlusiveIndex = -1;
+
+		static void onExclusiveSourceSelection(ModUpdater& updater, int sourceIndex);
+
+		ModulationDisplayValue::QueryFunction::Ptr modFunction;
+		HiSlider& parent;
+		ModulationDisplayValue lastValue;
+		
+		JUCE_DECLARE_WEAK_REFERENCEABLE(ModUpdater);
+	} ;
+
+	bool isInterestedInDragSource (const SourceDetails& dragSourceDetails) override
+	{
+		return modUpdater != nullptr && modUpdater->canBeDropped(dragSourceDetails.description);
+	}
+
+    void itemDragEnter (const SourceDetails& d) override
+	{
+		if(isInterestedInDragSource(d))
+		{
+			getProperties().set("modulationDragState", 2);
+			repaint();
+		}
+		
+	}
+
+	void visibilityChanged() override
+	{
+		if(currentHoverPopup != nullptr && modUpdater != nullptr && modUpdater->isUsingExclusiveSourceMode())
+			currentHoverPopup->setVisible(isVisible());
+	}
+
+    void itemDragExit (const SourceDetails& d) override
+	{
+		if(isInterestedInDragSource(d))
+		{
+			getProperties().set("modulationDragState", 1);
+			repaint();
+		}
+	}
+
+    void itemDropped (const SourceDetails& dragSourceDetails) override
+	{
+		if(modUpdater != nullptr)
+		{
+			modUpdater->onDrop(dragSourceDetails.description);
+			showModHoverPopup(true, false);
+		}
+	};
+
 private:
 
+	ScopedPointer<ModUpdater> modUpdater;
 	bool sendValueOnDrag = true;
-
 	String getModeSuffix() const;;
-
-	void setModeRange(double min, double max, double mid, double stepSize);;
-	
 	Mode mode;
-
-	bool useModulatedRing;
-
 	double modeValues[numModes];
-
 	double dragStartValue = 0.0f;
-
-	float displayValue;
-
-	NormalisableRange<double> normRange;
 	ScopedPointer<LookAndFeel> laf;
-	//ScopedPointer<Component> stupidComponent;
+	HoverPopupLookandFeel fallback;
 
+	bool skipGestureActive = false;
 };
 
 
 } // namespace hise
 
-#endif  // MACROCONTROLLEDCOMPONENTS_H_INCLUDED

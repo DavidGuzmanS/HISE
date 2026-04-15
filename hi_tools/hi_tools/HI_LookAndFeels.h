@@ -111,6 +111,8 @@ class PopupLookAndFeel : public LookAndFeel_V3
 {
 public:
     
+	
+
     static void drawFake3D(Graphics& g, Rectangle<int> area);
 
     PopupLookAndFeel();;
@@ -559,7 +561,7 @@ public:
 
 	int getSliderThumbRadius(Slider& ) override;
 
-	void drawVectorRotaryKnob(Graphics& g, Rectangle<float> area, double value, bool bipolar, bool hover, bool down, bool enabled, float modValue);
+	void drawVectorRotaryKnob(Graphics& g, Rectangle<float> area, bool bipolar, bool hover, bool down, bool enabled, const ModulationDisplayValue& mv);
 
 	void drawLinearSlider (Graphics &g, int /*x*/, int /*y*/, int width, int height, float /*sliderPos*/, float minSliderPos, float maxSliderPos, const Slider::SliderStyle style, Slider &s) override;
 

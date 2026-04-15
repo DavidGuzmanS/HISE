@@ -234,6 +234,9 @@ void ApiClass::addConstant(String constantName, var value)
 			return;
 		}
 	}
+
+	// You're using too many constants...
+	jassertfalse;
 }
 
 const var ApiClass::getConstantValue(int index) const
@@ -346,7 +349,7 @@ void ApiClass::getAllFunctionNames(Array<Identifier> &listToFill) const
 	{
 		for(auto& idList: ids)
 		{
-			if(idList[i].isNull())
+			if(!idList[i].isNull())
 				listToFill.add(idList[i]);
 		}
 	}
@@ -384,5 +387,12 @@ ApiClass::Constant& ApiClass::Constant::operator=(const Constant& other)
 	value = other.value;
 	return *this;
 }
+
+#if USE_BACKEND
+juce::String ApiClass::DiagnosticResult::Item::toConsoleString(Processor* p) const
+{
+	return HiseJavascriptEngine::toConsoleString(*this, p);
+}
+#endif
 
 } // namespace hise

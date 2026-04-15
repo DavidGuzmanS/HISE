@@ -35,13 +35,8 @@ juce::AttributedString Autocomplete::Item::createDisplayText() const
 	auto sf = findParentComponentOfClass<Autocomplete>()->getScaleFactor();
 
 	auto nf = GLOBAL_MONOSPACE_FONT().withHeight(16.0f * sf);
-    
-    
-#if JUCE_LINUX
-    auto bf = GLOBAL_BOLD_MONOSPACE_FONT().withHeight(16.0f * sf);
-#else
+
 	auto bf = nf.boldened();
-#endif
 
 	s.append(before, nf, Colours::white.withAlpha(0.7f));
 	s.append(between, bf, Colours::white.withAlpha(1.0f));
@@ -418,6 +413,9 @@ void TokenCollection::signalRebuild()
 
 void TokenCollection::signalClear(NotificationType n)
 {
+	if (!enabled)
+		return;
+
 	{
 		SimpleReadWriteLock::ScopedMultiWriteLock sl(buildLock);
 		dirty = false;
@@ -456,6 +454,9 @@ void TokenCollection::run()
 
 void TokenCollection::clearTokenProviders()
 {
+	if (!enabled)
+		return;
+
 	SimpleReadWriteLock::ScopedMultiWriteLock sl(buildLock);
 	tokenProviders.clear();
 	tokens.clear();
@@ -463,6 +464,9 @@ void TokenCollection::clearTokenProviders()
 
 void TokenCollection::addTokenProvider(Provider* ownedProvider)
 {
+	if (!enabled)
+		return;
+
 	if (tokenProviders.isEmpty() && useBackgroundThread)
 		startThread();
 
@@ -515,6 +519,9 @@ void TokenCollection::removeListener(Listener* l)
 
 void TokenCollection::handleAsyncUpdate()
 {
+	if (!enabled)
+		return;
+
 	for (auto l : listeners)
 	{
 		if (l != nullptr)
@@ -536,6 +543,9 @@ int64 TokenCollection::getHashFromTokens(const List& l)
 
 void TokenCollection::rebuild()
 {
+	if (!enabled)
+		return;
+
 	if(useBackgroundThread)
 		PerfettoHelpers::setCurrentThreadName("Token Rebuild Thread");
     

@@ -30,8 +30,6 @@
 *   ===========================================================================
 */
 
-#include "PatchBrowser.h"
-#include "PatchBrowser.h"
 
 namespace hise { using namespace juce;
 
@@ -55,8 +53,15 @@ showChains(false)
     addButton->setToggleModeWithColourChange(true);
 	addButton->setTooltip("Edit Module Tree");
     addButton->setToggleStateAndUpdateIcon(false);
-	
 	addCustomButton(addButton);
+
+#if HISE_INCLUDE_PROFILING_TOOLKIT
+	addAndMakeVisible(profileButton = new HiseShapeButton("profile", this, f));
+    profileButton->setToggleModeWithColourChange(true);
+	profileButton->setTooltip("Profile Audio rendering of the entire module tree");
+    profileButton->setToggleStateAndUpdateIcon(false);
+	addCustomButton(profileButton);
+#endif
 
 	window->getBackendProcessor()->getLockFreeDispatcher().addPresetLoadListener(this);
 
@@ -189,7 +194,7 @@ void PatchBrowser::showProcessorInPopup(Component* c, const MouseEvent& e, Proce
 
 		auto b = c->getLocalBounds();
 		b = bp->getLocalArea(c, b);
-		auto pe = dynamic_cast<ProcessorEditorContainer*>(DebugableObject::Helpers::showProcessorEditorPopup(e, c, p));
+		auto pe = dynamic_cast<ProcessorEditorContainer*>(DebugableObject::Helpers::showProcessorEditorPopup(c, p));
 		
 		Component::SafePointer<FloatingTilePopup> safePopup = ft->showComponentAsDetachedPopup(pe, bp, { b.getRight() + 50 + (CONTAINER_WIDTH)/2, b.getY() -10 }, true);
 
@@ -523,6 +528,9 @@ void PatchBrowser::paint(Graphics &g)
         
 		if (!c->hasVisibleItems()) continue;
 
+		// Skip drawing joining lines if parent is folded
+		if (c->isParentFolded()) continue;
+
         Processor *p = c->getProcessor();
 
 		if (p == nullptr) return;
@@ -545,26 +553,9 @@ void PatchBrowser::paint(Graphics &g)
 		auto endPoint = c->getPointForTreeGraph(false).toFloat();
 		auto endPointInParent = getLocalPoint(c, endPoint);
 
-        bool paintUniform = false;
-        
-        if(auto ms = dynamic_cast<ModulatorSynth*>(c->getProcessor()))
-        {
-            if(ms->isUsingUniformVoiceHandler())
-                paintUniform = true;
-            
-            if(auto msc = dynamic_cast<ModulatorSynthChain*>(ms))
-            {
-                if(msc->isUniformVoiceHandlerRoot())
-                    paintUniform = false;
-            }
-        }
-        
-		g.setColour(paintUniform ? Colour(0xFF888888) :
-            Colour(0xFF222222));
-
+		g.setColour(Colour(0xFF222222));
 		g.drawLine((float)startPointInParent.getX(), (float)startPointInParent.getY(), (float)startPointInParent.getX(), (float)endPointInParent.getY(), 2.0f);
 		g.drawLine((float)startPointInParent.getX(), (float)endPointInParent.getY(), (float)endPointInParent.getX(), (float)endPointInParent.getY(), 2.0f);
-
 	}
     
     if(showChains)
@@ -729,6 +720,77 @@ void PatchBrowser::buttonClicked(Button *b)
 	{
 		toggleShowChains();
 	}
+	else if (b == profileButton)
+	{
+#if HISE_INCLUDE_PROFILING_TOOLKIT
+		auto shouldProfile = b->getToggleState();
+
+		auto chain = rootWindow.getComponent()->getBackendProcessor()->getMainSynthChain();
+		auto& session = chain->getMainController()->getDebugSession();
+		
+		chain->setEnableProfiling(shouldProfile, &session, 0);
+
+		if(shouldProfile)
+		{
+			Component::SafePointer<HiseShapeButton> b(profileButton.get());
+			auto delay = (int)session.getOptions().millisecondsToRecord;
+			Timer::callAfterDelay(delay, [b]()
+			{
+				if(b.getComponent() != nullptr && b->getToggleState())
+					b->setToggleState(false, sendNotificationSync);
+			});
+
+			session.clearData(&session);
+
+			session.heatmapManager.heatmapBroadcaster.addListener(*this, [](PatchBrowser& pb, DebugInformationBase::Ptr p, const std::map<int, double>* map)
+			{
+				if(map != nullptr)
+				{
+					Array<NodeComponent*> list;
+
+					callRecursive<PatchItem>(&pb, [&](PatchItem* i)
+					{
+						if(auto t = dynamic_cast<ProfiledProcessor*>(i->getProcessor()))
+						{
+							auto idx = t->getHeatmapIndex();
+
+							if(map->find(idx) != map->end())
+							{
+								i->heatmapAlpha = (float)map->at(idx);
+								FloatSanitizers::sanitizeFloatNumber(i->heatmapAlpha);
+								i->heatmapAlpha = jlimit(0.0f, 1.0f, i->heatmapAlpha);
+								i->repaint();
+							}
+						}
+
+						return false;
+					});
+				}
+			});
+		}
+		else
+		{
+			session.heatmapManager.heatmapBroadcaster.removeListener(*this);
+
+			callRecursive<PatchItem>(this, [&](PatchItem* i)
+			{
+				if(auto t = dynamic_cast<ProfiledProcessor*>(i->getProcessor()))
+				{
+					i->heatmapAlpha = 0.0f;
+					i->repaint();
+				}
+
+				return false;
+			});
+
+			if(auto r = chain->getMainController()->getDebugSession().getLastProfileRoot(DebugSession::ThreadIdentifier::Type::AudioThread))
+			{
+				auto c = chain->getMainController()->getDebugSession().createPopupViewer(r);
+				rootWindow->getRootFloatingTile()->showComponentInRootPopup(c, profileButton, { profileButton->getWidth() / 2, profileButton->getHeight() } );
+			}
+		}
+#endif
+	}
 }
 
 HiseShapeButton* PatchBrowser::skinWorkspaceButton(Processor* processor)
@@ -890,7 +952,7 @@ idUpdater(p->getMainController()->getRootDispatcher(), *this, BIND_MEMBER_FUNCTI
 
 	idLabel.setFont(GLOBAL_BOLD_FONT());
 	idLabel.setJustificationType(Justification::centredLeft);
-	idLabel.setText(getProcessor()->getId(), dontSendNotification);
+	idLabel.setText(ProcessorHelpers::getDisplayName(getProcessor()), dontSendNotification);
 	idLabel.addListener(this);
     
 	bypassed = getProcessor()->isBypassed();
@@ -1102,17 +1164,17 @@ void PatchBrowser::ModuleDragTarget::itemDropped(const SourceDetails& dragSource
 		return;
 	}
 
-	Chain *c = dynamic_cast<Chain*>(getProcessor());
+	auto targetProcessor = getProcessor();
+
+	
+
+	Chain *c = dynamic_cast<Chain*>(targetProcessor);
+
+	auto isFirstTarget = c != nullptr;
 
 	auto p = dynamic_cast<ModuleDragTarget*>(dragSourceDetails.sourceComponent.get())->getProcessor();
 
 	auto oldChain = dynamic_cast<Chain*>(p->getParentProcessor(false));
-
-	if(p->getParentProcessor(false) == getProcessor())
-	{
-		resetDragState();
-		return;
-	}
 
 	if(c == nullptr)
 		c = dynamic_cast<Chain*>(getProcessor()->getParentProcessor(false));
@@ -1122,27 +1184,44 @@ void PatchBrowser::ModuleDragTarget::itemDropped(const SourceDetails& dragSource
 		Identifier type = Identifier(dragSourceDetails.description.toString().upToFirstOccurrenceOf("::", false, true));
 		String name = dragSourceDetails.description.toString().fromLastOccurrenceOf("::", false, true);
 
-		int index = -1;
+		Processor* sibling = nullptr;
 
-		for(int i = 0; i < c->getHandler()->getNumProcessors(); i++)
+		if(isFirstTarget && c->getHandler()->getNumProcessors() > 0)
 		{
-			if(c->getHandler()->getProcessor(i) == p)
+			sibling = c->getHandler()->getProcessor(0);
+		}
+		else
+		{
+			int index = -1;
+			int selfDelta = 0;
+
+			for(int i = 0; i < c->getHandler()->getNumProcessors(); i++)
 			{
-				index = i;
-				break;
+				//if(c->getHandler()->getProcessor(i) == p)
+					//selfDelta -= 1;
+
+				if(c->getHandler()->getProcessor(i) == targetProcessor)
+				{
+					index = i + selfDelta + 1;
+					break;
+				}
 			}
+
+			if(isPositiveAndBelow(index, c->getHandler()->getNumProcessors()))
+				sibling = c->getHandler()->getProcessor(index);
+		}
+
+		if(p == sibling)
+		{
+			resetDragState();
+			return;
 		}
 
 		p->getMainController()->allNotesOff();
 
-		auto sibling = index == -1 ? nullptr : c->getHandler()->getProcessor(index);
-
 		oldChain->getHandler()->remove(p, false);
 
 		c->getHandler()->add(p, sibling);
-
-		//if(index != -1)
-		//	c->getHandler()->moveProcessor(p, -1);
 
 		auto root = p->getMainController()->getMainSynthChain();
 		root->prepareToPlay(root->getSampleRate(), root->getLargestBlockSize());
@@ -1398,27 +1477,7 @@ void PatchBrowser::PatchCollection::paint(Graphics &g)
 
 	idLabel.setColour(Label::ColourIds::textColourId, Colours::white.withAlpha(bypassed ? 0.2f : 0.8f));
     
-    if(auto ms = dynamic_cast<ModulatorSynthChain*>(getProcessor()))
-    {
-        if(ms->isUniformVoiceHandlerRoot())
-        {
-            
-            g.setFont(GLOBAL_BOLD_FONT().withHeight(10.0f));
-            
-            
-            
-            auto b = iconSpace2.removeFromRight(30.0f);
-            
-            g.setColour(JUCE_LIVE_CONSTANT_OFF(Colour(0x14FFFFFF)));
-            g.fillRoundedRectangle(b.reduced(3.0f), 2.0f);
-            
-            g.setColour(Colour(0xFF888888));
-            g.drawText("UVH", b, Justification::centred);
-        }
-        
-    }
-
-	auto ds = getDragState();
+    auto ds = getDragState();
 
 	if(ds != DragState::Inactive)
 	{
@@ -1432,6 +1491,56 @@ void PatchBrowser::PatchCollection::paint(Graphics &g)
 	}
 }
 
+
+bool PatchBrowser::PatchCollection::isParentFolded() const
+{
+	auto* pb = findParentComponentOfClass<PatchBrowser>();
+	if (pb == nullptr)
+		return false;
+
+	const Processor* thisProcessor = getProcessor();
+	if (thisProcessor == nullptr)
+		return false;
+
+	// Check if any parent is folded
+	const Processor* currentParent = ProcessorHelpers::findParentProcessor(thisProcessor, true);
+
+	while (currentParent != nullptr)
+	{
+		// Check all Collections to see if any matches the current parent processor
+		int numCollections = pb->getNumCollections();
+		for (int i = 0; i < numCollections; i++)
+		{
+			auto* pc = dynamic_cast<PatchCollection*>(pb->getCollection(i));
+			if (pc == nullptr || pc == this)
+				continue;
+
+			// Check if this Collection represents the parent processor
+			if (pc->getProcessor() == currentParent)
+			{
+				if (pc->isFolded())
+					return true;
+				// otherwise, keep checking higher parents
+				break;
+			}
+		}
+
+		// Move up to next parent processor, until it's null
+		currentParent = ProcessorHelpers::findParentProcessor(currentParent, true);
+	}
+
+	return false;
+}
+
+int PatchBrowser::PatchCollection::getHeightForCollection() const
+{
+	// If a parent is folded, hide this Collection
+	if (isParentFolded())
+		return 0;
+
+	// Otherwise, use the base class implementation
+	return SearchableListComponent::Collection::getHeightForCollection();
+}
 
 void PatchBrowser::PatchCollection::refreshFoldButton()
 {
@@ -1836,6 +1945,12 @@ void PatchBrowser::PatchItem::paint(Graphics& g)
 		g.drawRoundedRectangle(b.reduced(1.0f), 2.0f, 1.0f);
 	}
 
+	if(heatmapAlpha != 0.0f)
+	{
+		g.setColour(Colour(HISE_WARNING_COLOUR).withAlpha(heatmapAlpha));
+		g.fillRoundedRectangle(b.reduced(1.0f), 2.0f);
+	}
+
 	g.setColour(pColour.withAlpha(!bypassed ? 1.0f : 0.5f));
 
 	auto iconSpace = b.removeFromLeft(b.getHeight()).reduced(2.0f);
@@ -1865,6 +1980,36 @@ void PatchBrowser::PatchItem::paint(Graphics& g)
 		g.drawEllipse(iconSpace.reduced(JUCE_LIVE_CONSTANT_OFF(3.0f)), 1.5f);
 
 		g.setColour(Colour(0xFF222222));
+	}
+
+	if(auto fx = dynamic_cast<MasterEffectProcessor*>(p.get()))
+	{
+		if(auto fxChain = dynamic_cast<EffectProcessorChain*>(fx->getParentProcessor(false, false)))
+		{
+			auto idx = fxChain->getProcessingOrderIndex(fx);
+
+			if(idx.first)
+			{
+				g.setColour(Colour(0xFF222222));
+				g.setFont(GLOBAL_BOLD_FONT());
+				g.drawText(String(idx.second+1), iconSpace.translated(0.0f, -1.0f), Justification::centred);
+			}
+		}
+	}
+
+	if(auto fx = dynamic_cast<VoiceEffectProcessor*>(p.get()))
+	{
+		if(auto fxChain = dynamic_cast<EffectProcessorChain*>(fx->getParentProcessor(false, false)))
+		{
+			auto idx = fxChain->getProcessingOrderIndex(fx);
+
+			if(idx.first)
+			{
+				g.setColour(Colour(0xFF222222));
+				g.setFont(GLOBAL_BOLD_FONT());
+				g.drawText(String(idx.second+1), iconSpace.translated(0.0f, -1.0f), Justification::centred);
+			}
+		}
 	}
 
 	g.drawRoundedRectangle(iconSpace, 2.0f, 2.0f);
@@ -2458,11 +2603,12 @@ juce::Path PatchBrowser::Factory::createPath(const String& url) const
 {
 	Path p;
 	LOAD_EPATH_IF_URL("add", EditorIcons::penShape);
-	LOAD_PATH_IF_URL("workspace", ColumnIcons::openWorkspaceIcon);
+	LOAD_EPATH_IF_URL("workspace", ColumnIcons::openWorkspaceIcon);
 	LOAD_EPATH_IF_URL("close", SampleMapIcons::deleteSamples);
 	LOAD_EPATH_IF_URL("create", HiBinaryData::ProcessorEditorHeaderIcons::addIcon);
 	LOAD_EPATH_IF_URL("folded", HiBinaryData::ProcessorEditorHeaderIcons::foldedIcon);
 	LOAD_EPATH_IF_URL("unfolded", HiBinaryData::ProcessorEditorHeaderIcons::foldedIcon);
+	LOAD_EPATH_IF_URL("profile", EditorIcons::profileIcon);
 
 	if (url == "unfolded")
 		p.applyTransform(AffineTransform::rotation(float_Pi * 0.5f));

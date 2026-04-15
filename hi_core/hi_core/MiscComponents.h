@@ -38,6 +38,7 @@ namespace hise { using namespace juce;
 class MouseCallbackComponent : public Component,
 							   public MacroControlledObject,
 							   public TouchAndHoldComponent,
+							   public ProfiledComponent,
 						       public FileDragAndDropTarget
 {
 	// ================================================================================================================
@@ -228,10 +229,13 @@ public:
 
 	void setEnableFileDrop(const String& newCallbackLevel, const String& allowedWildcards);
 
-
+	/** Checks whether the event object is properly formatted. */
+	static Result validateEventObject(const var& objectToTest, const String& callbackLevel);
 
 	void setAllowCallback(const String &newCallbackLevel) noexcept;
 	CallbackLevel getCallbackLevel() const;
+
+	static CallbackLevel getCallbackLevel(const String& newCallbackLevel);
 
 	/** overwrite this method and update the Component to display the current value of the controlled attribute. */
 	virtual void updateValue(NotificationType /*sendAttributeChange=sendNotification*/);;
@@ -243,6 +247,8 @@ public:
 
 	void setMidiLearnEnabled(bool shouldBeEnabled);
 
+	paintAndProfileChildren(g);
+	
 	// ================================================================================================================
 
 private:
@@ -265,7 +271,7 @@ private:
 
 	using SubMenuList = std::tuple < String, StringArray > ;
 
-	void sendFileMessage(Action a, const String& f, Point<int> pos);
+	void sendFileMessage(Action a, const StringArray& f, Point<int> pos);
 
 	void sendMessage(const MouseEvent &event, Action action, EnterState state = Nothing);
 	void sendToListeners(var clickInformation);
@@ -324,6 +330,30 @@ struct DrawActions
 		virtual void setCachedImage(Image& actionImage_, Image& mainImage_);
 		virtual void setScaleFactor(float sf);
 
+#if HISE_INCLUDE_PROFILING_TOOLKIT
+		virtual void setEnableProfiling(bool shouldBeProfiling)
+		{
+			auto isProfiling = profileData != nullptr;
+
+			if(isProfiling != shouldBeProfiling)
+			{
+				if(shouldBeProfiling)
+				{
+					profileData = new DebugSession::ProfileDataSource();
+					profileData->name << "g." << getDispatchId().toString() << "()";
+					profileData->sourceType = DebugSession::ProfileDataSource::SourceType::Paint;
+					profileData->preferredDomain = DebugSession::ProfileDataSource::TimeDomain::FPS60;
+				}
+				else
+				{
+					profileData = nullptr;
+				}
+			}
+		}
+#endif
+
+		DebugSession::ProfileDataSource::Ptr profileData;
+
 	protected:
 
 		Image actionImage;
@@ -369,6 +399,16 @@ struct DrawActions
 		void setCachedImage(Image& actionImage_, Image& mainImage_) final override;
 
 		virtual void setScaleFactor(float sf) final override;
+
+#if HISE_INCLUDE_PROFILING_TOOLKIT
+		void setEnableProfiling(bool shouldBeProfiling) override
+		{
+			ActionBase::setEnableProfiling(shouldBeProfiling);
+
+			for(auto c: internalActions)
+				c->setEnableProfiling(shouldBeProfiling);
+		}
+#endif
 
 		void perform(Graphics& g);
 
@@ -473,7 +513,7 @@ struct DrawActions
 
 		void addDrawAction(ActionBase* newDrawAction);
 
-		void flush(uint64_t perfettoTrackId);
+		void flush(uint64_t perfettoTrackId, uint32 profileTrackId);
 
 		void logError(const String& message);
 
@@ -493,7 +533,29 @@ struct DrawActions
 
 		NoiseMapManager* getNoiseMapManager();
 
+#if HISE_INCLUDE_PROFILING_TOOLKIT
+		void setEnableProfiling(ApiProviderBase::Holder* newProfileHolder)
+		{
+			auto shouldBeProfiling = newProfileHolder != nullptr;
+
+			if(shouldBeProfiling != isProfiling())
+			{
+				profileHolder = newProfileHolder;
+
+				Iterator iter(this);
+
+				while(auto a = iter.getNextAction())
+					a->setEnableProfiling(isProfiling());
+			}
+		}
+
+		bool isProfiling() const { return profileHolder != nullptr; }
+#endif
+
 	private:
+
+		uint32 currentProfileId = 0;
+		WeakReference<ApiProviderBase::Holder> profileHolder;
 
 		dispatch::AccumulatedFlowManager flowManager;
 
@@ -539,7 +601,18 @@ public:
 
 	void openGLContextClosing() override;
 
+	
 	void newPaintActionsAvailable(uint64_t flowId) override;
+
+#if HISE_INCLUDE_PROFILING_TOOLKIT
+	void onProfileEnableChange() override
+	{
+		if(drawHandler != nullptr)
+		{
+			drawHandler->setEnableProfiling(getProfileHolderIfProfiling());
+		}
+	}
+#endif
 
 	void paint(Graphics &g);
 	Colour c1, c2, borderColour;
@@ -613,7 +686,8 @@ private:
 };
 
 
-class MultilineLabel : public Label
+class MultilineLabel : public Label,
+					   public ProfiledComponent	
 {
 public:
 
@@ -632,6 +706,8 @@ public:
 	}
 
 	void paint(Graphics& g) override;
+
+	paintAndProfileChildren(g);
 
 	void setJustificationForLabelAndTextEditor(Justification t)
 	{

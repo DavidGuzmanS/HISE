@@ -38,6 +38,22 @@ namespace hise { using namespace juce;
 		contentParameterHandler(*this)
 	{}
 
+	hise::ProcessorMetadata ProcessorWithScriptingContent::withDynamicScriptParameters(const ProcessorMetadata& pd) const
+	{
+		auto md = pd;
+
+		auto content = getScriptingContent();
+
+		for (int i = 0; i < content->getNumComponents(); i++)
+		{
+			auto sc = content->getComponent(i);
+
+			md = md.withParameter(sc->createParameterMetadata(i));
+		}
+
+		return md;
+	}
+
 	void ProcessorWithScriptingContent::setAllowObjectConstruction(bool shouldBeAllowed)
 	{
 		allowObjectConstructors = shouldBeAllowed;
@@ -92,6 +108,10 @@ namespace hise { using namespace juce;
 	void ProcessorWithScriptingContent::initContent()
 	{
 		content = new ScriptingApi::Content(this);
+
+		callbackProfile.setSourceType(DebugSession::ProfileDataSource::SourceType::ScriptCallback);
+		callbackProfile.setHolder(dynamic_cast<ApiProviderBase::Holder*>(this), true);
+		callbackProfile.setPrefix(dynamic_cast<Processor*>(this)->getId() + ".");
 	}
 
 	ProcessorWithScriptingContent::ContentParameterHandler::ContentParameterHandler(
@@ -188,20 +208,7 @@ void ProcessorWithScriptingContent::controlCallback(ScriptingApi::Content::Scrip
 
 	Processor* thisAsProcessor = dynamic_cast<Processor*>(this);
 
-	
-#if USE_FRONTEND
-    
-    if (component->isAutomatable() &&
-        component->getScriptObjectProperty(ScriptingApi::Content::ScriptComponent::Properties::isPluginParameter) &&
-        getMainController_()->getPluginParameterUpdateState())
-    {
-        float newValue = (float)controllerValue;
-        FloatSanitizers::sanitizeFloatNumber(newValue);
-        
-        dynamic_cast<PluginParameterAudioProcessor*>(getMainController_())->setScriptedPluginParameter(component->getName(), newValue);
-    }
-    
-#endif
+	auto sp = getScriptingContent()->contentProfile.profile(component->pSetAttribute);
 
     if (component->isConnectedToMacroControll())
     {
@@ -256,7 +263,7 @@ void ProcessorWithScriptingContent::controlCallback(ScriptingApi::Content::Scrip
 	}
 	else if (auto callback = component->getCustomControlCallback())
 	{
-		if (MessageManager::getInstance()->isThisTheMessageThread())
+		if (MessageManager::getInstance()->isThisTheMessageThread() || component->shouldDeferControlCallback())
 		{
 			auto f = [component, controllerValue](JavascriptProcessor* p)
 			{
@@ -281,15 +288,6 @@ void ProcessorWithScriptingContent::controlCallback(ScriptingApi::Content::Scrip
 	}
 	else
 	{
-		if (auto modulationData = component->getModulationData())
-		{
-			if (modulationData->valueCallback)
-			{
-				modulationData->valueCallback((float)controllerValue);
-				return;
-			}
-		}
-
 		int callbackIndex = getControlCallbackIndex();
 
 		getMainController_()->getDebugLogger().logParameterChange(thisAsJavascriptProcessor, component, controllerValue);
@@ -323,6 +321,8 @@ void ProcessorWithScriptingContent::controlCallback(ScriptingApi::Content::Scrip
 
 void ProcessorWithScriptingContent::defaultControlCallbackIdle(ScriptingApi::Content::ScriptComponent *component, const var& controllerValue, Result& r)
 {
+	getScriptingContent()->contentProfile.profile(component->pControlCallback);
+	getScriptingContent()->contentProfile.closeTrack(component->pControlCallback);
 	ScopedValueSetter<bool> objectConstructorSetter(allowObjectConstructors, true);
 
 	int callbackIndex = getControlCallbackIndex();
@@ -351,7 +351,9 @@ void ProcessorWithScriptingContent::defaultControlCallbackIdle(ScriptingApi::Con
 void ProcessorWithScriptingContent::customControlCallbackIdle(ScriptingApi::Content::ScriptComponent *component, const var& controllerValue, Result& r)
 {
 	ScopedValueSetter<bool> objectConstructorSetter(allowObjectConstructors, true);
-	
+
+	auto sp = getScriptingContent()->contentProfile.profile(component->pControlCallback);
+	getScriptingContent()->contentProfile.closeTrack(component->pControlCallback);
 
 	getMainController_()->getDebugLogger().logParameterChange(thisAsJavascriptProcessor, component, controllerValue);
 
@@ -372,7 +374,13 @@ void ProcessorWithScriptingContent::customControlCallbackIdle(ScriptingApi::Cont
 
 		scriptEngine->executeInlineFunction(fVar, args, &r);
 
-		BACKEND_ONLY(if (!r.wasOk()) debugError(dynamic_cast<Processor*>(this), r.getErrorMessage()));
+#if USE_BACKEND
+		if (!r.wasOk())
+		{
+			thisAsJavascriptProcessor->runtimeErrorBroadcaster.sendMessage(sendNotificationAsync, r.getErrorMessage());
+			dynamic_cast<Processor*>(this)->getMainController()->writeToConsole(r.getErrorMessage(), 1, dynamic_cast<Processor*>(this));
+		}
+#endif
 	}
 
 #if 0
@@ -721,10 +729,15 @@ ValueTree FileChangeListener::collectAllScriptFiles(ModulatorSynthChain *chainTo
 
 void FileChangeListener::ExternalReloader::timerCallback()
 {
+	auto changed = false;
+
 	for(auto w: parent.watchers)
 	{
-		w->reloadIfChanged();
+		changed |= w->reloadIfChanged();
 	}
+
+	if(changed)
+		parent.fileChanged();
 }
 
 void FileChangeListener::addFileContentToValueTree(JavascriptProcessor* jp, ValueTree externalScriptFiles, File scriptFile, ModulatorSynthChain* chainToExport)
@@ -877,10 +890,42 @@ Result JavascriptProcessor::getLastErrorMessage() const
 { return lastResult; }
 
 ApiProviderBase* JavascriptProcessor::getProviderBase()
-{ return scriptEngine.get(); }
+{
+#if HISE_INCLUDE_PROFILING_TOOLKIT
+	auto& dh = dynamic_cast<Processor*>(this)->getMainController()->getDebugSession();
+
+	if(auto currentSession = dh.getProviderBase())
+		return currentSession;
+#endif
+
+	return scriptEngine.get();
+}
+
+DebugSession* JavascriptProcessor::getDebugSession()
+{
+	return &mainController->getDebugSession();
+}
 
 HiseJavascriptEngine* JavascriptProcessor::getScriptEngine()
 { return scriptEngine; }
+
+#if USE_BACKEND
+WeakCallbackHolder::CallableObject::StrictnessLevel JavascriptProcessor::getStrictnessLevel() const
+{
+	using SL = WeakCallbackHolder::CallableObject::StrictnessLevel;
+
+	if (callScopeOverride != SL::Unset)
+		return callScopeOverride;
+
+	auto s = GET_HISE_SETTING(dynamic_cast<const Processor*>(this),
+	                          HiseSettings::Scripting::CallScopeWarnings).toString();
+
+	if (s == "Strict") return SL::Strict;
+	if (s == "Warn")   return SL::Warn;
+	if (s == "Unsafe") return SL::Unsafe;
+	return SL::Unset;
+}
+#endif
 
 void JavascriptProcessor::toggleBreakpoint(const Identifier& snippetId, int lineNumber, int charNumber)
 {
@@ -983,17 +1028,18 @@ JavascriptProcessor::JavascriptProcessor(MainController *mc) :
 	mainController(mc),
 	scriptEngine(new HiseJavascriptEngine(this, mc)),
 	lastCompileWasOK(false),
-	currentCompileThread(nullptr),
 	lastResult(Result::ok()),
 	callStackEnabled(mc->isCallStackEnabled()),
 	repaintDispatcher(mc)
 {
-#if USE_BACKEND
+	initialiseProjectDll(mc);
 
-	dynamic_cast<BackendProcessor*>(mc)->dllManager->loadDll(false);
-	setProjectDll(dynamic_cast<BackendProcessor*>(mc)->dllManager->projectDll);
-#endif
-
+	compileProfile.setHolder(this, true);
+	compileProfile.setPrefix("later");
+	compileProfile.setSourceType(DebugSession::ProfileDataSource::SourceType::Script);
+	pCompileScript = compileProfile.add("compileScript()");
+	pCreateDebugInfo = compileProfile.add("createDebugInfo()");
+	pControlCallback = compileProfile.add("controlCallbacks()");
 
 	allInterfaceData = ValueTree("UIData");
 	auto defaultContent = ValueTree("ContentProperties");
@@ -1245,39 +1291,74 @@ void JavascriptProcessor::breakpointWasHit(int index)
 		repaintUpdater.triggerAsyncUpdate();
 }
 
-void JavascriptProcessor::addInplaceDebugValue(const Identifier& callback, int lineNumber, const String& value)
+void JavascriptProcessor::addInplaceDebugValue(const Identifier& callback, int lineNumber, const String& value, DebugInformationBase::Ptr info)
 {
-	if (auto sn = getSnippet(callback))
+	bool initialised = false;
+
+	auto docToUse = getSnippetOrExternalFile(callback);
+	
+	lineNumber--;
+
+	if(docToUse == nullptr)
 	{
-		lineNumber--;
-
-		inplaceBroadcaster.sendMessage(sendNotificationAsync, callback, lineNumber);
-
-		for (mcl::LanguageManager::InplaceDebugValue& v : inplaceValues)
+		if(scriptEngine != nullptr && docToUse == nullptr)
 		{
-			if (v.location.getOwner() == sn &&
-				(v.location.getLineNumber() == lineNumber || lineNumber == v.originalLineNumber))
+			for(int i = 0; i < scriptEngine->getNumIncludedFiles(); i++)
 			{
-				v.value = value;
-				return;
+				if(scriptEngine->getIncludedFile(i).getFileName() == callback.toString())
+				{
+					std::pair<String, mcl::LanguageManager::InplaceDebugValue::Ptr> d;
+
+					d.second = new mcl::LanguageManager::InplaceDebugValue();
+
+					d.first = callback.toString();
+					d.second->initialised = false;
+					d.second->info = info;
+					d.second->originalLineNumber = lineNumber;
+					d.second->value = value;
+
+					deferredValues.add(d);
+				}
 			}
 		}
 
-
-		mcl::LanguageManager::InplaceDebugValue newValue;
-		newValue.location = CodeDocument::Position(*sn, lineNumber, 99);
-		newValue.originalLineNumber = lineNumber;
-		newValue.value = value;
-		newValue.initialised = sn->isInitialised();
-
-		inplaceValues.add(newValue);
-		inplaceValues.getReference(inplaceValues.size() - 1).location.setPositionMaintained(true);
+		return;
 	}
+
+	inplaceBroadcaster.sendMessage(sendNotificationAsync, callback, lineNumber);
+
+	for (auto v : inplaceValues)
+	{
+		if (v->location.getOwner() == docToUse &&
+			(v->location.getLineNumber() == lineNumber || lineNumber == v->originalLineNumber))
+		{
+			v->value = value;
+			v->info = info;
+			return;
+		}
+	}
+
+	auto newValue = new mcl::LanguageManager::InplaceDebugValue();
+	newValue->location = CodeDocument::Position(*docToUse, lineNumber, 99);
+	newValue->originalLineNumber = lineNumber;
+	newValue->value = value;
+	newValue->info = info;
+	newValue->initialised = initialised;
+	newValue->location.setPositionMaintained(true);
+	
+	inplaceValues.add(newValue);
 }
 
 void JavascriptProcessor::fileChanged()
 {
-	compileScript();
+#if USE_BACKEND
+
+	auto p = dynamic_cast<Processor*>(this);
+	auto shouldRecompile = GET_HISE_SETTING(p, HiseSettings::Scripting::RecompileOnFileChange);
+
+	if(shouldRecompile)
+		compileScript();
+#endif
 }
 
 
@@ -1301,10 +1382,13 @@ void JavascriptProcessor::clearExternalWindows()
 
 JavascriptProcessor::SnippetResult JavascriptProcessor::compileInternal()
 {
+	compileProfile.setPrefix(dynamic_cast<Processor*>(this)->getId() + ".");
+
 	auto mc = dynamic_cast<Processor*>(this)->getMainController();
 	LockHelpers::freeToGo(mc);
 
 	SUSPEND_GLOBAL_DISPATCH(mc, "compile script");
+	auto sp1 = compileProfile.profile(0);
 
 	ProcessorWithScriptingContent* thisAsScriptBaseProcessor = dynamic_cast<ProcessorWithScriptingContent*>(this);
 
@@ -1343,6 +1427,7 @@ JavascriptProcessor::SnippetResult JavascriptProcessor::compileInternal()
 	{
 		CompileDebugLock compileLock(*this);
 		scriptEngine->clearDebugInformation();
+		content->resetLafRegistry();
 	}
 
 	content->beginInitialization();
@@ -1359,6 +1444,11 @@ JavascriptProcessor::SnippetResult JavascriptProcessor::compileInternal()
 	thisAsScriptBaseProcessor->allowObjectConstructors = true;
 
 	const static Identifier onInit("onInit");
+
+#if HISE_INCLUDE_PROFILING_TOOLKIT
+	auto enableProfiling = dynamic_cast<Processor*>(this)->getMainController()->getDebugSession().getTriggerType() == DebugSession::TriggerType::Compilation;
+	scriptEngine->setEnableOnInitProfiling(enableProfiling);
+#endif
 
 	for (int i = 0; i < getNumSnippets(); i++)
 	{
@@ -1421,12 +1511,15 @@ JavascriptProcessor::SnippetResult JavascriptProcessor::compileInternal()
 	}
 
 	{
+		auto sp2 = compileProfile.profile(2);
 		CompileDebugLock compileLock(*this);
 		scriptEngine->rebuildDebugInformation();
 	}
 
 	try
 	{
+		auto sp2 = compileProfile.profile(3);
+
 		if (useCustomPreset)
 		{
 			// We need to reinitialise the automation ID property here because
@@ -1480,23 +1573,36 @@ void JavascriptProcessor::compileScript(const ResultFunction& rf /*= ResultFunct
 {
     inplaceValues.clearQuick();
 
+	
+
+	bool stopAfterCompilation = false;
+
+#if HISE_INCLUDE_PROFILING_TOOLKIT
+    auto& ds = dynamic_cast<Processor*>(this)->getMainController()->getDebugSession();
+	if(ds.getTriggerType() == DebugSession::TriggerType::Compilation && !ds.isRecordingMultithread())
+	{
+		ds.startRecording(10000.0, this);
+		stopAfterCompilation = true;
+	}
+#endif
+
 	clearCallableObjects();
     
-	auto f = [rf](Processor* p)
+	auto f = [rf, stopAfterCompilation](Processor* p)
 	{
 		auto jp = dynamic_cast<JavascriptProcessor*>(p);
 
 		auto result = jp->compileInternal();
 
-		auto postCompile = [result, rf](Dispatchable* obj)
+		auto postCompile = [result, rf, stopAfterCompilation](Dispatchable* obj)
 		{
-			
-
 			auto jp = static_cast<JavascriptProcessor*>(obj);
 			jp->stuffAfterCompilation(result);
 			
 			if(rf)
 				rf(result);
+
+			PROFILE_ONLY(if(stopAfterCompilation) dynamic_cast<Processor*>(jp)->getMainController()->getDebugSession().stopRecording());
 
 			return Dispatchable::Status::OK;
 		};
@@ -1511,16 +1617,61 @@ void JavascriptProcessor::compileScript(const ResultFunction& rf /*= ResultFunct
 	mainController->getKillStateHandler().killVoicesAndCall(dynamic_cast<Processor*>(this), f, MainController::KillStateHandler::TargetThread::ScriptingThread);
 }
 
+#if USE_BACKEND
+void JavascriptProcessor::shadowParseFile(const String& code, const String& fileName, const DiagnosticCallback& callback,
+										   NotificationType notificationType)
+{
+	if (notificationType == sendNotificationSync)
+	{
+		// HTTP-direct path: run on the calling thread with a read lock to
+		// block until any in-progress compilation finishes.
+		SimpleReadWriteLock::ScopedReadLock sl(
+			mainController->getJavascriptThreadPool().getLookAndFeelRenderLock());
+
+		auto diagnostics = scriptEngine->shadowParse(code, fileName);
+		callback(diagnostics);
+		return;
+	}
+
+	// Async path (IDE F7): defer to scripting thread, callback on message thread.
+	auto f = [code, fileName, callback](Processor* p)
+	{
+		auto jp = dynamic_cast<JavascriptProcessor*>(p);
+		auto diagnostics = jp->scriptEngine->shadowParse(code, fileName);
+
+		auto postParse = [diagnostics, callback](Dispatchable* obj)
+		{
+			callback(diagnostics);
+			return Dispatchable::Status::OK;
+		};
+
+		jp->mainController->getLockFreeDispatcher().callOnMessageThreadAfterSuspension(jp, postParse);
+
+		return SafeFunctionCall::OK;
+	};
+
+	mainController->getKillStateHandler().killVoicesAndCall(
+		dynamic_cast<Processor*>(this), f,
+		MainController::KillStateHandler::TargetThread::ScriptingThread);
+}
+#endif
 
 void JavascriptProcessor::setupApi()
 {
 	clearFileWatchers();
 
     sendClearMessage();
-    
+
+	inplaceValues.clearQuick();
+	inplaceBroadcaster.sendMessage(sendNotificationAsync, {}, -1);
+
 	dynamic_cast<ProcessorWithScriptingContent*>(this)->getScriptingContent()->cleanJavascriptObjects();
 
-	scriptEngine = new HiseJavascriptEngine(this, dynamic_cast<Processor*>(this)->getMainController());
+	auto mc =  dynamic_cast<Processor*>(this)->getMainController();
+
+	PROFILE_ONLY(mc->getDebugSession().clearData(this));
+	PROFILE_ONLY(mc->getDebugSession().sendClearMessage());
+	scriptEngine = new HiseJavascriptEngine(this, mc);
 
 	scriptEngine->addBreakpointListener(this);
 
@@ -1568,6 +1719,39 @@ const JavascriptProcessor::SnippetDocument * JavascriptProcessor::getSnippet(con
 	}
 
 	return nullptr;
+}
+
+CodeDocument* JavascriptProcessor::getSnippet(const DebugableObjectBase::Location& loc)
+{
+	auto fileName = loc.fileName;
+
+	if (fileName.isEmpty() || fileName == "onInit")
+	{
+		// onInit callback - empty fileName or "onInit" means onInit
+		return getSnippet(Identifier("onInit"));
+	}
+	else if (fileName.contains("()"))
+	{
+		// Other callback like "onNoteOn()" - strip the "()"
+		auto callbackName = fileName.upToFirstOccurrenceOf("()", false, false);
+		return getSnippet(Identifier(callbackName));
+	}
+	else
+	{
+		auto scriptFolder = GET_PROJECT_HANDLER(dynamic_cast<Processor*>(this)).getSubDirectory(FileHandlerBase::Scripts);
+
+		// External file - fileName is full path
+		auto f = File(scriptFolder).getChildFile(fileName);
+
+		for (int i = 0; i < getNumWatchedFiles(); i++)
+		{
+			
+
+			if (getWatchedFile(i) == f)
+				return &getWatchedFileDocument(i);
+		}
+		return nullptr;
+	}
 }
 
 #if 0
@@ -2117,17 +2301,6 @@ bool JavascriptProcessor::parseSnippetsFromString(const String &x, bool clearUnd
 }
 
 
-
-void JavascriptProcessor::setCompileProgress(double progress)
-{
-	if (currentCompileThread != nullptr && mainController->isUsingBackgroundThreadForCompiling())
-	{
-		currentCompileThread->setProgress(progress);
-	}
-}
-
-
-
 void JavascriptProcessor::compileScriptWithCycleReferenceCheckEnabled()
 {
 	ScopedValueSetter<bool> ss(cycleReferenceCheckEnabled, true);
@@ -2195,6 +2368,23 @@ void JavascriptProcessor::stuffAfterCompilation(const SnippetResult& result)
 		}
 	}
 
+	for(auto & d: deferredValues)
+	{
+		for (int i = 0; i < getNumWatchedFiles(); i++)
+		{
+			if (getWatchedFile(i).getFileName() == d.first)
+			{
+				d.second->location = CodeDocument::Position(getWatchedFileDocument(i), d.second->originalLineNumber, 90);
+				d.second->init();
+
+				inplaceBroadcaster.sendMessage(sendNotificationAsync, Identifier(d.first), d.second->originalLineNumber);
+				inplaceValues.add(d.second);
+			}
+		}
+	}
+
+	deferredValues.clear();
+
 	mainController->sendScriptCompileMessage(this);
 	rebuild();
 }
@@ -2256,31 +2446,11 @@ String JavascriptProcessor::SnippetDocument::getSnippetAsFunction() const
 	else				  return getAllContent();
 }
 
-JavascriptProcessor::CompileThread::CompileThread(JavascriptProcessor *processor) :
-ThreadWithProgressWindow("Compiling", true, false),
-sp(processor),
-result(SnippetResult(Result::ok(), 0))
-{
-	getAlertWindow()->setLookAndFeel(&alaf);
-}
-
-void JavascriptProcessor::CompileThread::run()
-{
-	result = sp->compileInternal();
-}
-
-
-float ScriptBaseMidiProcessor::getDefaultValue(int index) const
-{
-	if(auto c = getScriptingContent()->getComponent(index))
-		return c->getScriptObjectProperty(ScriptingApi::Content::ScriptComponent::defaultValue);
-
-	return 0.0f;
-}
 
 JavascriptThreadPool::JavascriptThreadPool(MainController* mc) :
 	Thread("Javascript Thread", HISE_DEFAULT_STACK_SIZE),
 	ControlledObject(mc),
+	ProfiledRecordingSession(mc->getDebugSession(), DebugSession::ThreadIdentifier::Type::ScriptingThread),
 	lowPriorityQueue(8192),
 	highPriorityQueue(2048),
 	compilationQueue(128),
@@ -2295,6 +2465,19 @@ JavascriptThreadPool::JavascriptThreadPool(MainController* mc) :
 	taskNames[Task::HiPriorityCallbackExecution] = "Hi Priority Callback Counter";
 	taskNames[Task::LowPriorityCallbackExecution] = "Low Priority Callback Counter";
 	taskNames[Task::DeferredPanelRepaintJob] = "Deferred Paint Routine Counter";
+
+	scriptThreadData.setPrefix("");
+	scriptThreadData.setColour(Colour(0xFF666666));
+	scriptThreadData.setDurationThreshold(0.05);
+	scriptThreadData.setSourceType(DebugSession::ProfileDataSource::SourceType::ScriptCallback);
+	scriptThreadData.setHolder(&mc->getDebugSession(), true);
+
+
+	pCompile = scriptThreadData.add("Compilation");
+	pHigh = scriptThreadData.add("High Priority Callbacks");
+	pLow = scriptThreadData.add("Low Priority Callbacks");
+	pRepaint = scriptThreadData.add("Deferred Paint Routines");
+
 }
 
 JavascriptThreadPool::~JavascriptThreadPool()
@@ -2530,8 +2713,7 @@ void JavascriptThreadPool::addJob(Task::Type t, JavascriptProcessor* p, const Ta
 	}
 	case MainController::KillStateHandler::TargetThread::AudioThread:
 	{
-		// Nope...
-		jassertfalse;
+		pushToQueue(t, p, f);
 		break;
 	}
     default:
@@ -2568,7 +2750,8 @@ Result JavascriptThreadPool::executeQueue(const Task::Type& t, PendingCompilatio
 		allowSleep = true;
 
 		TRACE_EVENT("scripting", "compile queue");//, perfetto::Track(CompilationTrackId));
-		
+		auto sp = scriptThreadData.profile(pCompile);
+
 		while (compilationQueue.pop(ct))
 		{
             SimpleReadWriteLock::ScopedWriteLock sl(getLookAndFeelRenderLock());
@@ -2622,7 +2805,8 @@ Result JavascriptThreadPool::executeQueue(const Task::Type& t, PendingCompilatio
 		r = executeQueue(Task::ReplEvaluation, pendingCompilations);
 
 		TRACE_EVENT("scripting", "high priority queue");//, perfetto::Track(HighPriorityTrackId));
-		
+		auto sp = scriptThreadData.profile(pHigh);
+
 		CallbackTask hpt;
 
 		while (r.wasOk() && highPriorityQueue.pop(hpt))
@@ -2668,30 +2852,34 @@ Result JavascriptThreadPool::executeQueue(const Task::Type& t, PendingCompilatio
 		PerfettoHelpers::setTrackNameName(tr, "low priority queue");
 #endif
 
-		TRACE_EVENT_BEGIN("scripting", "low priority queue");//, t);
-
-		while (r.wasOk() && lowPriorityQueue.pop(lpt))
 		{
-            // We're trying to leave this unlocked here as the
-            // localised inline function scope might resolve all
-            // multithreading issues (???)
-			//SimpleReadWriteLock::ScopedWriteLock sl(getLookAndFeelRenderLock());
+			TRACE_EVENT_BEGIN("scripting", "low priority queue");//, t);
+			auto sp = scriptThreadData.profile(pLow);
 
-			jassert(!lpt.getFunction().isHiPriority());
+			while (r.wasOk() && lowPriorityQueue.pop(lpt))
+			{
+	            // We're trying to leave this unlocked here as the
+	            // localised inline function scope might resolve all
+	            // multithreading issues (???)
+				//SimpleReadWriteLock::ScopedWriteLock sl(getLookAndFeelRenderLock());
 
-			if (alreadyCompiled(lpt))
-				continue;
+				jassert(!lpt.getFunction().isHiPriority());
 
-#if PERFETTO
-			dispatch::StringBuilder b;
-			b << "low priority callback " << dynamic_cast<Processor*>(lpt.getFunction().getProcessor())->getId();
-			TRACE_DYNAMIC_SCRIPTING(b);
-#endif
+				if (alreadyCompiled(lpt))
+					continue;
 
-			r = lpt.call();
+	#if PERFETTO
+				dispatch::StringBuilder b;
+				b << "low priority callback " << dynamic_cast<Processor*>(lpt.getFunction().getProcessor())->getId();
+				TRACE_DYNAMIC_SCRIPTING(b);
+	#endif
+
+				r = lpt.call();
+			}
+
+			TRACE_EVENT_END("scripting");//, t);
 		}
-
-		TRACE_EVENT_END("scripting");//, t);
+		
 
 		if (!r.wasOk())
 			lowPriorityQueue.clear();
@@ -2699,6 +2887,8 @@ Result JavascriptThreadPool::executeQueue(const Task::Type& t, PendingCompilatio
 		clearCounter(t);
 
 		WeakReference<ScriptingApi::Content::ScriptPanel> sp;
+
+		auto sp2 = scriptThreadData.profile(pRepaint);
 
 		if (r.wasOk())
 		{
@@ -2742,6 +2932,9 @@ void JavascriptThreadPool::run()
 	while (!threadShouldExit())
 	{
 		{
+			PROFILE_ONLY(initIfEmpty(DebugSession::ThreadIdentifier::getCurrent()));
+			PROFILE_ONLY(checkRecording());
+
 			PerfettoHelpers::setCurrentThreadName("Scripting Thread");
 			
 			TRACE_SCRIPTING("script thread execution");
@@ -2755,10 +2948,9 @@ void JavascriptThreadPool::run()
 			{
 				debugError(getMainController()->getMainSynthChain(), r.getErrorMessage());
 			}
-		}
-		
 
-		
+			PROFILE_ONLY(checkRecording());
+		}
 
 		wait(500);
 	}
@@ -2836,21 +3028,21 @@ Result JavascriptThreadPool::Task::callWithResult()
 
 		try
 		{
-			return f(jp.get());
+			return jp->returnResult(f(jp.get()));
 		}
 		catch (Result& r)
 		{
 			jassertfalse;
-			return Result(r);
+			return jp->returnResult(r);;
 		}
 		catch (String& errorMessage)
 		{
 			jassertfalse;
-			return Result::fail(errorMessage);
+			return jp->returnResult(Result::fail(errorMessage));
 		}
 	};
 
-	return Result::fail("invalid function");
+	return jp->returnResult(Result::fail("invalid function"));
 }
 
 void JavascriptProcessor::EditorHelpers::applyChangesFromActiveEditor(JavascriptProcessor* p)

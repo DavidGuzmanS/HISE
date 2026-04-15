@@ -200,7 +200,7 @@ class CurveEqEditor  : public ProcessorEditorBody,
                        public FilterTypeSelector::Listener,
 					   public FilterDragOverlay::Listener,
                        public ButtonListener,
-                       public SliderListener
+                       public Slider::Listener
 {
 public:
     //==============================================================================
@@ -247,12 +247,12 @@ public:
 		freqSlider->setEnabled(true);
 
 		gainSlider->setup(eq, eq->getParameterIndex(currentlySelectedFilterBand, CurveEq::BandParameter::Gain), "Gain " + String(currentlySelectedFilterBand));
-        gainSlider->setMode(HiSlider::Decibel, -24.0, 24.0, 0.0);
+        gainSlider->setMode(HiSlider::Decibel, NormalisableRange(-24.0, 24.0));
 		gainSlider->updateValue();
 
 		qSlider->setup(eq, eq->getParameterIndex(currentlySelectedFilterBand, CurveEq::BandParameter::Q), "Q " + String(currentlySelectedFilterBand));
 		qSlider->updateValue();
-        qSlider->setMode(HiSlider::Linear, 0.1, 8.0, 1.0);
+        qSlider->setMode(HiSlider::Linear, NormalisableRange(0.1, 8.0).withCentreSkew(1.0));
 
 		enableBandButton->setup(eq, eq->getParameterIndex(currentlySelectedFilterBand, CurveEq::BandParameter::Enabled), "Enabled " + String(currentlySelectedFilterBand));
 		enableBandButton->updateValue();

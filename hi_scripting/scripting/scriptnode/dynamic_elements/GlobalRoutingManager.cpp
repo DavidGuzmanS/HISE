@@ -145,7 +145,7 @@ juce::Path GlobalRoutingManager::RoutingIcons::createPath(const String& url) con
 #if USE_BACKEND
 	LOAD_EPATH_IF_URL("new", SampleMapIcons::newSampleMap);
 	LOAD_EPATH_IF_URL("debug", BackendBinaryData::ToolbarIcons::viewPanel);
-	LOAD_PATH_IF_URL("goto", ColumnIcons::openWorkspaceIcon);
+	LOAD_EPATH_IF_URL("goto", ColumnIcons::openWorkspaceIcon);
 	LOAD_EPATH_IF_URL("global", HiBinaryData::SpecialSymbols::globalCableIcon);
 #endif
 
@@ -528,6 +528,8 @@ struct HiseOSCSender: public OSCSender,
 		{
 
 		}
+
+		bool shouldBeCleanedUp() const override { return sender == nullptr; }
 
 		String getTargetId() const override
 		{
@@ -1007,7 +1009,6 @@ GlobalRoutingNodeBase::GlobalRoutingNodeBase(DspNetwork* n, ValueTree d) :
 	lastResult(Result::ok())
 {
 	globalRoutingManager = GlobalRoutingManager::Helpers::getOrCreate(n->getScriptProcessor()->getMainController_());
-
 	slotId.initialise(this);
 }
 
@@ -1093,7 +1094,7 @@ void GlobalRoutingNodeBase::initParameters()
 		auto ndb = new parameter::dynamic_base(p.callback);
 
 		newP->setDynamicParameter(ndb);
-		newP->valueNames = p.parameterNames;
+		newP->valueNames = p.getParameterNames().toStringArray();
 
 		addParameter(newP);
 	}
@@ -1466,7 +1467,7 @@ void GlobalCableNode::initParameters()
 		auto ndb = new parameter::dynamic_base(p.callback);
 
 		newP->setDynamicParameter(ndb);
-		newP->valueNames = p.parameterNames;
+		newP->valueNames = p.getParameterNames().toStringArray();
 
 		addParameter(newP);
 	}
@@ -1677,7 +1678,7 @@ bool GlobalRoutingManager::Cable::cleanup()
 {
 	for (int i = 0; i < targets.size(); i++)
 	{
-		if (targets[i] == nullptr)
+		if (targets[i] == nullptr || targets[i]->shouldBeCleanedUp())
 			targets.remove(i--);
 	}
 
@@ -1696,6 +1697,12 @@ scriptnode::routing::GlobalRoutingManager::SelectableTargetBase::List GlobalRout
 	return l;
 }
 
+void GlobalRoutingManager::Cable::sendDataStatic(source_base* sb, void* data, size_t numBytes)
+{
+	auto c = static_cast<Cable*>(sb);
+	c->sendData(nullptr, data, numBytes);
+}
+
 bool GlobalRoutingManager::Cable::containsTarget(CableTargetBase* n) const
 {
 	return targets.contains(n);
@@ -1706,12 +1713,28 @@ void GlobalRoutingManager::Cable::addTarget(CableTargetBase* n)
 	SimpleReadWriteLock::ScopedWriteLock sl(lock);
 	targets.addIfNotAlreadyThere(n);
 	n->sendValue(lastValue);
+
+	if(lastData.getSize() > 0)
+		n->sendData(lastData.getData(), lastData.getSize());
 }
 
 void GlobalRoutingManager::Cable::removeTarget(CableTargetBase* n)
 {
 	SimpleReadWriteLock::ScopedWriteLock sl(lock);
 	targets.removeAllInstancesOf(n);
+}
+
+void GlobalRoutingManager::Cable::sendData(CableTargetBase* source, void* data, size_t numBytes)
+{
+	lastData.replaceAll(data, numBytes);
+
+	for (auto t : targets)
+	{
+		if (t == source)
+			continue;
+
+		t->sendData(data, numBytes);
+	}
 }
 
 void GlobalRoutingManager::Cable::sendValue(CableTargetBase* source, double v)

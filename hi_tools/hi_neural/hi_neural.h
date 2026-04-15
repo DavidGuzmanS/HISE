@@ -167,11 +167,16 @@ struct NeuralNetwork: public ReferenceCountedObject,
 	void process(int networkIndex, const float* input, float* output);
 	void clearModel();
 
+	void warmup(int networkIndex=-1, int warmupSize=2048);
+
 	/* Loads a model with trained weights from Tensorflow. */
 	Result loadTensorFlowModel(const var& jsonData);
 
 	/** Loads a model with trained weights from Pytorch. */
 	Result loadPytorchModel(const var& jsonData);
+
+	/** Loads a model from a NAM file. */
+	Result loadNAMModel(const var& jsonData);
 
 	/** Build a model from the JSON layout. */
 	Result build(const var& modelJSON);

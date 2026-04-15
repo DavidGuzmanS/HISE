@@ -176,6 +176,8 @@ void MouseCallbackComponent::setEnableFileDrop(const String& newCallbackLevel, c
 
 void MouseCallbackComponent::mouseDown(const MouseEvent& event)
 {
+	checkMouseClickProfiler(true);
+
 	CHECK_MIDDLE_MOUSE_DOWN(event);
 
 	ignoreMouseUp = false;
@@ -321,38 +323,110 @@ bool MouseCallbackComponent::isInterestedInFileDrag(const StringArray& files)
 	if (fileDropExtensions.isEmpty())
 		return false;
 
-	if (files.size() > 1)
-		return false;
+	auto ok = !files.isEmpty();
 
-	File f(files[0]);
-
-	for (auto& ex : fileDropExtensions)
+	for(auto& fn: files)
 	{
-		if (files[0].matchesWildcard(ex, true))
-			return true;
+		File f(fn);
+
+		auto match = false;
+
+		for (auto& ex : fileDropExtensions)
+		{
+			if(ex == "{FOLDER}" && f.isDirectory())
+			{
+				match = true;
+				break;
+			}
+			else if (fn.matchesWildcard(ex, true))
+			{
+				match = true;
+				break;
+			}
+		}
+
+		ok &= match;
 	}
 
-	return false;
+	return ok;
 }
 
 void MouseCallbackComponent::fileDragEnter(const StringArray& files, int x, int y)
 {
-	sendFileMessage(Action::FileEnter, files[0], Point<int>(x, y));
+	sendFileMessage(Action::FileEnter, files, Point<int>(x, y));
 }
 
 void MouseCallbackComponent::fileDragMove(const StringArray& files, int x, int y)
 {
-	sendFileMessage(Action::FileMove, files[0], Point<int>(x, y));
+	sendFileMessage(Action::FileMove, files, Point<int>(x, y));
 }
 
 void MouseCallbackComponent::fileDragExit(const StringArray& files)
 {
-	sendFileMessage(Action::FileExit, files[0], Point<int>());
+	sendFileMessage(Action::FileExit, files, Point<int>());
 }
 
 void MouseCallbackComponent::filesDropped(const StringArray& files, int x, int y)
 {
-	sendFileMessage(Action::FileDrop, files[0], Point<int>(x, y));
+	sendFileMessage(Action::FileDrop, files, Point<int>(x, y));
+}
+
+Result MouseCallbackComponent::validateEventObject(const var& objectToTest, const String& callbackLevel)
+{
+	auto cl = getCallbackLevel(callbackLevel);
+
+	if (cl == CallbackLevel::NoCallbacks)
+		return Result::fail("allowCallbacks is set to No Callbacks, this will never execute");
+
+	auto e = objectToTest.getDynamicObject();
+
+	if (e == nullptr)
+	{
+		return Result::fail("Must be a JSON object");
+	}
+
+	auto validIds = getCallbackPropertyNames();
+
+	String errorMessage;
+
+	for (const auto& nv : e->getProperties())
+	{
+		if (!validIds.contains(nv.name.toString()))
+		{
+			errorMessage << "invalid property: " << nv.name;
+			errorMessage << " - expected properties: ";
+
+			for (const auto& i : validIds)
+				errorMessage << i << ", ";
+
+			return Result::fail(errorMessage.upToLastOccurrenceOf(", ", false, false));
+		}
+	}
+
+	auto checkAdvancedProperty = [&](const Identifier& id, CallbackLevel expected)
+	{
+		if (e->hasProperty(id) && cl < expected)
+		{
+			String errorMessage;
+			errorMessage << "property '" << id.toString() << "' requires callback level >= " << getCallbackLevels()[(int)CallbackLevel::ClicksAndEnter].quoted();
+			throw Result::fail(errorMessage);
+		}
+	};
+
+	try
+	{
+		checkAdvancedProperty("hover", CallbackLevel::ClicksAndEnter);
+		checkAdvancedProperty("drag", CallbackLevel::Drag);
+		checkAdvancedProperty("insideDrag", CallbackLevel::Drag);
+		checkAdvancedProperty("isDragOnly", CallbackLevel::Drag);
+		checkAdvancedProperty("dragX", CallbackLevel::Drag);
+		checkAdvancedProperty("dragY", CallbackLevel::Drag);
+		return Result::ok();
+	}
+	catch (Result& r)
+	{
+		return r;
+	}
 }
 
 void MouseCallbackComponent::setAllowCallback(const String &newCallbackLevel) noexcept
@@ -365,6 +439,16 @@ void MouseCallbackComponent::setAllowCallback(const String &newCallbackLevel) no
 MouseCallbackComponent::CallbackLevel MouseCallbackComponent::getCallbackLevel() const
 {
 	return callbackLevel;
+}
+
+MouseCallbackComponent::CallbackLevel MouseCallbackComponent::getCallbackLevel(const String& newCallbackLevel)
+{
+	auto idx = getCallbackLevels(false).indexOf(newCallbackLevel);
+
+	if (idx != -1)
+		return (CallbackLevel)idx;
+
+	return CallbackLevel::NoCallbacks;
 }
 
 void MouseCallbackComponent::mouseMove(const MouseEvent& event)
@@ -406,6 +490,8 @@ void MouseCallbackComponent::mouseExit(const MouseEvent &event)
 
 void MouseCallbackComponent::mouseUp(const MouseEvent &event)
 {
+	checkMouseClickProfiler(false);
+
 	CHECK_MIDDLE_MOUSE_UP(event);
 
 	abortTouch();
@@ -422,7 +508,7 @@ void MouseCallbackComponent::mouseUp(const MouseEvent &event)
 	sendMessage(event, Action::MouseUp);
 }
 
-void MouseCallbackComponent::sendFileMessage(Action a, const String& f, Point<int> pos)
+void MouseCallbackComponent::sendFileMessage(Action a, const StringArray& f, Point<int> pos)
 {
 	FileCallbackLevel requiredLevel = FileCallbackLevel::NoCallbacks;
 
@@ -451,9 +537,20 @@ void MouseCallbackComponent::sendFileMessage(Action a, const String& f, Point<in
 	e->setProperty(y, pos.getY());
 	e->setProperty(hover, a != Action::FileExit);
 	e->setProperty(drop, a == Action::FileDrop);
-	e->setProperty(file, f);
 
-	
+	if(f.size() == 1)
+		e->setProperty(file, f[0]);
+	else
+	{
+		Array<var> fileList;
+
+		fileList.ensureStorageAllocated(f.size());
+
+		for(auto& fn: f)
+			fileList.add(var(fn));
+
+		e->setProperty(file, var(fileList));
+	}
 
 	for(auto l: listenerList)
 	{
@@ -790,13 +887,15 @@ void DrawActions::Handler::endLayer()
 
 void DrawActions::Handler::addDrawAction(ActionBase* newDrawAction)
 {
+	PROFILE_ONLY(newDrawAction->setEnableProfiling(isProfiling()));
+
 	if (layerStack.getLast() != nullptr)
 		layerStack.getLast()->addDrawAction(newDrawAction);
 	else
 		currentActions.add(newDrawAction);
 }
 
-void DrawActions::Handler::flush(uint64_t perfettoTrackId)
+void DrawActions::Handler::flush(uint64_t perfettoTrackId, uint32 profileTrackId)
 {
 	{
 		SpinLock::ScopedLockType sl(lock);
@@ -808,6 +907,9 @@ void DrawActions::Handler::flush(uint64_t perfettoTrackId)
 
 	if(perfettoTrackId != 0)
 		flowManager.continueFlow(perfettoTrackId, "flush draw handler");
+
+	if(profileTrackId != 0)
+		currentProfileId = profileTrackId;
 
 	triggerAsyncUpdate();
 }
@@ -843,6 +945,9 @@ DrawActions::NoiseMapManager* DrawActions::Handler::getNoiseMapManager()
 void DrawActions::Handler::handleAsyncUpdate()
 {
 	auto x = flowManager.flushAllButLastOne("flush draw handler", {});
+
+	if(currentProfileId != 0)
+		x = currentProfileId;
 
 	for (auto l : listeners)
 	{
@@ -943,8 +1048,8 @@ void BorderPanel::openGLContextClosing()
 
 void BorderPanel::newPaintActionsAvailable(uint64_t flowId)
 {
+	repaintWithProfileTrack((uint32)flowId);
 	flowManager.continueFlow(flowId, "repaint request");
-	repaint();
 }
 
 void BorderPanel::registerToTopLevelComponent()
@@ -1065,7 +1170,19 @@ void BorderPanel::paint(Graphics &g)
 	}
 	else
 	{
-        if(auto laf = dynamic_cast<simple_css::StyleSheetLookAndFeel*>(&getLookAndFeel()))
+		auto thisLaf = &getLookAndFeel();
+
+		auto laf = dynamic_cast<simple_css::StyleSheetLookAndFeel*>(thisLaf);
+
+		if(laf == nullptr)
+		{
+			if(auto scriptedLaf = dynamic_cast<hise::ScriptingObjects::ScriptedLookAndFeel::LafBase*>(thisLaf))
+			{
+				laf = scriptedLaf->getStyleSheetLookAndFeel();
+			}
+		}
+
+        if(laf != nullptr)
         {
 			if(auto root = simple_css::CSSRootComponent::find(*this))
 			{
@@ -1469,6 +1586,8 @@ void DrawActions::Handler::Iterator::render(Graphics& g, Component* c)
 			TRACE_EVENT("drawactions", DYNAMIC_STRING_BUILDER(b));
 #endif
 
+			DebugSession::ProfileDataSource::ScopedProfiler sp(action->profileData, handler->profileHolder);
+
 			if (action->wantsCachedImage())
 			{
 				Image actionImage;
@@ -1507,6 +1626,8 @@ void DrawActions::Handler::Iterator::render(Graphics& g, Component* c)
 			b << "g." << action->getDispatchId() << "()";
 			TRACE_EVENT("drawactions", DYNAMIC_STRING_BUILDER(b));
 #endif
+
+			DebugSession::ProfileDataSource::ScopedProfiler sp(action->profileData, handler->profileHolder);
 
 			action->perform(g);
 		}

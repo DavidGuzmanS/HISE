@@ -35,27 +35,17 @@
 
 namespace hise { using namespace juce;
 
-/** A Envelope that uses two Tables for the attack and release time.
-*	@ingroup modulatorTypes
-*
-*	It uses an internal uptime counter to switch between states to allow the tables to reach 1.0 or 0.0 without accidently switching states. 
-*	If the release phase is started, while the attack phase was still active, it adjust its release gain to prevent a value jump.
-*
-*	The TableEnvelopeEditor has two TableEditors that display the time in the domain (converted from samples) and two ModulatorChainEditors.
-*/
 class TableEnvelope: public EnvelopeModulator,
 					 public LookupTableProcessor
 {
 public:
 
-	SET_PROCESSOR_NAME("TableEnvelope", "Table Envelope", "A Envelope that uses two Tables for the attack and release time.")
+	SET_PROCESSOR_NAME("TableEnvelope", "Table Envelope", "")
 
-
-	/** SpecialParameters for the TableEnvelope */
 	enum SpecialParameters
 	{
-		Attack = EnvelopeModulator::Parameters::numParameters, ///< the attack time in milliseconds
-		Release, ///< the release time in milliseconds
+		Attack = EnvelopeModulator::Parameters::numParameters,
+		Release,
 		numTotalParameters
 	};
 
@@ -76,6 +66,8 @@ public:
 	TableEnvelope(MainController *mc, const String &id, int voiceAmount, Modulation::Mode m, float attackTimeMs=20.0f, float releaseTimeMs=20.0f);
 
 	~TableEnvelope();
+
+	static ProcessorMetadata createMetadata();
 
 	void restoreFromValueTree(const ValueTree &v) override;;
 
@@ -127,47 +119,9 @@ public:
 	};
 
 		/** sets the envelope time and calculates the delta values per sample */
-	void setInternalAttribute (int parameterIndex, float newValue) override
-	{
-		if (parameterIndex < EnvelopeModulator::Parameters::numParameters)
-		{
-			EnvelopeModulator::setInternalAttribute(parameterIndex, newValue);
-			return;
-		}
+	void setInternalAttribute (int parameterIndex, float newValue) override;;
 
-		switch(parameterIndex)
-		{
-			case Attack:
-				attack = newValue;
-				attackUptimeDelta = calculateTableDelta(newValue);
-				break;
-			case Release:
-				release = newValue;
-				releaseUptimeDelta = calculateTableDelta(newValue);
-				break;
-			default:
-				jassertfalse;
-		}	
-	};
-
-	float getDefaultValue(int parameterIndex) const
-	{
-		if (parameterIndex < EnvelopeModulator::Parameters::numParameters)
-		{
-			return EnvelopeModulator::getDefaultValue(parameterIndex);
-		}
-
-		switch (parameterIndex)
-		{
-		case Attack:
-			return 20.0f;
-		case Release:
-			return 20.0f;
-		default:
-			jassertfalse;
-			return -1;
-		}
-	}
+	ModulationDisplayValue::QueryFunction::Ptr getModulationQueryFunction(int parameterIndex) const override;
 
 	double calculateTableDelta(float ms)
 	{

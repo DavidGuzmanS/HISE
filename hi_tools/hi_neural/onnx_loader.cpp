@@ -64,9 +64,7 @@ bool ONNXLoader::run(const Image& img, std::vector<float>& outputValues, bool is
 
 			Image tf = PNGImageFormat().loadFrom(mis);
 
-			Spectrum2D::testImage(tf, true, "after PNG conversion");
-			
-			if(f(currentModel, mos.getData(), mos.getDataSize(), outputValues.size(), isGreyscale))
+			if(f(currentModel, mos.getData(), mos.getDataSize(), (int)outputValues.size(), isGreyscale))
 			{
 				if(auto w = getFunction<getOutput_f>("getOutput"))
 				{
@@ -101,6 +99,26 @@ Result ONNXLoader::loadModel(const MemoryBlock& mb)
 	}
 
 	return ok;
+}
+
+var ONNXLoader::getStatistics()
+{
+	auto o = new DynamicObject();
+
+	Statistics s;
+
+	if(currentModel != nullptr)
+	{
+		if(auto f = getFunction<getStatistics_f>("getStatistics"))
+			f(currentModel, &s);
+	}
+
+	o->setProperty("loaded", currentModel != nullptr);
+	o->setProperty("numInputs", s.numInputs);
+	o->setProperty("numParameters", s.numParameters);
+	o->setProperty("numOutputs", s.numOutputs);
+
+	return var(o);
 }
 
 Result ONNXLoader::getLastError() const

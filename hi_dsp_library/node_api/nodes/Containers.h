@@ -49,6 +49,13 @@ template <typename... Ps> static constexpr int getNumChannelsOfFirstElement()
 	return FirstElementType::NumChannels;
 }
 
+template <typename... Ps> static constexpr int getNumVoicesOfFirstElement()
+{
+	using TupleType = std::tuple<Ps...>;
+	using FirstElementType = typename std::tuple_element<0, TupleType>::type;
+	return FirstElementType::NumVoices;
+}
+
 template <class ...Types> struct _ChannelCounter;
 
 template <class T> struct _ChannelCounter<T>
@@ -66,7 +73,11 @@ template <class ...Types> static constexpr int getSummedChannels()
 	return _ChannelCounter<Types...>()();
 }
 
+
+
+
 }
+
 
 
 
@@ -80,7 +91,7 @@ template <class ParameterClass, typename... Processors> struct container_base
     
 	static constexpr int getFixChannelAmount() { return Helpers::getNumChannelsOfFirstElement<Processors...>(); };
 
-	void initialise(NodeBase* b)
+	void initialise(ObjectWithValueTree* b)
 	{
 		call_tuple_iterator1(initialise, b);
 	}
@@ -132,7 +143,7 @@ protected:
 private:
 
 	tuple_iterator0(reset);
-	tuple_iterator1(initialise, NodeBase*, b);
+	tuple_iterator1(initialise, ObjectWithValueTree*, b);
 };
 
 

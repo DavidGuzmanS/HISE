@@ -184,7 +184,7 @@ void NodePopupEditor::buttonClicked(Button* b)
 			m.addItem((int)NodeComponent::MenuActions::WrapIntoMidiChain, "Wrap into midichain");
 			m.addItem((int)NodeComponent::MenuActions::WrapIntoCloneChain, "Wrap into clone");
 			m.addItem((int)NodeComponent::MenuActions::WrapIntoNoMidiChain, "Wrap into nomidi");
-			m.addItem((int)NodeComponent::MenuActions::WrapIntoNoMidiChain, "Wrap into soft bypass");
+			m.addItem((int)NodeComponent::MenuActions::WrapIntoSoftBypass, "Wrap into soft bypass");
 			m.addItem((int)NodeComponent::MenuActions::WrapIntoOversample4, "Wrap into oversample4");
 		}
 		else
@@ -421,6 +421,8 @@ PropertyEditor::PropertyEditor(NodeBase* n, bool useTwoColumns, ValueTree data, 
 
 		if (hiddenIds.contains(id))
 			continue;
+
+		PropertyHelpers::addMissingIdsForEditor(data, n->getUndoManager());
 
 		auto nt = PropertyHelpers::createPropertyComponent(n->getScriptProcessor(), data, id, n->getUndoManager());
 

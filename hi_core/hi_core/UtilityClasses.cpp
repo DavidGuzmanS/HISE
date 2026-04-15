@@ -138,97 +138,6 @@ double ScopedGlitchDetector::getAllowedPercentageForLocation(int locationId)
 	}
 }
 
-
-AutoSaver::AutoSaver(MainController* mc_):
-	mc(mc_),
-	currentAutoSaveIndex(0)
-{
-		
-}
-
-void AutoSaver::updateAutosaving()
-{
-	if (isAutoSaving()) enableAutoSaving();
-	else disableAutoSaving();
-}
-
-void AutoSaver::enableAutoSaving()
-{
-	IF_NOT_HEADLESS(startTimer(1000 * 60 * getIntervalInMinutes())); // autosave all 5 minutes
-}
-
-void AutoSaver::disableAutoSaving()
-{
-	stopTimer();
-}
-
-int AutoSaver::getIntervalInMinutes() const
-{
-	auto value = (int)dynamic_cast<const GlobalSettingManager*>(mc)->getSettingsObject().getSetting(HiseSettings::Other::AutosaveInterval);
-
-	if (value >= 1  && value <= 30)
-		return value;
-
-	return 5;
-}
-
-bool AutoSaver::isAutoSaving() const
-{
-	return dynamic_cast<const GlobalSettingManager*>(mc)->getSettingsObject().getSetting(HiseSettings::Other::EnableAutosave);
-}
-
-void AutoSaver::timerCallback()
-{
-#if USE_BACKEND
-	Processor *mainSynthChain = mc->getMainSynthChain();
-
-	File backupFile = getAutoSaveFile();
-
-	ValueTree v = mainSynthChain->exportAsValueTree();
-
-	v.setProperty("BuildVersion", BUILD_SUB_VERSION, nullptr);
-	FileOutputStream fos(backupFile);
-	v.writeToStream(fos);
-
-	debugToConsole(mainSynthChain, "Autosaving as " + backupFile.getFileName());
-#endif
-}
-
-File AutoSaver::getAutoSaveFile()
-{
-#if USE_BACKEND
-	Processor *mainSynthChain = mc->getMainSynthChain();
-
-	File presetDirectory = GET_PROJECT_HANDLER(mainSynthChain).getSubDirectory(ProjectHandler::SubDirectories::Presets);
-
-	if (presetDirectory.isDirectory())
-	{
-		if (fileList.size() == 0)
-		{
-			fileList.add(presetDirectory.getChildFile("Autosave_1.hip"));
-			fileList.add(presetDirectory.getChildFile("Autosave_2.hip"));
-			fileList.add(presetDirectory.getChildFile("Autosave_3.hip"));
-			fileList.add(presetDirectory.getChildFile("Autosave_4.hip"));
-			fileList.add(presetDirectory.getChildFile("Autosave_5.hip"));
-		}
-
-		File toReturn = fileList[currentAutoSaveIndex];
-
-		if (toReturn.existsAsFile()) toReturn.deleteFile();
-
-		currentAutoSaveIndex = (currentAutoSaveIndex + 1) % 5;
-
-		return toReturn;
-	}
-	else
-	{
-		return File();
-	}
-#else
-	return File();
-#endif
-}
-
 DelayedFunctionCaller::DelayedFunctionCaller(std::function<void()> func, int delayInMilliseconds):
 	f(func)
 {
@@ -490,11 +399,174 @@ String BalanceCalculator::getBalanceAsString(int balanceValue)
 	else return String(abs(balanceValue)) + (balanceValue > 0 ? " R" : " L");
 }
 
+CustomKeyboardState::LookAndFeelBase::LookAndFeelBase()
+{
+	topLineColour = Colours::darkred;
+	bgColour = Colour(BACKEND_BG_COLOUR_BRIGHT);
+	overlayColour = Colours::red.withAlpha(0.12f);
+}
+
+void CustomKeyboardState::LookAndFeelBase::drawKeyboardBackground(Graphics &g, Component* c, int width, int height)
+{
+	if (!useFlatStyle)
+	{
+		g.setGradientFill(ColourGradient(Colour(0x7d000000),
+			0.0f, 80.0f,
+			Colour(0x00008000),
+			5.0f, 80.0f,
+			false));
+		g.fillRect(0, 0, 16, height);
+
+		g.setGradientFill(ColourGradient(Colour(0x7d000000),
+			(float)width, 80.0f,
+			Colour(0x00008000),
+			(float)width - 5.0f, 80.0f,
+			false));
+		g.fillRect(width - 16, 0, 16, height);
+	}
+}
+
+
+void CustomKeyboardState::LookAndFeelBase::drawWhiteNote(CustomKeyboardState* state, Component* c, int midiNoteNumber, Graphics &g, int x, int y, int w, int h, bool isDown, bool isOver, const Colour &/*lineColour*/, const Colour &/*textColour*/)
+{
+	if (useFlatStyle)
+	{
+		Rectangle<int> r(x, y, w, h);
+
+		float cornerSize = (float)roundToInt((float)w * 0.05f);
+
+		r.reduce(2, 1);
+		r.removeFromTop(4);
+
+		g.setColour(bgColour);
+		g.fillRoundedRectangle(r.toFloat(), cornerSize);
+
+		g.setColour(overlayColour);
+		g.drawRoundedRectangle(r.toFloat(), cornerSize, 1.0f);
+
+		if (isDown)
+		{
+			g.setColour(activityColour);
+			g.fillRoundedRectangle(r.toFloat(), cornerSize);
+		}
+
+	}
+	else
+	{
+		float cornerSize = (float)w * 0.1f;
+		g.setColour(Colours::black);
+		//g.fillRect(x, y, w, h);
+
+		if (!isDown)
+			h -= (h / 20);
+
+		Colour bc = isDown ? JUCE_LIVE_CONSTANT_OFF(Colour(0xFFAAAAAA)) : Colour(0xFFCCCCCC);
+
+		g.setGradientFill(ColourGradient(Colour(0xFFEEEEEE), 0.0f, 0.0f,
+			bc, 0.0f, (float)(y + h), false));
+
+		g.fillRoundedRectangle((float)x + 1.f, (float)y - cornerSize, (float)w - 2.f, (float)h + cornerSize, cornerSize);
+
+		if (isOver)
+		{
+			g.setColour(overlayColour);
+			g.fillRoundedRectangle((float)x + 1.f, (float)y - cornerSize, (float)w - 2.f, (float)h + cornerSize, cornerSize);
+		}
+
+		g.setGradientFill(ColourGradient(Colours::black.withAlpha(0.2f), 0.0f, 0.0f,
+			Colours::transparentBlack, 0.0f, 8.0f, false));
+
+		g.fillRect(x, y, w, 8);
+
+		g.setColour(Colour(BACKEND_BG_COLOUR_BRIGHT));
+		g.drawLine((float)x, (float)y, (float)(x + w), (float)y, 2.0f);
+
+		if (state->isColourDefinedForKey(midiNoteNumber))
+		{
+			g.setColour(state->getColourForSingleKey(midiNoteNumber));
+			g.fillRoundedRectangle((float)x + 1.f, (float)y - cornerSize, (float)w - 2.f, (float)h + cornerSize, cornerSize);
+		}
+	}
+}
+
+void CustomKeyboardState::LookAndFeelBase::drawBlackNote(CustomKeyboardState* state, Component* c, int midiNoteNumber, Graphics &g, int x, int y, int w, int h, bool isDown, bool isOver, const Colour &noteFillColour)
+{
+	if (useFlatStyle)
+	{
+
+		Rectangle<int> r(x, y, w, h);
+
+		float cornerSize = (float)roundToInt((float)w * 0.09f);
+
+		r.reduce(1, 1);
+
+		g.setColour(topLineColour);
+		g.fillRoundedRectangle(r.toFloat(), cornerSize);
+
+		g.setColour(overlayColour);
+		g.drawRoundedRectangle(r.toFloat(), cornerSize, 1.0f);
+
+		if (isDown)
+		{
+			g.setColour(activityColour);
+			g.fillRoundedRectangle(r.toFloat(), cornerSize);
+		}
+
+	}
+	else
+	{
+		float cornerSize = (float)w * 0.1f;
+		Rectangle<float> keyArea((float)x, (float)y - cornerSize, (float)w, (float)(h - cornerSize)*0.9f);
+		float xOffset = JUCE_LIVE_CONSTANT_OFF(0.22f) * (float)w;
+		float shadowHeight = isDown ? 0.05f : 0.18f * (float)h;
+
+		Colour c1 = JUCE_LIVE_CONSTANT_OFF(Colour(0xFF333333));
+
+		g.setColour(JUCE_LIVE_CONSTANT_OFF(Colour(0xFF333333)));
+		g.fillRoundedRectangle(keyArea, cornerSize);
+
+		Colour c2 = JUCE_LIVE_CONSTANT_OFF(Colour(0xff505050));
+
+		g.setGradientFill(ColourGradient(c1, 0.0f, 0.0f,
+			isDown ? c1 : c2, 0.0f, (float)h, false));
+
+		g.fillRect(keyArea.reduced(xOffset, shadowHeight));
+
+		if (isOver)
+		{
+			g.setColour(overlayColour);
+			g.fillRoundedRectangle(keyArea, cornerSize);
+		}
+
+		Path p;
+
+		p.startNewSubPath(keyArea.getBottomLeft());
+		p.lineTo((float)x + xOffset, keyArea.getBottom() - shadowHeight);
+		p.lineTo(keyArea.getRight() - xOffset, keyArea.getBottom() - shadowHeight);
+		p.lineTo(keyArea.getBottomRight());
+		p.closeSubPath();
+
+		g.setGradientFill(ColourGradient(JUCE_LIVE_CONSTANT_OFF(Colour(0x36ffffff)), 0.0f, p.getBounds().getY(),
+			Colours::transparentWhite, 0.0f, keyArea.getBottom(), false));
+
+		g.fillPath(p);
+
+		g.setColour(Colour(BACKEND_BG_COLOUR_BRIGHT));
+		//g.drawRoundedRectangle(keyArea, cornerSize, 1.0f);
+
+		if (state->isColourDefinedForKey(midiNoteNumber))
+		{
+			g.setColour(state->getColourForSingleKey(midiNoteNumber));
+			g.fillRoundedRectangle(keyArea, cornerSize);
+		}
+	}
+}
+
 CustomKeyboardState::CustomKeyboardState():
 	MidiKeyboardState(),
 	lowestKey(40)
 {
-	for (int i = 0; i < 127; i++)
+	for (int i = 0; i < 128; i++)
 	{
 		setColourForSingleKey(i, Colours::transparentBlack);
 	}
@@ -512,7 +584,7 @@ bool CustomKeyboardState::isColourDefinedForKey(int noteNumber) const
 
 void CustomKeyboardState::setColourForSingleKey(int noteNumber, Colour colour)
 {
-	if (noteNumber >= 0 && noteNumber < 127)
+	if (noteNumber >= 0 && noteNumber <= 127)
 	{
 		noteColours[noteNumber] = colour;
 	}
@@ -656,6 +728,15 @@ void AsyncValueTreePropertyListener::valueTreeChildOrderChanged(ValueTree& value
 void AsyncValueTreePropertyListener::valueTreeParentChanged(ValueTree& valueTrees)
 {}
 
+void AsyncValueTreePropertyListener::clearQueue()
+{
+	while (!pendingPropertyChanges.isEmpty())
+	{
+		auto pc = pendingPropertyChanges.removeAndReturn(0);
+		asyncValueTreePropertyChanged(pc.v, pc.id);
+	}
+}
+
 AsyncValueTreePropertyListener::PropertyChange::PropertyChange(ValueTree v_, Identifier id_): v(v_), id(id_)
 {}
 
@@ -674,11 +755,8 @@ AsyncValueTreePropertyListener::AsyncHandler::AsyncHandler(AsyncValueTreePropert
 
 void AsyncValueTreePropertyListener::AsyncHandler::handleAsyncUpdate()
 {
-	while (!parent.pendingPropertyChanges.isEmpty())
-	{
-		auto pc = parent.pendingPropertyChanges.removeAndReturn(0);
-		parent.asyncValueTreePropertyChanged(pc.v, pc.id);
-	}
+	parent.clearQueue();
+	
 }
 
 

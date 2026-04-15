@@ -48,6 +48,9 @@
 #include <limits.h>
 #include <regex>
 
+#include <juce_product_unlocking/juce_product_unlocking.h>
+
+#include "../hi_dsp_library/hi_dsp_library.h"
 #include "hi_tools.h"
 
 #if !HISE_NO_GUI_TOOLS
@@ -61,7 +64,14 @@
 #include "hi_tools/CustomDataContainers.cpp"
 #include "hi_tools/HiseEventBuffer.cpp"
 
+#include "hi_tools/SiTraNoConverter.cpp"
 #include "hi_tools/MiscToolClasses.cpp"
+
+#if HI_RUN_UNIT_TESTS
+#include "hi_tools/FuzzySearcherTests.cpp"
+#include "hi_tools/SemanticVersionCheckerTests.cpp"
+#endif
+
 #include "hi_dispatch/hi_dispatch.cpp"
 
 #include "hi_tools/PathFactory.cpp"
@@ -81,18 +91,10 @@
 #include "hi_tools/PostGraphicsRenderer.cpp"
 
 #include "hi_standalone_components/ChocWebView.cpp"
-#include "hi_standalone_components/CodeEditorApiBase.cpp"
-#include "hi_standalone_components/AdvancedCodeEditor.cpp"
-#include "hi_standalone_components/ScriptWatchTable.cpp"
+#include "hi_standalone_components/ChocWebSocket.cpp"
+
 #include "hi_standalone_components/ComponentWithPreferredSize.cpp"
 
-#if USE_BACKEND // Only include this file in the GPL build configuration
-#include "hi_tools/FaustTokeniser.h"
-#include "hi_tools/FaustTokeniser.cpp"
-#endif
-
-#include "hi_tools/JavascriptTokeniserFunctions.h"
-#include "hi_tools/JavascriptTokeniser.cpp"
 #include "hi_markdown/MarkdownLink.cpp"
 #include "hi_markdown/MarkdownHeader.cpp"
 #include "hi_markdown/MarkdownDatabase.cpp"
@@ -118,12 +120,7 @@
 #include "hi_tools/LorisManager.cpp"
 #endif
 
-#if !HISE_NO_GUI_TOOLS
-#include "hi_standalone_components/ZoomableViewport.cpp"
-#if USE_BACKEND
-#include "hi_standalone_components/PerfettoWebViewer.cpp"
-#endif
-#endif
+#include "hi_tools/RectangleDynamicObject.cpp"
 
 #include "hi_standalone_components/SampleDisplayComponent.cpp"
 
@@ -133,16 +130,25 @@
 #include "hi_standalone_components/SliderPack.cpp"
 #include "hi_standalone_components/TableEditor.cpp"
 
-#if HISE_INCLUDE_RLOTTIE
-#include "hi_standalone_components/RLottieDevComponent.cpp"
-#endif
+
 
 
 #include "hi_standalone_components/eq_plot/FilterInfo.cpp"
 #include "hi_standalone_components/eq_plot/FilterGraph.cpp"
 
 #if HISE_INCLUDE_RT_NEURAL
+
+#if USE_BACKEND
+#include "../hi_snex/hi_snex.h"
+#endif
+
 #include "hi_neural/hi_neural.cpp"
 #endif
 
-#include "hi_neural/onnx_loader.cpp";
+#include "hi_neural/onnx_loader.cpp"
+
+
+#if !HISE_NO_GUI_TOOLS
+#include "simple_css/simple_css.cpp"
+#include "hi_multipage/multipage.cpp"
+#endif

@@ -72,7 +72,9 @@ class MacroModulationSource : public ModulatorSynth,
 {
 public:
 
-	SET_PROCESSOR_NAME("MacroModulationSource", "Macro Modulation Source", "A container that processes Modulator instances that can be used as modulation sources for the macro control system");
+	SET_PROCESSOR_NAME("MacroModulationSource", "Macro Modulation Source", "");
+
+	static ProcessorMetadata createMetadata();
 
 	int getNumActiveVoices() const override { return 0; };
     
@@ -87,7 +89,8 @@ public:
 
 	int getNumChildProcessors() const override
 	{
-		return ModulatorSynth::numInternalChains + HISE_NUM_MACROS;
+		auto numMacros = HISE_GET_PREPROCESSOR(getMainController(), HISE_NUM_MACROS);
+		return ModulatorSynth::numInternalChains + numMacros;
 	}
 
 	Processor* getChildProcessor(int processorIndex) override
@@ -128,7 +131,7 @@ public:
 
 private:
 
-	float lastValues[HISE_NUM_MACROS];
+	float lastValues[HISE_NUM_MAX_MACROS];
 
 	Array<ModulatorChain*> macroChains;
 

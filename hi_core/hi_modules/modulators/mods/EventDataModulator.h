@@ -52,7 +52,9 @@ public:
 		numParameters
 	};
 
-	SET_PROCESSOR_NAME("EventDataModulator", "Event Data Modulator", "Creates a modulation value based on the event data written through the global routing manager.")
+	SET_PROCESSOR_NAME("EventDataModulator", "Event Data Modulator", "")
+
+	static ProcessorMetadata createMetadata();
 
 	EventDataModulator(MainController *mc, const String &id, int numVoices, Modulation::Mode m);
 
@@ -114,7 +116,9 @@ class EventDataEnvelope: public EnvelopeModulator
 {
 public:
 
-	SET_PROCESSOR_NAME("EventDataEnvelope", "EventData Envelope", "An envelope modulator for time-varying event data slots")
+	SET_PROCESSOR_NAME("EventDataEnvelope", "EventData Envelope", "")
+
+	static ProcessorMetadata createMetadata();
 
 	/// @brief special parameters for EventDataEnvelope
 	enum Parameter
@@ -130,6 +134,8 @@ public:
 	void setInternalAttribute(int parameterIndex, float newValue) override;;
 
 	float getAttribute(int parameterIndex) const override;;
+
+	const bool metadataInitialised;
 
 	void restoreFromValueTree(const ValueTree &v) override;;
 

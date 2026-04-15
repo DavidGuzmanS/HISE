@@ -56,6 +56,10 @@ struct ScriptUserPresetHandler::Wrapper
 	API_METHOD_WRAPPER_0(ScriptUserPresetHandler, createObjectForSaveInPresetComponents);
 	API_VOID_METHOD_WRAPPER_0(ScriptUserPresetHandler, resetToDefaultUserPreset);
 	API_METHOD_WRAPPER_0(ScriptUserPresetHandler, createObjectForAutomationValues);
+	API_VOID_METHOD_WRAPPER_1(ScriptUserPresetHandler, setParameterGestureCallback);
+	API_METHOD_WRAPPER_3(ScriptUserPresetHandler, sendParameterGesture);
+	API_VOID_METHOD_WRAPPER_1(ScriptUserPresetHandler, setPluginParameterGroupNames);
+	API_VOID_METHOD_WRAPPER_1(ScriptUserPresetHandler, setPluginParameterSortFunction);
 	API_VOID_METHOD_WRAPPER_0(ScriptUserPresetHandler, runTest);
 };
 
@@ -66,20 +70,25 @@ ScriptUserPresetHandler::ScriptUserPresetHandler(ProcessorWithScriptingContent* 
 	postCallback(pwsc, nullptr, var(), 1),
 	postSaveCallback(pwsc, nullptr, var(), 1),
 	customLoadCallback(pwsc, nullptr, var(), 1),
-	customSaveCallback(pwsc, nullptr, var(), 1)
+	customSaveCallback(pwsc, nullptr, var(), 1),
+	parameterGestureCallback(pwsc, nullptr, var(), 2)
 {
 	getMainController()->getUserPresetHandler().addListener(this);
 
 	ADD_API_METHOD_1(isOldVersion);
     ADD_API_METHOD_0(isInternalPresetLoad);
 	ADD_API_METHOD_0(isCurrentlyLoadingPreset);
-	ADD_API_METHOD_1(setPostCallback);
-	ADD_API_METHOD_1(setPostSaveCallback);
-	ADD_API_METHOD_1(setPreCallback);
+	ADD_TYPED_API_METHOD_1(setPostCallback, VarTypeChecker::Function);
+	ADD_CALLBACK_DIAGNOSTIC(postCallback, setPostCallback, 0);
+	ADD_TYPED_API_METHOD_1(setPostSaveCallback, VarTypeChecker::Function);
+	ADD_CALLBACK_DIAGNOSTIC(postSaveCallback, setPostSaveCallback, 0);
+	ADD_TYPED_API_METHOD_1(setPreCallback, VarTypeChecker::Function);
+	ADD_CALLBACK_DIAGNOSTIC(preCallback, setPreCallback, 0);
 	ADD_API_METHOD_2(setEnableUserPresetPreprocessing);
 	ADD_API_METHOD_1(setCustomAutomation);
 	ADD_API_METHOD_3(setUseCustomUserPresetModel);
-	ADD_API_METHOD_3(attachAutomationCallback);
+	ADD_TYPED_API_METHOD_3(attachAutomationCallback, VarTypeChecker::String, VarTypeChecker::Function, VarTypeChecker::Number);
+	ADD_CALLBACK_DIAGNOSTIC_RAW(attachAutomationCallback, WeakCallbackHolder::checkCallbackNumArgs<2, 1>);
 	ADD_API_METHOD_0(clearAttachedCallbacks);
 	ADD_API_METHOD_1(getAutomationIndex);
 	ADD_API_METHOD_2(setAutomationValue);
@@ -92,14 +101,16 @@ ScriptUserPresetHandler::ScriptUserPresetHandler(ProcessorWithScriptingContent* 
 	ADD_API_METHOD_0(getSecondsSinceLastPresetLoad);
 	ADD_API_METHOD_0(resetToDefaultUserPreset);
 	ADD_API_METHOD_0(runTest);
-	
+	ADD_TYPED_API_METHOD_1(setParameterGestureCallback, VarTypeChecker::Function);
+	ADD_CALLBACK_DIAGNOSTIC(parameterGestureCallback, setParameterGestureCallback, 0);
+	ADD_API_METHOD_1(setPluginParameterGroupNames);
+	ADD_API_METHOD_3(sendParameterGesture);
+	ADD_API_METHOD_1(setPluginParameterSortFunction);
 }
 
 ScriptUserPresetHandler::~ScriptUserPresetHandler()
 {
 	clearAttachedCallbacks();
-	
-
 	getMainController()->getUserPresetHandler().removeListener(this);
 }
 
@@ -137,6 +148,30 @@ void ScriptUserPresetHandler::loadCustomUserPreset(const var& dataObject)
 
 		if (!ok.wasOk())
 			debugError(getMainController()->getMainSynthChain(), ok.getErrorMessage());
+	}
+}
+
+void ScriptUserPresetHandler::onParameterGesture(bool startGesture, int parameterIndex)
+{
+	if(parameterGestureCallback)
+	{
+		auto jp = dynamic_cast<AudioProcessor*>(getMainController())->getParameters()[parameterIndex];
+
+		if(auto hp = dynamic_cast<HisePluginParameterBase*>(jp))
+		{
+			auto type = (int)hp->getWrappedParameter()->getType();
+			auto slotIndex = hp->getWrappedParameter()->getSlotIndex();
+
+			var args[3];
+			args[0] = type;
+			args[1] = slotIndex;
+			args[2] = startGesture;
+			var::NativeFunctionArgs a(var(this), args, 3);
+			auto ok = parameterGestureCallback.callSync(a, nullptr);
+
+			if(!ok.wasOk())
+				reportScriptError(ok.getErrorMessage());
+		}
 	}
 }
 
@@ -302,6 +337,11 @@ ScriptUserPresetHandler::AttachedCallback::AttachedCallback(ScriptUserPresetHand
 	cData->dispatcher.addValueListener(&listener, false, n);
 #endif
 
+	if(customUpdateCallback)
+		customUpdateCallback.incRefCount();
+	if(customAsyncUpdateCallback)
+		customAsyncUpdateCallback.incRefCount();
+	
 
 }
 
@@ -361,11 +401,20 @@ void ScriptUserPresetHandler::attachAutomationCallback(String automationId, var 
 			if (automationId == c->cData->id)
 			{
 				attachedCallbacks.removeObject(c);
-				debugToConsole(dynamic_cast<Processor*>(getScriptProcessor()), "removing old attached callback for " + automationId);
 				break;
 			}
 		}
 
+#if USE_BACKEND
+		if (n == dispatch::DispatchType::sendNotificationSync)
+		{
+			if (auto co = dynamic_cast<WeakCallbackHolder::CallableObject*>(updateCallback.getObject()))
+			{
+				if (HiseJavascriptEngine::RootObject::RealtimeSafetyInfo::check(co, this, "UserPresetHandler.attachAutomationCallback"))
+					reportScriptError("Callback is not safe for synchronous audio-thread execution");
+			}
+		}
+#endif
 		if (HiseJavascriptEngine::isJavascriptFunction(updateCallback))
 		{
 			attachedCallbacks.add(new AttachedCallback(this, cData, updateCallback, n));
@@ -377,6 +426,42 @@ void ScriptUserPresetHandler::attachAutomationCallback(String automationId, var 
 	{
 		reportScriptError(automationId + " not found");
 	}
+}
+
+void ScriptUserPresetHandler::setParameterGestureCallback(var callbackFunction)
+{
+	if(HiseJavascriptEngine::isJavascriptFunction(callbackFunction))
+	{
+		parameterGestureCallback = WeakCallbackHolder(getScriptProcessor(), this, callbackFunction, 2);
+		parameterGestureCallback.incRefCount();
+		parameterGestureCallback.setHighPriority();
+	}
+}
+
+bool ScriptUserPresetHandler::sendParameterGesture(int automationType, int indexWithinType, bool gestureActive)
+{
+	auto ap = dynamic_cast<AudioProcessor*>(getScriptProcessor()->getMainController_());
+	auto fl = ap->getParameters();
+
+	auto requiredType = (HisePluginParameterBase::Type)automationType;
+
+	for(auto p: fl)
+	{
+		if(auto hp = dynamic_cast<HisePluginParameterBase*>(p))
+		{
+			if(hp->getWrappedParameter()->getType() == requiredType && hp->matchesIndex(indexWithinType))
+			{
+				if(gestureActive)
+					p->beginChangeGesture();
+				else
+					p->endChangeGesture();
+
+				return true;
+			}
+		}
+	}
+
+	return false;
 }
 
 void ScriptUserPresetHandler::clearAttachedCallbacks()
@@ -563,6 +648,100 @@ void ScriptUserPresetHandler::resetToDefaultUserPreset()
 		reportScriptError("You need to set a default user preset in order to user this method");
 	}
 
+}
+
+void ScriptUserPresetHandler::setPluginParameterGroupNames(var pluginParameterGroupNames)
+{
+	if(pluginParameterGroupNames.isArray())
+	{
+		StringArray sa;
+
+		for(auto& x: *pluginParameterGroupNames.getArray())
+			sa.add(x.toString());
+
+		getScriptProcessor()->getMainController_()->getUserPresetHandler().setPluginParameterGroups(sa);
+	}
+	else
+	{
+		reportScriptError("pluginParameterGroupNames must be an array of strings");
+	}
+
+	
+}
+
+void ScriptUserPresetHandler::setPluginParameterSortFunction(var customSortFunction)
+{
+	if(HiseJavascriptEngine::isJavascriptFunction(customSortFunction))
+	{
+		struct CustomSorter
+		{
+			CustomSorter(ScriptUserPresetHandler& p, var f):
+			  callback(p.getScriptProcessor(), &p, f, 2),
+			  type("type"),
+			  parameterIndex("parameterIndex"),
+			  typeIndex("typeIndex"),
+			  group("group"),
+			  name("name")
+			{
+				arg1[type] = 0;
+				arg2[type] = 0;
+				arg1[parameterIndex] = 0;
+				arg2[parameterIndex] = 0;
+				arg1[typeIndex] = 0;
+				arg2[typeIndex] = 0;
+				arg1[name] = 0;
+				arg2[name] = 0;
+				arg1[group] = 0;
+				arg2[group] = 0;
+
+				callback.incRefCount();
+			};
+
+			int operator()(HisePluginParameterBase* p1, HisePluginParameterBase* p2)
+			{
+				if(callback)
+				{
+					arg1[type] = (int)p1->getType();
+					arg2[type] = (int)p2->getType();
+					arg1[parameterIndex] = p1->getHiseParameterIndex();
+					arg2[parameterIndex] = p2->getHiseParameterIndex();
+					arg1[typeIndex] = p1->getSlotIndex();
+					arg2[typeIndex] = p2->getSlotIndex();
+					arg1[name] = p1->getHisePluginParameterName();
+					arg2[name] = p2->getHisePluginParameterName();
+					arg1[group] = p1->getHisePluginParameterGroupName();
+					arg2[group] = p2->getHisePluginParameterGroupName();
+
+					var args[2] = { arg1, arg2 };
+					var rv;
+
+					auto ok = callback.callSync(args, 2, &rv);
+
+					// If we don't return anything, assume default sorting behaviour
+					if(rv.isUndefined() || rv.isVoid())
+						return HisePluginParameterBase::defaultSort(p1, p2);
+
+					if(ok.wasOk())
+						return (int)rv;
+				}
+
+				jassertfalse;
+				return HisePluginParameterBase::defaultSort(p1, p2);
+				
+			};
+
+			Identifier type, parameterIndex, typeIndex, group, name;
+			hise::JSONObject arg1, arg2;
+
+			WeakCallbackHolder callback;
+		};
+
+		dynamic_cast<PluginParameterAudioProcessor*>(getMainController())->pluginParameterSortFunction = CustomSorter(*this, customSortFunction);
+	}
+	else
+	{
+		dynamic_cast<PluginParameterAudioProcessor*>(getMainController())->pluginParameterSortFunction = HisePluginParameterBase::defaultSort;
+	}
 }
 
 double ScriptUserPresetHandler::getSecondsSinceLastPresetLoad()
@@ -957,6 +1136,7 @@ struct ScriptExpansionHandler::Wrapper
 	API_VOID_METHOD_WRAPPER_1(ScriptExpansionHandler, setAllowedExpansionTypes);
 	API_METHOD_WRAPPER_2(ScriptExpansionHandler, installExpansionFromPackage);
 	API_METHOD_WRAPPER_1(ScriptExpansionHandler, getExpansionForInstallPackage);
+	API_METHOD_WRAPPER_1(ScriptExpansionHandler, getMetaDataFromPackage);
 };
 
 ScriptExpansionHandler::ScriptExpansionHandler(JavascriptProcessor* jp_) :
@@ -969,13 +1149,15 @@ ScriptExpansionHandler::ScriptExpansionHandler(JavascriptProcessor* jp_) :
 {
 	getMainController()->getExpansionHandler().addListener(this);
 
-	ADD_API_METHOD_1(setErrorFunction);
+	ADD_TYPED_API_METHOD_1(setErrorFunction, VarTypeChecker::Function);
+	ADD_CALLBACK_DIAGNOSTIC(errorFunction, setErrorFunction, 0);
 	ADD_API_METHOD_1(setErrorMessage);
 	ADD_API_METHOD_1(setCredentials);
 	ADD_API_METHOD_1(setEncryptionKey);
 	ADD_API_METHOD_0(getExpansionList);
 	ADD_API_METHOD_1(getExpansion);
-	ADD_API_METHOD_1(setExpansionCallback);
+	ADD_TYPED_API_METHOD_1(setExpansionCallback, VarTypeChecker::Function);
+	ADD_CALLBACK_DIAGNOSTIC(expansionCallback, setExpansionCallback, 0);
 	ADD_API_METHOD_1(setCurrentExpansion);
 	ADD_API_METHOD_1(setInstallFullDynamics);
 	ADD_API_METHOD_1(encodeWithCredentials);
@@ -983,7 +1165,9 @@ ScriptExpansionHandler::ScriptExpansionHandler(JavascriptProcessor* jp_) :
 	ADD_API_METHOD_2(installExpansionFromPackage);
 	ADD_API_METHOD_1(setAllowedExpansionTypes);
 	ADD_API_METHOD_0(getCurrentExpansion);
-	ADD_API_METHOD_1(setInstallCallback);
+	ADD_TYPED_API_METHOD_1(setInstallCallback, VarTypeChecker::Function);
+	ADD_CALLBACK_DIAGNOSTIC(installCallback, setInstallCallback, 0);
+	ADD_API_METHOD_1(getMetaDataFromPackage);
 	ADD_API_METHOD_1(getExpansionForInstallPackage);
 
 	
@@ -1171,6 +1355,17 @@ bool ScriptExpansionHandler::installExpansionFromPackage(var packageFile, var sa
 		reportScriptError("argument is not a file");
 		RETURN_IF_NO_THROW(false);
 	}
+}
+
+var ScriptExpansionHandler::getMetaDataFromPackage(var packageFile)
+{
+	if (auto sf = dynamic_cast<ScriptingObjects::ScriptFile*>(packageFile.getObject()))
+	{
+		hlac::HlacArchiver a(nullptr);
+		return a.readMetadataFromArchive(sf->f);
+	}
+	
+	return {};
 }
 
 var ScriptExpansionHandler::getExpansionForInstallPackage(var packageFile)
@@ -1682,35 +1877,49 @@ Result ScriptEncryptedExpansion::encodeExpansion()
 	{
 		auto& handler = getMainController()->getExpansionHandler();
 
-		if (handler.getEncryptionKey().isEmpty())
+		Identifier expId;
+
+		if(HISE_GET_PREPROCESSOR(getMainController(), HISE_USE_UNLOCKER_FOR_EXPANSIONS))
 		{
-			return Result::fail("You have to set an encryption key using `ExpansionHandler.setEncryptionKey()` before using this method.");
+#if USE_BACKEND
+			auto key = data->v[ExpansionIds::Key].toString();
+			expId = handler.addEncryptionKeyForExpansionToBeEncoded(this, key);
+#endif
 		}
+			
+		auto expansionKey = handler.getEncryptionKey(expId);
 
-		String s;
-		s << "Do you want to encode the expansion " << getProperty(ExpansionIds::Name) << "?  \n> The encryption key is `" << handler.getEncryptionKey() << "`.";
+		if (expansionKey.isEmpty())
+			return Result::fail("You have to set an encryption key using `ExpansionHandler.setEncryptionKey()` before using this method.");
 
-		if (true)//PresetHandler::showYesNoWindow("Encode expansion", s))
 		{
 			auto hxiFile = Expansion::Helpers::getExpansionInfoFile(getRootFolder(), Expansion::Intermediate);
 
 			ValueTree hxiData("Expansion");
 
 			auto metadata = data->v.createCopy();
-			metadata.setProperty(ExpansionIds::Hash, handler.getEncryptionKey().hashCode64(), nullptr);
+
+			if(HISE_GET_PREPROCESSOR(getMainController(), HISE_USE_UNLOCKER_FOR_EXPANSIONS))
+				metadata.removeProperty(ExpansionIds::Key, nullptr);
+
+			metadata.setProperty(ExpansionIds::Hash, expansionKey.hashCode64(), nullptr);
 
 			hxiData.addChild(metadata, -1, nullptr);
 			encodePoolAndUserPresets(hxiData, false);
 
-#if HISE_USE_XML_FOR_HXI
-			ScopedPointer<XmlElement> xml = hxiData.createXml();
-			hxiFile.replaceWithText(xml->createDocument(""));
-#else
-			hxiFile.deleteFile();
-			FileOutputStream fos(hxiFile);
-			hxiData.writeToStream(fos);
-			fos.flush();
-#endif
+			if (HISE_GET_PREPROCESSOR(getMainController(), HISE_USE_XML_FOR_HXI))
+			{
+				auto xml = hxiData.createXml();
+				hxiFile.replaceWithText(xml->createDocument(""));
+			}
+			else
+			{
+				hxiFile.deleteFile();
+				FileOutputStream fos(hxiFile);
+				hxiData.writeToStream(fos);
+				fos.flush();
+			}
+
 			auto h = &getMainController()->getExpansionHandler();
 
 			h->forceReinitialisation();
@@ -1743,42 +1952,48 @@ juce::Result ScriptEncryptedExpansion::loadValueTree(ValueTree& v)
 {
 	if(getExpansionType() == Expansion::Intermediate)
 	{
-		auto& handler = getMainController()->getExpansionHandler();
-
-		if (handler.getEncryptionKey().isEmpty())
+		if (!HISE_GET_PREPROCESSOR(getMainController(), HISE_USE_UNLOCKER_FOR_EXPANSIONS))
 		{
-			v = ValueTree(ExpansionIds::ExpansionInfo);
-			v.setProperty(ExpansionIds::Name, getRootFolder().getFileName(), nullptr);
-			return Result::ok(); // will fail later
+			auto& handler = getMainController()->getExpansionHandler();
+
+			if (handler.getEncryptionKey({}).isEmpty())
+			{
+				v = ValueTree(ExpansionIds::ExpansionInfo);
+				v.setProperty(ExpansionIds::Name, getRootFolder().getFileName(), nullptr);
+				return Result::ok(); // will fail later
+			}
 		}
 
 		auto fileToLoad = Helpers::getExpansionInfoFile(getRootFolder(), Intermediate);
 
-	#if HISE_USE_XML_FOR_HXI
-		ScopedPointer<XmlElement> xml = XmlDocument::parse(fileToLoad);
-
-		if (xml != nullptr)
+		if(HISE_GET_PREPROCESSOR(getMainController(), HISE_USE_XML_FOR_HXI)) 
 		{
-			v = ValueTree::fromXml(*xml);
-			return Result::ok();
+			auto xml = XmlDocument::parse(fileToLoad);
+
+			if (xml != nullptr)
+			{
+				v = ValueTree::fromXml(*xml);
+				return Result::ok();
+			}
+
+			return Result::fail("Can't parse XML");
+		} 
+		else 
+		{
+			FileInputStream fis(fileToLoad);
+			v = ValueTree::readFromStream(fis);
+
+			if (v.isValid())
+				return Result::ok();
+			else
+				return Result::fail("Can't parse ValueTree");
 		}
-
-		return Result::fail("Can't parse XML");
-	#else
-		FileInputStream fis(fileToLoad);
-		v = ValueTree::readFromStream(fis);
-
-		if (v.isValid())
-			return Result::ok();
-		else
-			return Result::fail("Can't parse ValueTree");
-	#endif
 	}
 	if (getExpansionType() == Expansion::Encrypted)
 	{
 		auto& handler = getMainController()->getExpansionHandler();
 
-		if (handler.getEncryptionKey().isEmpty() || !handler.getCredentials().isObject())
+		if (handler.getEncryptionKey({}).isEmpty() || !handler.getCredentials().isObject())
 		{
 			v = ValueTree(ExpansionIds::ExpansionInfo);
 			v.setProperty(ExpansionIds::Name, getRootFolder().getFileName(), nullptr);
@@ -1821,54 +2036,10 @@ Result ScriptEncryptedExpansion::initialise()
 
 		return ok;
 
-
-
-#if 0
-		auto& handler = getMainController()->getExpansionHandler();
-
-		if (handler.getEncryptionKey().isEmpty())
-			return skipEncryptedExpansionWithoutKey();
-
-		auto fileToLoad = Helpers::getExpansionInfoFile(getRootFolder(), type);
-
-#if HISE_USE_XML_FOR_HXI
-		ScopedPointer<XmlElement> xml = XmlDocument::parse(fileToLoad);
-
-		if (xml != nullptr)
-			return initialiseFromValueTree(ValueTree::fromXml(*xml));
-
-		return Result::fail("Can't parse XML");
-#else
-		FileInputStream fis(fileToLoad);
-		auto v = ValueTree::readFromStream(fis);
-
-		if (v.isValid())
-			return initialiseFromValueTree(v);
-		else
-			return Result::fail("Can't parse ValueTree");
-#endif
-#endif
-
 	}
 	else if (type == ExpansionType::Encrypted)
 	{
 		auto& handler = getMainController()->getExpansionHandler();
-#if 0
-		
-
-		if (handler.getEncryptionKey().isEmpty() || !handler.getCredentials().isObject())
-			return skipEncryptedExpansionWithoutKey();
-
-		zstd::ZDefaultCompressor comp;
-		auto f = Helpers::getExpansionInfoFile(getRootFolder(), type);
-
-		FileInputStream fis(f);
-
-		auto hxpData = ValueTree::readFromStream(fis);
-
-		if (!hxpData.isValid())
-			return Result::fail("Can't parse expansion data file");
-#endif
 
 		ValueTree hxpData;
 
@@ -1907,12 +2078,12 @@ Result ScriptEncryptedExpansion::initialise()
 
 juce::BlowFish* ScriptEncryptedExpansion::createBlowfish()
 {
-	return createBlowfish(getMainController());
+	return createBlowfishStatic(getMainController(),  getEncryptionKeyId());
 }
 
-juce::BlowFish* ScriptEncryptedExpansion::createBlowfish(MainController* mc)
+juce::BlowFish* ScriptEncryptedExpansion::createBlowfishStatic(MainController* mc, const Identifier& expId)
 {
-	auto d = mc->getExpansionHandler().getEncryptionKey();
+	String d = mc->getExpansionHandler().getEncryptionKey(expId);
 
 	if (d.isNotEmpty())
 		return new BlowFish(d.getCharPointer().getAddress(), d.length());
@@ -1922,24 +2093,36 @@ juce::BlowFish* ScriptEncryptedExpansion::createBlowfish(MainController* mc)
 
 bool ScriptEncryptedExpansion::encryptIntermediateFile(MainController* mc, const File& f, File expRoot)
 {
+	if(HISE_GET_PREPROCESSOR(mc, HISE_USE_UNLOCKER_FOR_EXPANSIONS))
+	{
+		// not required with HISE_USE_UNLOCKER_FOR_EXPANSIONS...
+		jassertfalse;
+		return false;
+	}
+
 	auto& h = mc->getExpansionHandler();
 
-	auto key = h.getEncryptionKey();
+	ValueTree hxiData;
+
+	if(HISE_GET_PREPROCESSOR(mc, HISE_USE_XML_FOR_HXI))
+	{
+		auto xml = XmlDocument::parse(f);
+
+		if (xml == nullptr)
+			return h.setErrorMessage("Can't parse XML", true);
+
+		hxiData = ValueTree::fromXml(*xml);
+	}
+	else
+	{
+		FileInputStream fis(f);
+		hxiData = ValueTree::readFromStream(fis);
+	}
+
+	auto key = h.getEncryptionKey({});
 
 	if (key.isEmpty())
 		return h.setErrorMessage("Can't encode credentials without encryption key", true);
-
-#if HISE_USE_XML_FOR_HXI
-	ScopedPointer<XmlElement> xml = XmlDocument::parse(f);
-
-	if (xml == nullptr)
-		return h.setErrorMessage("Can't parse XML", true);
-
-	auto hxiData = ValueTree::fromXml(*xml);
-#else
-	FileInputStream fis(f);
-	auto hxiData = ValueTree::readFromStream(fis);
-#endif
 
 	if (hxiData.getType() != Identifier("Expansion"))
 		return h.setErrorMessage("Invalid .hxi file", true);
@@ -1969,13 +2152,14 @@ bool ScriptEncryptedExpansion::encryptIntermediateFile(MainController* mc, const
 
 	auto c = ValueTreeConverters::convertDynamicObjectToBase64(var(obj), "Credentials", true);
 	auto credentialsHash = c.hashCode64();
-
+	
 	ValueTree credTree(ExpansionIds::Credentials);
+	credTree.setProperty(ExpansionIds::Hash, credentialsHash, nullptr);
 
 	MemoryBlock mb;
 	mb.fromBase64Encoding(c);
 
-	if (ScopedPointer<BlowFish> bf = createBlowfish(mc))
+	if (ScopedPointer<BlowFish> bf = createBlowfishStatic(mc, {}))
 		bf->encrypt(mb);
 	else
 		return h.setErrorMessage("Can't create blowfish key", true);
@@ -2085,9 +2269,22 @@ Result ScriptEncryptedExpansion::initialiseFromValueTree(const ValueTree& hxiDat
 
 	extractUserPresetsIfEmpty(hxiData);
 
+	auto key = getMainController()->getExpansionHandler().getEncryptionKey(getEncryptionKeyId());
+
+	if(key.isEmpty())
+	{
+		if(HISE_GET_PREPROCESSOR(getMainController(), HISE_USE_UNLOCKER_FOR_EXPANSIONS))
+			return Result::fail("Expansion not registered");
+	}
+
 	auto hash = getProperty(ExpansionIds::Hash).getLargeIntValue();
 
-	if (getMainController()->getExpansionHandler().getEncryptionKey().hashCode64() != hash)
+	if(hash == 0)
+		return Result::fail("Can't find hash for encryption key");
+
+	auto kh = key.hashCode64();
+
+	if (kh != hash)
 		return Result::fail("Wrong hash code");
 
 	for (auto fileType : getListOfPooledSubDirectories())
@@ -2265,6 +2462,11 @@ void FullInstrumentExpansion::expansionPackLoaded(Expansion* e)
 					auto pr = presetToLoad.createCopy();
 					p->getMainController()->loadPresetFromValueTree(pr);
 				}
+				else
+				{
+					auto& h = p->getMainController()->getExpansionHandler();
+					h.setErrorMessage(r.getErrorMessage(), false);
+				}
 
 				return SafeFunctionCall::OK;
 			}, MainController::KillStateHandler::TargetThread::SampleLoadingThread);
@@ -2309,8 +2511,11 @@ juce::Result FullInstrumentExpansion::initialise()
 	{
 		auto& handler = getMainController()->getExpansionHandler();
 
-		if (handler.getEncryptionKey().isEmpty())
-			return Result::fail("The encryption key for a Full expansion must be set already");
+		if(!HISE_GET_PREPROCESSOR(getMainController(), HISE_USE_UNLOCKER_FOR_EXPANSIONS))
+		{
+			if (handler.getEncryptionKey(getEncryptionKeyId()).isEmpty())
+				return Result::fail("The encryption key for a Full expansion must be set already");
+		}
 
 		auto allData = getValueTreeFromFile(type);
 
@@ -2373,6 +2578,15 @@ juce::ValueTree FullInstrumentExpansion::getValueTreeFromFile(Expansion::Expansi
 
 Result FullInstrumentExpansion::lazyLoad()
 {
+	if(HISE_GET_PREPROCESSOR(getMainController(), HISE_USE_UNLOCKER_FOR_EXPANSIONS))
+	{
+		auto id = getEncryptionKeyId();
+		String d = getMainController()->getExpansionHandler().getEncryptionKey(id);
+
+		if(d.isEmpty())
+			return Result::fail(id + " is not registered");
+	}
+
 	auto allData = getValueTreeFromFile(getExpansionType());
 
 	if (!allData.isValid())
@@ -2437,6 +2651,33 @@ Result FullInstrumentExpansion::lazyLoad()
 	pool->getImagePool().setDataProvider(new PoolBase::DataProvider(&pool->getImagePool()));
 
 	auto r = initialiseFromValueTree(allData);
+
+	if(r.wasOk())
+	{
+		// We'll add a check if the samples exist in the loading stage so that it can be catched 
+		// gracefully by the expansion handler
+		auto sampleMapList = pool->getSampleMapPool().getListOfAllReferences(true);
+
+		auto expSampleRoot = getSubDirectory(FileHandlerBase::Samples);
+		auto sampleRoot = getMainController()->getSampleManager().getProjectHandler().getSubDirectory(Samples);
+
+		Array<File> expSamples = expSampleRoot.findChildFiles(File::findFiles, true, "*");
+		Array<File> globalSamples = sampleRoot.findChildFiles(File::findFiles, true, "*");
+
+		for(auto sm: sampleMapList)
+		{
+			auto vt = pool->getSampleMapPool().loadFromReference(sm, PoolHelpers::LoadingType::DontCreateNewEntry);
+
+			// checks if the sample file is found in either of the sample folder (global sample folder or expansion).
+			auto missing1 = SampleMap::checkReferences(getMainController(), vt->data, sampleRoot, globalSamples);
+			auto missing2 = SampleMap::checkReferences(getMainController(), vt->data, expSampleRoot, expSamples);
+
+			if(missing1.isNotEmpty() && missing2.isNotEmpty())
+			{
+				return Result::fail("Error at loading samples: " + missing1);
+			}
+		}
+	}
 
 	auto webResources = allData.getChildWithName("WebViewResources");
 
@@ -2523,7 +2764,7 @@ Result FullInstrumentExpansion::encodeExpansion()
 	ValueTree allData(ExpansionIds::FullData);
 
 	auto& h = getMainController()->getExpansionHandler();
-	auto key = h.getEncryptionKey();
+	auto key = h.getEncryptionKey(getEncryptionKeyId());
 
 	auto printStats = [&h](const String& name, int number)
 	{
@@ -2657,14 +2898,17 @@ Result FullInstrumentExpansion::encodeExpansion()
 
 	h.setErrorMessage("Writing file", false);
 
-#if HISE_USE_XML_FOR_HXI
-	ScopedPointer<XmlElement> xml = allData.createXml();
-	hxiFile.replaceWithText(xml->createDocument(""));
-#else
-	hxiFile.deleteFile();
-	FileOutputStream fos(hxiFile);
-	allData.writeToStream(fos);
-#endif
+	if(HISE_GET_PREPROCESSOR(getMainController(), HISE_USE_XML_FOR_HXI))
+	{
+		auto xml = allData.createXml();
+		hxiFile.replaceWithText(xml->createDocument(""));
+	}
+	else
+	{
+		hxiFile.deleteFile();
+		FileOutputStream fos(hxiFile);
+		allData.writeToStream(fos);
+	}
 
 	h.setErrorMessage("Done", false);
 
@@ -2690,7 +2934,7 @@ ExpansionEncodingWindow::ExpansionEncodingWindow(MainController* mc, Expansion* 
 		addComboBox("rhapsody", { "HXI Full Instrument Expansion", "Rhapsody Player Library", "HISE Project Archive" }, "Export Format");
 		getComboBoxComponent("rhapsody")->setSelectedItemIndex((int)exportMode, dontSendNotification);
 
-		if (mc->getExpansionHandler().getEncryptionKey().isEmpty())
+		if (mc->getExpansionHandler().getEncryptionKey({}).isEmpty())
 		{
 			auto k = dynamic_cast<GlobalSettingManager*>(mc)->getSettingsObject().getSetting(HiseSettings::Project::EncryptionKey).toString();
 
@@ -2742,7 +2986,7 @@ juce::Result ExpansionEncodingWindow::performChecks()
 	if (exportMode == ExportMode::HXI)
 		return Result::ok();
 
-	if (getMainController()->getExpansionHandler().getEncryptionKey() != "1234")
+	if (getMainController()->getExpansionHandler().getEncryptionKey({}) != "1234")
 	{
 		return Result::fail("The encryption key must be `1234` for the open export to work");
 	}
@@ -3107,6 +3351,69 @@ juce::File ScriptUnlocker::getLicenseKeyFile()
 	
 }
 
+juce::File ScriptUnlocker::getExpansionListFile()
+{
+	auto lf = getLicenseKeyFile();
+	return lf.getSiblingFile("expansions").withFileExtension(lf.getFileExtension());
+}
+
+juce::var ScriptUnlocker::getExpansionList()
+{
+	DynamicObject::Ptr obj = new DynamicObject();
+
+	auto data = getExpansionListFile().loadFileAsString().fromFirstOccurrenceOf("#", false, false);
+
+	BigInteger val;
+	val.parseString(data, 16);
+
+	auto key = getPublicKey();
+	jassert(key.isValid());
+
+	std::unique_ptr<XmlElement> xml;
+
+	if (!val.isZero())
+	{
+		key.applyToValue(val);
+
+		auto mb = val.toMemoryBlock();
+
+		MemoryOutputStream mos;
+		mos.writeString(registeredMachineId);
+		mos.flush();
+
+		BlowFish bf(mos.getData(), (int)mos.getDataSize());
+		
+		bf.decrypt(mb);
+
+		if (CharPointer_UTF8::isValidString(static_cast<const char*> (mb.getData()), (int)mb.getSize()))
+			xml = parseXML(mb.toString());
+
+		if (xml != nullptr)
+		{
+			auto payload = ValueTree::fromXml(*xml);
+
+			if (payload.getType() == Identifier("payload"))
+			{
+				auto userValid = payload["email"] == var(getUserEmail());
+				auto machineValid = payload["machine_id"] == registeredMachineId;
+				auto productValid = doesProductIDMatch(payload["product"].toString());
+
+				if (userValid && machineValid && productValid)
+				{
+					for (auto c : payload)
+					{
+						auto id = Identifier(c["slug"].toString());
+						auto key = c["key"].toString();
+						obj->setProperty(id, key);
+					}
+				}
+			}
+		}
+	}
+
+	return var(obj.get());
+}
+
 struct BeatportManager::Wrapper
 {
 	API_METHOD_WRAPPER_0(BeatportManager, validate);
@@ -3209,6 +3516,9 @@ struct ScriptUnlocker::RefObject::Wrapper
 	API_METHOD_WRAPPER_0(RefObject, getLicenseKeyFile);
 	API_METHOD_WRAPPER_1(RefObject, contains);
 	API_VOID_METHOD_WRAPPER_1(RefObject, checkMuseHub);
+	API_METHOD_WRAPPER_0(RefObject, loadExpansionList);
+	API_METHOD_WRAPPER_1(RefObject, unlockExpansionList);
+	API_METHOD_WRAPPER_1(RefObject, writeExpansionKeyFile);
 };
 
 ScriptUnlocker::RefObject::RefObject(ProcessorWithScriptingContent* p) :
@@ -3220,9 +3530,10 @@ ScriptUnlocker::RefObject::RefObject(ProcessorWithScriptingContent* p) :
 	mcheck(p, nullptr, var(), 1)
 {
 	if (unlocker->getLicenseKeyFile().existsAsFile())
-	{
 		unlocker->loadKeyFile();
-	}
+
+	if(HISE_GET_PREPROCESSOR(getScriptProcessor()->getMainController_(), HISE_USE_UNLOCKER_FOR_EXPANSIONS))
+		loadExpansionList();
 	
 	unlocker->currentObject = this;
 
@@ -3239,6 +3550,9 @@ ScriptUnlocker::RefObject::RefObject(ProcessorWithScriptingContent* p) :
 	ADD_API_METHOD_0(getLicenseKeyFile);
 	ADD_API_METHOD_1(contains);
 	ADD_API_METHOD_1(checkMuseHub);
+	ADD_API_METHOD_0(loadExpansionList);
+	ADD_API_METHOD_1(unlockExpansionList);
+	ADD_API_METHOD_1(writeExpansionKeyFile);
 }
 
 ScriptUnlocker::RefObject::~RefObject()
@@ -3370,4 +3684,126 @@ bool ScriptUnlocker::RefObject::contains(String otherString)
 
 	return true;
 }
+
+bool ScriptUnlocker::RefObject::loadExpansionList()
+{
+	if (HISE_GET_PREPROCESSOR(getScriptProcessor()->getMainController_(), HISE_USE_UNLOCKER_FOR_EXPANSIONS))
+	{
+		if(isUnlocked())
+		{
+			auto& h = getScriptProcessor()->getMainController_()->getExpansionHandler();
+			h.setCredentials(unlocker->getExpansionList());
+			return true;
+		}
+
+		return false;
+	}
+	else
+	{
+		reportScriptError("HISE_USE_UNLOCKER_FOR_EXPANSIONS is not enabled");
+	}
+
+	RETURN_IF_NO_THROW(false);
+}
+
+bool ScriptUnlocker::RefObject::unlockExpansionList(const var& expansionIdList)
+{
+#if USE_BACKEND
+
+	if (unlocker->isUnlocked())
+	{
+		DynamicObject::Ptr obj = new DynamicObject();
+
+		auto mc = getScriptProcessor()->getMainController_();
+		auto& expHandler = mc->getExpansionHandler();
+
+		if (expansionIdList.isArray())
+		{
+			auto expFolder = expHandler.getExpansionFolder();
+
+			StringArray allExpansions;
+			StringArray foundExpansions;
+
+			for (auto& e : *expansionIdList.getArray())
+				allExpansions.add(e.toString());
+
+			auto expRoot = expHandler.getExpansionFolder();
+
+			for (auto f : expRoot.findChildFiles(File::findDirectories, false, "*"))
+			{
+				if(FullInstrumentExpansion::isEnabled(mc))
+				{
+					if (auto xml = XmlDocument::parse(f.getChildFile("project_info.xml")))
+					{
+						String name;
+
+						if(auto n = xml->getChildByName(HiseSettings::Project::Name))
+							name = n->getStringAttribute("value");
+
+						if (name.isEmpty() || !allExpansions.contains(name))
+							continue;
+
+						if (auto ec = xml->getChildByName(HiseSettings::Project::EncryptionKey))
+						{
+							foundExpansions.add(name);
+
+							auto id = Expansion::Helpers::getExpansionSlug(name);
+
+							auto key = ec->getStringAttribute("value");
+							obj->setProperty(id, key);
+						}
+					}
+				}
+				else
+				{
+					if (auto xml = XmlDocument::parse(f.getChildFile("expansion_info.xml")))
+					{
+						auto name = xml->getStringAttribute(ExpansionIds::Name.toString());
+
+						if (!allExpansions.contains(name))
+							continue;
+
+						foundExpansions.add(name);
+
+						auto id = Expansion::Helpers::getExpansionSlug(name);
+						auto key = xml->getStringAttribute(ExpansionIds::Key);
+						obj->setProperty(id, key);
+					}
+				}
+			}
+
+			if(foundExpansions.size() != allExpansions.size())
+			{
+				for(auto x: allExpansions)
+					if(!foundExpansions.contains(x))
+						reportScriptError("Cannot find metadata for expansion " + x);
+			}
+		}
+
+		expHandler.setCredentials(var(obj.get()));
+		return true;
+	}
+#endif
+
+	return false;
+}
+
+juce::var ScriptUnlocker::RefObject::writeExpansionKeyFile(const String& keyData)
+{
+	if(!(bool)HISE_GET_PREPROCESSOR(getScriptProcessor()->getMainController_(), HISE_USE_UNLOCKER_FOR_EXPANSIONS))
+	{
+		reportScriptError("You must enabled HISE_USE_UNLOCKER_FOR_EXPANSIONS for this function");
+		return var(false);
+	}
+	
+	if(keyData.startsWith("Expansion List"))
+	{
+		if(unlocker->getExpansionListFile().replaceWithText(keyData))
+			return var(loadExpansionList());
+	}
+
+	return var(false);
+	
+}
+
 } // namespace hise

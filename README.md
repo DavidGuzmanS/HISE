@@ -48,9 +48,11 @@ It supports x86 and x64 on Windows, altough the 64bit version is highly recommen
 
 3. Open the Projucer (there are compiled versions for every supported OS in the `tools/projucer` subdirectory) and load the HISE project (either `projects/standalone/HISE Standalone.jucer` or `project/plugin/HISE.jucer`)
 
-4. Click on "Save Project and open in IDE" to load the project in Visual Studio 2022.
+4. The default build configuration on Windows assumes you have IPP installed. If you want to compile HISE without IPP on Windows, you need to change the projucer setting **Exporters -> VS2022 -> Use IPP (One API)** to **"No"**.
 
-5. Hit compile and wait...
+5. Click on "Save Project and open in IDE" to load the project in Visual Studio 2022.
+
+6. Hit compile and wait...
 
 ### OSX
 
@@ -58,22 +60,26 @@ It supports x86 and x64 on Windows, altough the 64bit version is highly recommen
 
 2. Extract the contents of `tools/SDK/sdk.zip` to `tools/SDK`. Your `tools` folder should now contain folders named `ASIOSDK2.3` and `VST3 SDK`.
 
-3. Install [xcpretty](https://github.com/xcpretty/xcpretty), a formatter for xcode. You can install it from the terminal using the command `sudo gem install xcpretty`.
-
-4. Open the Projucer (there are compiled versions for every supported OS in the `tools/projucer` subdirectory) and load the HISE project (either `projects/standalone/HISE Standalone.jucer` or `project/plugin/HISE.jucer`).
+3. Open the Projucer (there are compiled versions for every supported OS in the `tools/projucer` subdirectory) and load the HISE project (either `projects/standalone/HISE Standalone.jucer` or `project/plugin/HISE.jucer`).
 
 > If you hit a permission issue when launching Projucer (or an error stating that Projucer is damaged) you need to open Security & Privacy and whitelist Projucer.
 
-5. Click on "Save Project and open in IDE" to load the project in XCode.
+4. Click on "Save Project and open in IDE" to load the project in XCode.
 
-6. Hit compile and wait...
+5. Hit compile and wait...
 
 ### Linux
 
 1. Install the dependencies: 
 ```
-sudo apt-get -y install build-essential make llvm clang libfreetype6-dev libx11-dev libxinerama-dev libxrandr-dev libxcursor-dev mesa-common-dev libasound2-dev freeglut3-dev libxcomposite-dev libcurl4-gnutls-dev libwebkit2gtk-4.0 libgtk-3-dev libjack-jackd2-dev
+sudo apt-get -y install build-essential make llvm clang libfreetype6-dev libx11-dev libxinerama-dev libxrandr-dev libxcursor-dev mesa-common-dev libasound2-dev freeglut3-dev libxcomposite-dev libcurl4-gnutls-dev libgtk-3-dev libjack-jackd2-dev libwebkit2gtk-4.0-dev
 ```
+
+> If *libwebkit2gtk-4.0-dev* is not available in your distro's repositories you can use *libwebkit2gtk-4.1-dev* instead.
+
+> HISE can be compiled with GCC/G++ versions greater than 11, however there will be buggy behaviour with certain elements of the UI. Therefore it is advised to use GCC/G++ 11 or lower.
+
+> If your distro's repositories contain the *mold* linker you should absolutely use it as it will greatly reduce build times. Alias it to *gold* in .bashrc and you don't need to make any changes to HISE or Projucer to get the benefit.
 
 2. Clone this repository. It also includes the (slightly modified) JUCE source code, so it might take a while.
 
@@ -86,6 +92,21 @@ sudo apt-get -y install build-essential make llvm clang libfreetype6-dev libx11-
 6. Type `make CONFIG=Release` and wait. If you need the debug version (that is slower but allows you to jump around in the source code, use `make CONFIG=Debug`.
 
 
+## AI Development Tools
+
+HISE includes optional tooling for AI-assisted development with [OpenCode](https://opencode.ai), [Claude Code](https://claude.ai), or other MCP/LSP-compatible AI coding agents.
+
+### MCP Server
+
+Gives your AI agent access to HISE documentation and, when HISE is running with the REST server enabled (**Tools > Enable REST Server**), live interaction with your project — compile scripts, capture screenshots, manipulate UI components.
+
+**Setup:** See [`MCP Server Repository`](https://github.com/christoph-hart/hise_mcp_server)
+
+### LSP Server
+
+A diagnostic-only Language Server that catches HISEScript errors (API hallucinations, wrong argument counts, type mismatches) in `.js` files before you compile. Configure this **per-project** to avoid overriding the standard JavaScript LSP in non-HISE projects.
+
+**Setup:** See [`LSP Server Repository`](https://github.com/christoph-hart/hise_lsp_server)
 ## License
 
 HISE is licensed under the GPL v3, but there will be a commercial license for closed source usage. Every instrument you'll build will inheritate this license so in order to release a closed source product you'll have to obtain a HISE commercial license as well as a JUCE commercial license. Please get in touch with me for further informations.

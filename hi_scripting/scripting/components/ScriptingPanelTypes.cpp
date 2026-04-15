@@ -269,12 +269,18 @@ void CodeEditorPanel::fillIndexList(StringArray& indexList)
 			indexList.add(p->getSnippet(i)->getCallbackName().toString());
 		}
 
-        auto scriptRoot = getMainController()->getActiveFileHandler()->getSubDirectory(FileHandlerBase::SubDirectories::Scripts);
-        
+		auto scriptRoot = getMainController()->getCurrentFileHandler().getSubDirectory(FileHandlerBase::SubDirectories::Scripts);
+		
+		String globalScriptPath = dynamic_cast<const GlobalSettingManager*>(getMainController())->getSettingsObject().getSetting(HiseSettings::Scripting::GlobalScriptPath);
+		String globalScriptFolder = File(globalScriptPath).getFileName() + "/";
+
 		for (int i = 0; i < p->getNumWatchedFiles(); i++)
 		{
-            auto f = p->getWatchedFile(i);
+			auto f = p->getWatchedFile(i);
 			auto path = f.getRelativePathFrom(scriptRoot);
+
+			if (path.contains(globalScriptFolder))
+				path = path.fromFirstOccurrenceOf(globalScriptFolder, false, false);
 
 			if(p->isEmbeddedSnippetFile(i))
 				path << " (embedded)";
@@ -570,6 +576,8 @@ public:
 
 private:
 
+	std::vector<std::pair<Rectangle<int>, float>> heatmap;
+
 	float overlayAlpha = 0.0f;
 	Image overlayImage;
 
@@ -729,15 +737,26 @@ ScriptContentPanel::Editor::Editor(Canvas* c):
 			currentOverlayImage = format.loadFrom(currentOverlays[idx-1]);
 		}
 
-		overlayBroadcaster.sendMessage(sendNotificationSync, currentOverlayImage, overlayAlphaSlider->getValue());
+		float alphaToSend = overlayVisible ? overlayAlphaSlider->getValue() : 0.0f;
+		overlayBroadcaster.sendMessage(sendNotificationSync, currentOverlayImage, alphaToSend);
 	};
 
 	klaf.setDefaultColours(*overlaySelector);
+
+	using ActionButton = WrapperWithMenuBarBase::ActionButtonBase<Editor, Factory>;
+	auto overlayToggleButtonAction = new ActionButton(this, "overlay-toggle");
+	overlayToggleButtonAction->stateFunction = [](Editor& e) { return e.overlayVisible; };
+	overlayToggleButtonAction->enabledFunction = [](Editor& e) { return e.currentOverlayImage.isValid(); };
+	overlayToggleButtonAction->actionFunction = Actions::toggleOverlay;
+	overlayToggleButtonAction->setTooltip("Toggle overlay image visibility");
+	overlayToggleButton = overlayToggleButtonAction;
 
 	overlayAlphaSlider = new Slider("Alpha Overlay");
 
 	overlayAlphaSlider->setRange(-1.0, 1.0, 0.0);
 	overlayAlphaSlider->setDoubleClickReturnValue(true, 0.0);
+	overlayAlphaSlider->setValue(0.0, dontSendNotification);
+	lastOverlayAlpha = 0.0f;
     overlayAlphaSlider->setSliderStyle(Slider::SliderStyle::LinearHorizontal);
     overlayAlphaSlider->setTextBoxStyle(Slider::TextEntryBoxPosition::NoTextBox, true, 0, 0);
 	overlayAlphaSlider->setLookAndFeel(&slaf);
@@ -747,15 +766,25 @@ ScriptContentPanel::Editor::Editor(Canvas* c):
     {
         auto nAlpha = overlayAlphaSlider->getValue();
 
+		if(overlayVisible)
+			lastOverlayAlpha = nAlpha;
+
+		if(!currentOverlayImage.isValid())
+		{
+			overlayBroadcaster.sendMessage(sendNotificationSync, currentOverlayImage, 0.0f);
+			overlayAlphaSlider->setColour(Slider::trackColourId, Colours::orange.withSaturation(0.0f).withAlpha(0.5f));
+			return;
+		}
+
 		if(nAlpha < 0.0)
 		{
 			Image copy = currentOverlayImage.createCopy();
 			gin::applyInvert(copy);
-			overlayBroadcaster.sendMessage(sendNotificationSync, copy, hmath::abs(nAlpha));
+			overlayBroadcaster.sendMessage(sendNotificationSync, copy, overlayVisible ? hmath::abs(nAlpha) : 0.0f);
 		}
 		else
 		{
-			overlayBroadcaster.sendMessage(sendNotificationSync, this->currentOverlayImage, hmath::abs(nAlpha));
+			overlayBroadcaster.sendMessage(sendNotificationSync, this->currentOverlayImage, overlayVisible ? hmath::abs(nAlpha) : 0.0f);
 		}
 		
 		overlayAlphaSlider->setColour(Slider::trackColourId, Colours::orange.withSaturation(hmath::abs(nAlpha)).withAlpha(0.5f));
@@ -815,9 +844,10 @@ void ScriptContentPanel::Editor::rebuildAfterContentChange()
 	addSpacer(10);
 
 	addButton("edit-json");
-	addButton("debug-css");
+	addButton("profile");
 
 	addCustomComponent(overlaySelector);
+	addCustomComponent(overlayToggleButton);
 	addCustomComponent(overlayAlphaSlider);
 
 	setWantsKeyboardFocus(true);
@@ -847,16 +877,6 @@ void ScriptContentPanel::Editor::addButton(const String& name)
 		b->enabledFunction = isSelected;
 		b->actionFunction = Actions::editJson;
 		b->setTooltip("Edits the raw property data object as JSON (Dangerzone!)");
-	}
-	if(name == "debug-css")
-	{
-		b->enabledFunction = [](Editor& e)
-		{
-			return callRecursive<simple_css::HeaderContentFooter>(&e, [](simple_css::HeaderContentFooter*){ return true; });
-		};
-
-		b->actionFunction = Actions::debugCSS;
-		b->setTooltip("Show the CSS debugger for the current dialog");
 	}
 	if(name == "suspend")
 	{
@@ -903,6 +923,68 @@ void ScriptContentPanel::Editor::addButton(const String& name)
 		};
 
 		b->enabledFunction = isSingleSelection;
+	}
+	if(name == "profile")
+	{
+#if HISE_INCLUDE_PROFILING_TOOLKIT
+		b->stateFunction = [](Editor& e)
+		{
+			return e.canvas.getContent<Canvas>()->content->isProfiling();
+		};
+
+		b->actionFunction = [b](Editor& e)
+		{
+			auto content = e.canvas.getContent<Canvas>()->content.get();
+			auto jp = const_cast<JavascriptProcessor*>(content->getScriptProcessor());
+			auto mc = dynamic_cast<Processor*>(jp)->getMainController();
+
+			auto isProfiling = content->isProfiling();
+
+			
+			content->setEnableProfiling(!isProfiling, jp, true);
+
+			
+
+			if(content->isProfiling())
+			{
+				Component::SafePointer<ActionButton> sb(b);
+				Component::SafePointer<ScriptContentComponent> sc(content);
+				auto delay = (int)dynamic_cast<const Processor*>(content->getScriptProcessor())->getMainController()->getDebugSession().getOptions().millisecondsToRecord;
+				Timer::callAfterDelay(delay, [sb, sc]()
+				{
+					if(sb.getComponent() != nullptr && sc != nullptr && sc->isProfiling())
+						sb->triggerClick(sendNotificationSync);
+				});
+
+				ProfiledComponent::ComponentHeatmapGenerator hg(content);
+				hg.generateHeatmapIndexes();
+				mc->getDebugSession().clearData(jp);
+
+				jp->heatmapManager.heatmapBroadcaster.addListener(*content, [](ScriptContentComponent& c, DebugInformationBase::Ptr p, const std::map<int, double>* map)
+				{
+					c.setHeatmap(p, map);
+				});
+			}
+			else
+			{
+				jp->heatmapManager.heatmapBroadcaster.removeAllListeners();
+
+				content->setHeatmap(nullptr, nullptr);
+
+				auto dh = &dynamic_cast<const Processor*>(content->getScriptProcessor())->getMainController()->getDebugSession();
+
+				if(auto r = dh->getLastProfileRoot(DebugSession::ThreadIdentifier::Type::UIThread))
+				{
+					auto c = const_cast<DebugSession*>(dh)->createPopupViewer(r);
+					GET_BACKEND_ROOT_WINDOW(content)->getRootFloatingTile()->showComponentInRootPopup(c, b, { b->getWidth() / 2, b->getHeight() }, false);
+				}
+			}
+
+			content->repaint();
+
+			return true;
+		};
+#endif
 	}
 	if (name == "lock")
 	{
@@ -1204,6 +1286,43 @@ bool ScriptContentPanel::Editor::Actions::lockSelection(Editor& e)
 	return true;
 }
 
+bool ScriptContentPanel::Editor::Actions::toggleOverlay(Editor& e)
+{
+	e.overlayVisible = !e.overlayVisible;
+
+	if(e.overlayVisible)
+	{
+		if(!e.currentOverlayImage.isValid())
+		{
+			e.overlayBroadcaster.sendMessage(sendNotificationSync, e.currentOverlayImage, 0.0f);
+			return false;
+		}
+
+		float alphaToUse = e.overlayAlphaSlider->getValue();
+		e.overlayAlphaSlider->setValue(alphaToUse, dontSendNotification);
+		e.lastOverlayAlpha = alphaToUse;
+
+		auto nAlpha = e.overlayAlphaSlider->getValue();
+		if(nAlpha < 0.0)
+		{
+			Image copy = e.currentOverlayImage.createCopy();
+			gin::applyInvert(copy);
+			e.overlayBroadcaster.sendMessage(sendNotificationSync, copy, hmath::abs(nAlpha));
+		}
+		else
+		{
+			e.overlayBroadcaster.sendMessage(sendNotificationSync, e.currentOverlayImage, hmath::abs(nAlpha));
+		}
+	}
+	else
+	{
+		e.lastOverlayAlpha = e.overlayAlphaSlider->getValue();
+		e.overlayBroadcaster.sendMessage(sendNotificationSync, e.currentOverlayImage, 0.0f);
+	}
+
+	return false;
+}
+
 struct ComponentPositionComparator
 {
 	ComponentPositionComparator(bool isVertical_) :
@@ -1319,6 +1438,7 @@ void ScriptContentPanel::initKeyPresses(Component* root)
 
 	TopLevelWindowWithKeyMappings::addShortcut(root, cat, id_show_json, "Show JSON properties", KeyPress('j'));
     TopLevelWindowWithKeyMappings::addShortcut(root, cat, id_show_panel_data_json, "Show Panel.data as JSON", KeyPress('p'));
+	TopLevelWindowWithKeyMappings::addShortcut(root, cat, id_toggle_overlay, "Toggle overlay image visibility", KeyPress('o'));
 }
 
 bool ScriptContentPanel::Editor::keyPressed(const KeyPress& key)
@@ -1337,6 +1457,19 @@ bool ScriptContentPanel::Editor::keyPressed(const KeyPress& key)
 		return Actions::zoomOut(*this);
 	else if (TopLevelWindowWithKeyMappings::matches(this, key, id_lock_selection))
 		return Actions::lockSelection(*this);
+	else if (TopLevelWindowWithKeyMappings::matches(this, key, id_toggle_overlay))
+	{
+		if (overlayToggleButton && overlayToggleButton->isEnabled())
+		{
+			Actions::toggleOverlay(*this);
+			// Update button state
+			if (auto* actionButton = dynamic_cast<WrapperWithMenuBarBase::ActionButtonBase<Editor, Factory>*>(overlayToggleButton))
+			{
+				actionButton->repaint();
+			}
+		}
+		return true;
+	}
 
 	return false;
 }
@@ -2152,7 +2285,7 @@ Component* ScriptWatchTablePanel::createContentComponent(int /*index*/)
 
 	auto f = [this](Component* p, Component* c, Point<int> s)
 	{
-		findParentComponentOfClass<FloatingTile>()->getRootFloatingTile()->showComponentInRootPopup(p, c, s, true);
+		findParentComponentOfClass<FloatingTile>()->getRootFloatingTile()->showComponentInRootPopup(p, c, s);
 	};
 
 	swt->setPopupFunction(f);
@@ -2215,6 +2348,7 @@ Array<PathFactory::KeyMapping> ScriptContentPanel::Factory::getKeyMapping() cons
 	km.add({ "Undo", 'z', ModifierKeys::commandModifier });
 	km.add({ "Redo", 'y', ModifierKeys::commandModifier });
 	km.add({ "Edit JSON", 'j' });
+	km.add({ "overlay-toggle", 'o' });
 	
 	return km;
 }
@@ -2233,15 +2367,17 @@ juce::Path ScriptContentPanel::Factory::createPath(const String& id) const
 	LOAD_EPATH_IF_URL("cancel", EditorIcons::cancelIcon);
 	LOAD_EPATH_IF_URL("undo", EditorIcons::undoIcon);
 	LOAD_EPATH_IF_URL("redo", EditorIcons::redoIcon);
-	LOAD_PATH_IF_URL("rebuild", ColumnIcons::moveIcon);
+	LOAD_EPATH_IF_URL("rebuild", ColumnIcons::moveIcon);
 	LOAD_EPATH_IF_URL("learn", EditorIcons::connectIcon);
-	LOAD_PATH_IF_URL("vertical-align", ColumnIcons::verticalAlign);
-	LOAD_PATH_IF_URL("horizontal-align", ColumnIcons::horizontalAlign);
-	LOAD_PATH_IF_URL("vertical-distribute", ColumnIcons::verticalDistribute);
-	LOAD_PATH_IF_URL("horizontal-distribute", ColumnIcons::horizontalDistribute);
+	LOAD_EPATH_IF_URL("vertical-align", ColumnIcons::verticalAlign);
+	LOAD_EPATH_IF_URL("horizontal-align", ColumnIcons::horizontalAlign);
+	LOAD_EPATH_IF_URL("vertical-distribute", ColumnIcons::verticalDistribute);
+	LOAD_EPATH_IF_URL("horizontal-distribute", ColumnIcons::horizontalDistribute);
 	LOAD_EPATH_IF_URL("edit-json", HiBinaryData::SpecialSymbols::scriptProcessor);
-	LOAD_PATH_IF_URL("debug-css", ColumnIcons::debugCSS);
+	LOAD_EPATH_IF_URL("debug-css", ColumnIcons::debugCSS);
 	LOAD_EPATH_IF_URL("suspend", EditorIcons::nightIcon);
+	LOAD_EPATH_IF_URL("profile", EditorIcons::profileIcon);
+	LOAD_EPATH_IF_URL("overlay-toggle", EditorIcons::imageIcon);
 
 	return p;
 }
@@ -2371,7 +2507,7 @@ juce::Path OSCLogger::createPath(const String& url) const
 {
 	Path p;
 
-	LOAD_PATH_IF_URL("filter", ColumnIcons::filterIcon);
+	LOAD_EPATH_IF_URL("filter", ColumnIcons::filterIcon);
 	LOAD_EPATH_IF_URL("clear", SampleMapIcons::deleteSamples);
 	LOAD_EPATH_IF_URL("pause", HiBinaryData::ProcessorEditorHeaderIcons::bypassShape);
 	LOAD_EPATH_IF_URL("scale", ScriptnodeIcons::scaleIcon);

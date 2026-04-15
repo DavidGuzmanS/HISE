@@ -30,10 +30,11 @@
 *   ===========================================================================
 */
 
-
 #if !JUCE_LINUX
 #include "choc/gui/choc_webview.h"
 #endif
+
+#include "sha1.h"
 
 namespace hise {
 using namespace juce;
@@ -98,6 +99,15 @@ WebViewData::WebViewData(File f):
 	projectRootDirectory(f)
 {
 	pimpl = new Pimpl();
+
+	addEmbeddedResource("/favicon.ico", "image", "");
+}
+
+WebViewData::WebViewData(const char* embeddedHTMLCode):
+	serverType(ServerType::Hardcoded)
+{
+	pimpl = new Pimpl();
+	addEmbeddedResource("/", "text/html", embeddedHTMLCode);
 }
 
 WebViewData::~WebViewData()
@@ -105,9 +115,15 @@ WebViewData::~WebViewData()
 	delete pimpl;
 	pimpl = nullptr;
 
+	currentTcpServer = nullptr;
 	
 	scripts.clear();
 	errorLogger = {};
+}
+
+void WebViewData::setErrorLogger(const std::function<void(const String& m)>& errorFunction)
+{
+	errorLogger = errorFunction;
 }
 
 void WebViewData::addCallback(const String& callbackName, const CallbackType& function)
@@ -207,9 +223,24 @@ void WebViewData::setRootDirectory(const File& newRootDirectory)
 	}
 }
 
+void WebViewData::setHtmlContent(const String& htmlCode)
+{
+	pimpl->resources.clear();
+	rootFile = {};
+	rootDirectory = File();
+	serverType = ServerType::Hardcoded;
+	
+	addEmbeddedResource("/", "text/html", htmlCode.toStdString());
+}
+
 void WebViewData::setUsePersistentCalls(bool shouldUsePersistentCalls)
 {
 	usePersistentCalls = shouldUsePersistentCalls;
+}
+
+void WebViewData::setUseScaleFactorForZoom(bool shouldApplyScaleFactorAsZoom)
+{
+	applyScaleFactorAsZoom = shouldApplyScaleFactorAsZoom;
 }
 
 void WebViewData::reset(bool resetFiles)
@@ -346,6 +377,57 @@ bool WebViewData::explode()
 	return true;
 }
 
+bool WebViewData::setWebSocketCallback(const CallbackType& webSocketFunction)
+{
+	if(currentTcpServer != nullptr)
+	{
+		currentTcpServer->setDataCallback(webSocketFunction);
+		return true;
+	}
+
+	return false;
+}
+
+void WebViewData::setEnableWebsocket(int port)
+{
+	if(currentTcpServer == nullptr)
+	{
+		currentTcpServer = new TCPServer(*this, port);
+		currentTcpServer->start();
+
+		addEmbeddedResource("/hisewebsocket-min.js", "text/js", R"(class HiseWebSocketServer{constructor(e){this.port=e,this.eventListeners=[],this.initQueue=[],window.addEventListener("load",this.initialise),window.addEventListener("beforeunload",this.onUnload)}onUnload=()=>{this.socket.close()};onReader=e=>{let t=new Uint8Array(e.target.result),s=this.parseWebSocketMessage(t);for(let i=0;i<this.eventListeners.length;i++)this.eventListeners[i](s.id,s.data)};onMessage=e=>{let t=new FileReader;t.onload=this.onReader,t.readAsArrayBuffer(e.data)};initialise=()=>{console.log("PORT: "+this.port),this.socket=new WebSocket("ws://localhost:"+this.port),this.socket.onmessage=this.onMessage,this.socket.onopen=this.sendInitMessages};sendInitMessages=()=>{for(let e=0;e<this.initQueue.length;e++)console.log("send init message"+this.initQueue[e]),this.send(this.initQueue[e]);this.initQueue=[]};parseWebSocketMessage(e){let t=0,s=1==new DataView(e.buffer,t,1).getUint8(0,!0);t++;let i=new DataView(e.buffer,t,2).getUint16(0,!0);t+=2;let n=new TextDecoder().decode(e.slice(t,t+i-1));t+=i;let o=new DataView(e.buffer,t,4).getUint32(0,!0);t+=4;let r;return r=s?new TextDecoder().decode(e.buffer.slice(t,t+o)):new Float32Array(e.buffer.slice(t,t+o)),{id:n,data:r}}addEventListener(e){this.eventListeners.push(e)}send(e){this.socket?this.socket.send(e):this.initQueue.push(e)}})");
+	}
+}
+
+void WebViewData::sendDataToWebsocket(const Identifier& id, const void* data, size_t numBytes)
+{
+	if(currentTcpServer != nullptr)
+	{
+		currentTcpServer->sendData(id, data, numBytes);
+	}
+}
+
+void WebViewData::sendStringToWebsocket(const Identifier& id, const String& message)
+{
+	if(currentTcpServer != nullptr)
+	{
+		currentTcpServer->sendString(id, message);
+	}
+}
+
+void WebViewData::addBufferToWebsocket(uint8 bufferIndex, VariantBuffer::Ptr buffer)
+{
+	if(currentTcpServer != nullptr)
+		currentTcpServer->addBuffer(bufferIndex, buffer);
+}
+
+void WebViewData::updateBuffer(uint8 bufferIndex)
+{
+	if(currentTcpServer != nullptr)
+		currentTcpServer->updateBuffer(bufferIndex);
+}
+
+
 void WebViewData::registerWebView(Component* c)
 {
 	registeredViews.addIfNotAlreadyThere(c);
@@ -356,8 +438,43 @@ void WebViewData::deregisterWebView(Component* c)
 	registeredViews.removeAllInstancesOf(c);
 }
 
+void WebViewData::unloadRegisteredWebViews()
+{
+	for(auto r: registeredViews)
+	{
+		if(auto ww = dynamic_cast<WebViewWrapper*>(r.getComponent()))
+		{
+			ww->unload();
+		}
+	}
+
+	registeredViews.clear();
+}
+
+void WebViewData::addEmbeddedResource(const std::string& path, const std::string& mimeType, const std::string& content)
+{
+	ScopedPointer<ExternalResource> nr = new ExternalResource(path, mimeType, String(content));
+
+	for(auto& e: embeddedResources)
+	{
+		if(e->path == path)
+		{
+			e->resource = nr->resource;
+			return;
+		}
+	}
+
+	embeddedResources.add(nr.release());
+}
+
 WebViewData::OpaqueResourceType WebViewData::fetch(const std::string& path)
 {
+	for(auto e: embeddedResources)
+	{
+		if(e->path == path)
+			return e->resource;
+	}
+
 	auto url = juce::URL(String(path));
 
 	auto s = url.toString(false);
@@ -368,6 +485,33 @@ WebViewData::OpaqueResourceType WebViewData::fetch(const std::string& path)
 	{
 		if (r->path == pathToUse)
 			return r->resource;
+	}
+
+	auto hisePath = String(path);
+
+	if(hisePath.startsWith("/"))
+		hisePath = hisePath.substring(1);
+
+	hisePath = hisePath.replace("%7B", "{");
+	hisePath = hisePath.replace("%7D", "}");
+
+	for(auto pr: additionalProviders)
+	{
+		Image img = pr->getImage(hisePath);
+
+		if(img.isValid())
+		{
+			addPNGImage(path, img);
+			return pimpl->resources.getLast()->resource;
+		}
+
+		auto mimeContent = pr->getMimeContent(hisePath);
+		
+		if(mimeContent.first.isNotEmpty())
+		{
+			addResource(hisePath, mimeContent.first, mimeContent.second);
+			return pimpl->resources.getLast()->resource;
+		}
 	}
 
 	if (serverType == ServerType::FileBased)
@@ -417,18 +561,18 @@ WebViewData::OpaqueResourceType WebViewData::fetch(const std::string& path)
 	return {};
 };
 
-WebViewWrapper::WebViewWrapper(WebViewData::Ptr d) :
+WebViewWrapper::WebViewWrapper(WebViewData::Ptr d, bool init) :
 	data(d)
 {
 	data->registerWebView(this);
 
-	Component::SafePointer<WebViewWrapper> safeThis(this);
-
-	MessageManager::callAsync([safeThis]()
+	if(init)
 	{
-		if(safeThis.getComponent() != nullptr)
-			safeThis->refresh();
-	});
+		SafeAsyncCall::callAsyncIfNotOnMessageThread<WebViewWrapper>(*this, [](WebViewWrapper& wv)
+		{
+			wv.refresh();
+		});
+	}
 }
 
 WebViewWrapper::~WebViewWrapper()
@@ -437,10 +581,14 @@ WebViewWrapper::~WebViewWrapper()
 
 	if (data != nullptr)
 		data->deregisterWebView(this);
+	
+	unload();
 
-	if(content != nullptr)
-		content->setWindowHandle(nullptr);
+	
+}
 
+void WebViewWrapper::unload()
+{
 	content = nullptr;
 #if !JUCE_LINUX
 	webView = nullptr;
@@ -460,12 +608,19 @@ void WebViewWrapper::resized()
 
 void WebViewWrapper::call(const String& jsCode)
 {
-#if !JUCE_LINUX
+#if !JUCE_LINUX	
 	if(webView != nullptr)
 		webView->evaluateJavascript(jsCode.toStdString());
 #endif
 }
 
+void WebViewWrapper::setHtml(const String& htmlCode)
+{
+#if !JUCE_LINUX
+	if(webView != nullptr)
+		webView->setHTML(htmlCode.toStdString());
+#endif
+}
 
 void WebViewWrapper::navigateToURL(const URL& url)
 {
@@ -474,17 +629,13 @@ void WebViewWrapper::navigateToURL(const URL& url)
 
     auto currentFocusComponent = Component::getCurrentlyFocusedComponent();
 
-    content = new NativeComponentType();
-
 #if !JUCE_LINUX
     choc::ui::WebView::Options options;
     webView = new choc::ui::WebView(options);
-    content->setWindowHandle(webView->getViewHandle());
-#endif
+	content = dynamic_cast<NativeUIBase*>(choc::ui::createJUCEWebViewHolder(*webView).release());
 
     addAndMakeVisible(content);
 
-#if !JUCE_LINUX
     webView->navigate(url.toString(false).toStdString());
 #endif
     
@@ -494,15 +645,14 @@ void WebViewWrapper::navigateToURL(const URL& url)
 
 void WebViewWrapper::refresh()
 {
+#if !JUCE_LINUX
 	jassert(MessageManager::getInstance()->isThisTheMessageThread());
 
-	auto currentFocusComponent = Component::getCurrentlyFocusedComponent();
+	
 
-	content = new NativeComponentType();
-
-#if !JUCE_LINUX
 	choc::ui::WebView::Options options;
 	options.enableDebugMode = data->isDebugModeEnabled();
+	options.transparentBackground = true;
 	auto d = data;
 	options.fetchResource = [d](const std::string& path)
 	{
@@ -519,14 +669,17 @@ void WebViewWrapper::refresh()
 		return s;
 	};
 
+	webView = nullptr;
+	content = nullptr;
+
 	webView = new choc::ui::WebView(options);
 
-	for (const auto& x : data->scripts)
+	for (const auto& x : d->scripts)
 		webView->addInitScript(x.toStdString());
 
-	if (data->usePersistentCalls)
+	if (d->usePersistentCalls)
 	{
-		for (const auto& x : data->initScripts.getAllValues())
+		for (const auto& x : d->initScripts.getAllValues())
 		{
 			String asyncCode;
 			asyncCode << "document.addEventListener('DOMContentLoaded', function() {" << x << " }, false);";
@@ -537,19 +690,22 @@ void WebViewWrapper::refresh()
 	for (const auto c : data->pimpl->callbacks)
 		c->registerToWebView(webView);
 
-	content->setWindowHandle(webView->getViewHandle());
-#endif
+	content = dynamic_cast<NativeUIBase*>(choc::ui::createJUCEWebViewHolder(*webView).release());
 
 	addAndMakeVisible(content);
 	
 	refreshBounds(UnblurryGraphics::getScaleFactorForComponent(this));
 
-	if(currentFocusComponent != nullptr)
+	if(auto currentFocusComponent = Component::getCurrentlyFocusedComponent())
 		currentFocusComponent->grabKeyboardFocusAsync();
+
+	webView->navigate("");
+#endif
 }
 
 void WebViewWrapper::refreshBounds(float newScaleFactor)
 {
+#if !JUCE_LINUX
 	auto currentBounds = getLocalBounds();
 
 	if (content != nullptr)
@@ -575,7 +731,6 @@ void WebViewWrapper::refreshBounds(float newScaleFactor)
 
     data->evaluate("scaleFactor", s);
     
-#if !JUCE_LINUX
 	if (webView != nullptr)
     {
         String asyncCode;

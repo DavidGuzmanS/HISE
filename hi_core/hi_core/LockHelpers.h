@@ -95,6 +95,7 @@ public:
 		Type type;
 		bool holdsLock;
 		CriticalSection const* lock;
+		DebugSession::ProfileDataSource::Profiler waitProfiler, lockProfiler;
 	};
 
 	struct BadLockException
@@ -142,7 +143,7 @@ public:
 		ErrorCode c;
 	};
 
-	static bool freeToGo(MainController* mc);
+	static bool freeToGo(const MainController* mc);
 
 	static bool noMessageThreadBeyondInitialisation(const MainController* mc);
 

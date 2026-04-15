@@ -47,6 +47,7 @@ namespace InterfaceDesignerShortcuts
 	DECLARE_ID(id_show_json);
     DECLARE_ID(id_show_panel_data_json);
 	DECLARE_ID(id_duplicate);
+	DECLARE_ID(id_toggle_overlay);
 }
 #undef DECLARE_ID
 
@@ -233,23 +234,6 @@ public:
 			static bool toggleSuspension(Editor& e);
 
 			static bool editJson(Editor& e);
-
-			static bool debugCSS(Editor& e)
-			{
-				e.callRecursive<simple_css::HeaderContentFooter>(&e, [&](simple_css::HeaderContentFooter* r)
-				{
-
-					auto newEditor = new simple_css::HeaderContentFooter::CSSDebugger(*r);
-
-					newEditor->setSize(400, 700);
-
-					e.findParentComponentOfClass<FloatingTile>()->showComponentInRootPopup(newEditor, &e, {15, 30});
-					return true;
-				});
-				
-				return true;
-			}
-
 			static bool move(Editor& e);
 
 			static bool lockSelection(Editor& e);
@@ -257,6 +241,8 @@ public:
 			static bool distribute(Editor* editor, bool isVertical);
 			static bool align(Editor* editor, bool isVertical);
 			static bool undo(Editor * e, bool shouldUndo);
+
+			static bool toggleOverlay(Editor& e);
 		};
 
 		LambdaBroadcaster<Image, float> overlayBroadcaster;
@@ -267,7 +253,10 @@ public:
 		LookAndFeel_V4 slaf;
 		ComboBox* zoomSelector;
 		ComboBox* overlaySelector;
+		Component* overlayToggleButton;
 		Slider* overlayAlphaSlider;
+		float lastOverlayAlpha = 0.0f;
+		bool overlayVisible = true;
 
 		JUCE_DECLARE_WEAK_REFERENCEABLE(Editor);
 	};

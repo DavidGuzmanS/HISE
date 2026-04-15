@@ -60,7 +60,7 @@ struct ParameterSlider::RangeComponent : public ComponentWithMiddleMouseDrag,
 
 	ParameterSlider& parent;
 
-	RangePresets presets;
+	RangeHelpers::RangePresets presets;
 
 	ValueTree connectionSource;
 
@@ -683,8 +683,12 @@ struct ParameterSlider::RangeComponent : public ComponentWithMiddleMouseDrag,
 
 			PopupMenu ranges;
 
+			constexpr auto ConverterOffset = 5000;
+			constexpr auto ModulationOffset = 6000;
+			constexpr auto RangeOffset = 9000;
+
 			for (const auto& p : presets.presets)
-				ranges.addItem(9000 + p.index, p.id, true, RangeHelpers::isEqual(getParentRange(), p.nr));
+				ranges.addItem(RangeOffset + p.index, p.id, true, RangeHelpers::isEqual(getParentRange(), p.nr));
 
 			m.addSubMenu("Load Range Preset", ranges);
 			m.addItem(3, "Save Range Preset");
@@ -695,6 +699,53 @@ struct ParameterSlider::RangeComponent : public ComponentWithMiddleMouseDrag,
 			m.addItem(5, "Invert range", true, RangeHelpers::isInverted(getParent().pTree));
 			m.addItem(7, "Copy range to source", connectionSource.isValid());
 			m.addItem(8, "Set as default value");
+
+			PopupMenu tc;
+
+			
+
+			int idx = 0;
+
+			auto currentConverter = getParent().pTree[PropertyIds::TextToValueConverter].toString();
+
+			for(auto& n: parameter::pod::getTextValueConverterNames())
+			{
+				auto active = n == currentConverter;
+
+				if(idx == ((int)(parameter::pod::TextValueConverters::numTextValueConverters)))
+					break;
+
+				tc.addItem(ConverterOffset + idx++, n, true, active);
+			}
+
+			m.addSubMenu("TextConverter", tc);
+
+			if(auto mc = dynamic_cast<NodeContainer::MacroParameter*>(getParent().parameterToControl.get()))
+			{
+				auto isRoot = mc->parent == mc->parent->getRootNetwork()->getRootNode();
+
+				if(isRoot)
+				{
+					PopupMenu modMenu;
+
+					auto mn = OpaqueNode::ModulationProperties::getModulationModeNames();
+					mn.removeDuplicates(false); // Disabled is twice
+
+					idx = 0;
+
+					auto currentMod = getParent().pTree[PropertyIds::ExternalModulation].toString();
+					if(currentMod.isEmpty())
+						currentMod = "Disabled";
+
+					for(auto mod: mn)
+					{
+						auto active = mod == currentMod;
+						modMenu.addItem(ModulationOffset + idx++, mod, true, active);
+					}
+
+					m.addSubMenu("External Modulation Mode", modMenu);
+				}
+			}
 
 			auto r = m.show();
 
@@ -724,7 +775,7 @@ struct ParameterSlider::RangeComponent : public ComponentWithMiddleMouseDrag,
 				if (n.isNotEmpty())
 				{
 					auto cr = getParentRange();
-					presets.createDefaultRange(n, cr);
+					//presets.createDefaultRange(n, cr);
 				}
 			}
 			if (r == 5)
@@ -756,10 +807,25 @@ struct ParameterSlider::RangeComponent : public ComponentWithMiddleMouseDrag,
 				auto p = getParent().pTree;
 				p.setProperty(PropertyIds::DefaultValue, p[PropertyIds::Value], getParent().node->getUndoManager());
 			}
-			if (r > 9000)
+
+			if (r > RangeOffset)
 			{
 				auto p = presets.presets[r - 9001];
 				setNewRange(p.nr, sendNotification);
+			}
+			else if (r > ModulationOffset)
+			{
+				idx = r - ModulationOffset;
+				auto n = OpaqueNode::ModulationProperties::getModulationModeNames()[idx];
+				auto p = getParent().pTree;
+				p.setProperty(PropertyIds::ExternalModulation, n, getParent().node->getUndoManager());
+			}
+			else if (r > ConverterOffset)
+			{
+				idx = r - ConverterOffset;
+				auto n = parameter::pod::getTextValueConverterNames()[idx];
+				auto p = getParent().pTree;
+				p.setProperty(PropertyIds::TextToValueConverter, n, getParent().node->getUndoManager());
 			}
 			
 			repaint();
@@ -914,14 +980,27 @@ ParameterSlider::ParameterSlider(NodeBase* node_, int index_) :
 		valuetree::AsyncMode::Coallescated,
 		BIND_MEMBER_FUNCTION_2(ParameterSlider::updateRange));
 
+	textConverterWatcher.setCallback(
+	    pTree,
+		{ PropertyIds::TextToValueConverter},
+		valuetree::AsyncMode::Asynchronously,
+		[this](const Identifier&, const var& newValue)
+	{
+		parameter::data pData;
+		pData.info = parameter::pod(pTree);
+		vtc = pData.getValueToTextConverter();
+	});
+
 	valueListener.setCallback(pTree, { PropertyIds::Value },
 		valuetree::AsyncMode::Asynchronously,
 		[this](Identifier, var newValue)
 	{
-        double value = (double)newValue;
-        
-		setValue(value, dontSendNotification);
-		repaint();
+		if(externalModulationIndex == -1)
+		{
+			double value = (double)newValue;
+			setValue(value, dontSendNotification);
+			repaint();
+		}
 	});
 
 	if(!pTree.hasProperty(PropertyIds::DefaultValue))
@@ -941,7 +1020,7 @@ ParameterSlider::ParameterSlider(NodeBase* node_, int index_) :
 		}
 	});
 
-	automationListener.setCallback(pTree, {PropertyIds::Automated}, valuetree::AsyncMode::Asynchronously,
+	automationListener.setCallback(pTree, {PropertyIds::Automated, PropertyIds::AutomatedExternal}, valuetree::AsyncMode::Asynchronously,
 	[this](const Identifier& id, var newValue)
 	{
 		checkEnabledState();
@@ -1024,7 +1103,7 @@ void ParameterSlider::checkEnabledState()
 
 	setTooltip(tt);
 
-	if (modulationActive)
+	if (modulationActive || externalModulationIndex != -1)
 		start();
 	else
 		stop();
@@ -1056,7 +1135,7 @@ bool ParameterSlider::isInterestedInDragSource(const SourceDetails& details)
 	if (details.sourceComponent == this)
 		return false;
 
-	if(pTree[PropertyIds::Automated])
+	if(pTree[PropertyIds::Automated] || pTree[PropertyIds::AutomatedExternal])
 		return false;
 
 	WeakReference<NodeBase> sourceNode = DspNetworkListeners::getSourceNodeFromComponentDrag(details.sourceComponent);
@@ -1178,29 +1257,47 @@ void ParameterSlider::paint(Graphics& g)
 
 void ParameterSlider::timerCallback()
 {
-	auto thisDisplayValue = getValueToDisplay();
-
-	if (thisDisplayValue != lastDisplayValue || blinkAlpha > 0.0f)
+	if(externalModulationIndex != -1 && modulationQueryFunction != nullptr)
 	{
-        auto sl = getRange().getLength();
-        auto delta = std::abs(thisDisplayValue - lastDisplayValue);
-        
-        if(delta / sl > 0.01)
-        {
-            blinkAlpha = 1.0f;
-            lastDisplayValue = thisDisplayValue;
-            
-            if(auto l = dynamic_cast<ParameterKnobLookAndFeel::SliderLabel*>(getTextBox()))
-            {
-                l->updateText();
-            }
-        }
-        else
-        {
-            blinkAlpha = jmax(0.0f, blinkAlpha - 0.08f);
-        }
-        
-		repaint();
+		jassert(modulationQueryProcessor.get() != nullptr);
+
+		NormalisableRange<double> nr(getRange());
+		nr.skew = getSkewFactor();
+		auto thisValue = modulationQueryFunction->getDisplayValue(modulationQueryProcessor, getValue(), nr, -1);
+
+		if(thisValue != lastValue)
+		{
+			lastValue = thisValue;
+			lastValue.storeToComponent(*this);
+			repaint();
+		}
+	}
+	else
+	{
+		auto thisDisplayValue = getValueToDisplay();
+
+		if (thisDisplayValue != lastDisplayValue || blinkAlpha > 0.0f)
+		{
+	        auto sl = getRange().getLength();
+	        auto delta = std::abs(thisDisplayValue - lastDisplayValue);
+	        
+	        if(delta / sl > 0.01)
+	        {
+	            blinkAlpha = 1.0f;
+	            lastDisplayValue = thisDisplayValue;
+	            
+	            if(auto l = dynamic_cast<ParameterKnobLookAndFeel::SliderLabel*>(getTextBox()))
+	            {
+	                l->updateText();
+	            }
+	        }
+	        else
+	        {
+	            blinkAlpha = jmax(0.0f, blinkAlpha - 0.08f);
+	        }
+	        
+			repaint();
+		}
 	}
 }
 
@@ -1282,8 +1379,14 @@ void ParameterSlider::mouseDown(const MouseEvent& e)
 {
 	CHECK_MIDDLE_MOUSE_DOWN(e);
 
-    auto p = dynamic_cast<Processor*>(parameterToControl->getScriptProcessor());
-    
+	auto p = dynamic_cast<Processor*>(parameterToControl->getScriptProcessor());
+
+	if(e.mods.isCtrlDown() && modulationQueryFunction != nullptr)
+	{
+		modulationQueryFunction->onScaleDrag(modulationQueryProcessor, true, 0.0f);
+		return;
+	}
+
     if (isLearnable() && p->getMainController()->getScriptComponentEditBroadcaster()->getCurrentlyLearnedComponent() != nullptr)
     {
         Learnable::LearnData d;
@@ -1307,6 +1410,16 @@ void ParameterSlider::mouseDown(const MouseEvent& e)
 
 	if (e.mods.isRightButtonDown())
 	{
+		bool unused = false;
+		bool* flag = &unused;
+
+		if (auto ps = findParentComponentOfClass<ContainerComponent::ParameterComponent>())
+			flag = &ps->skipRebuild;
+
+		// This is required because the macro editor might add missing properties which
+		// cause a parameter rebuild so this would destroy this slider
+		ScopedValueSetter<bool> svs(*flag, true);
+
 		auto pe = new MacroPropertyEditor(node, pTree);
 
 		pe->setName("Edit Parameter");
@@ -1337,12 +1450,26 @@ void ParameterSlider::mouseDown(const MouseEvent& e)
 void ParameterSlider::mouseUp(const MouseEvent& e)
 {
 	CHECK_MIDDLE_MOUSE_UP(e);
+
+	if(e.mods.isCtrlDown() && modulationQueryFunction != nullptr)
+	{
+		return;
+	}
+
 	Slider::mouseUp(e);
 }
 
 void ParameterSlider::mouseDrag(const MouseEvent& e)
 {
 	CHECK_MIDDLE_MOUSE_DRAG(e);
+
+	if(e.mods.isCtrlDown() && modulationQueryFunction != nullptr)
+	{
+		auto delta = ModulationDisplayValue::getDeltaForDragEvent(*this, e);
+		modulationQueryFunction->onScaleDrag(modulationQueryProcessor, false, delta);
+		return;
+	}
+
 	Slider::mouseDrag(e);
 }
 
@@ -1493,17 +1620,22 @@ void ParameterSlider::sliderDragEnded(Slider*)
 
 void ParameterSlider::sliderValueChanged(Slider*)
 {
-
-	if (parameterToControl != nullptr)
+	if(externalModulationIndex != -1)
+	{
+		if(auto eh = node->getRootNetwork()->getParentHolder()->getExtraModulationHandler())
+		{
+			if(auto mc = eh->getModulatorChain(externalModulationIndex))
+			{
+				NormalisableRange<double> nr(getRange());
+				nr.skew = getSkewFactor();
+				auto iv = nr.convertTo0to1(getValue());
+				mc->setInitialValue(iv);
+			}
+		}
+	}
+	else if (parameterToControl != nullptr)
 	{
         auto value = getValue();
-        
-        if(isControllingFrozenNode())
-		{
-			auto n = parameterToControl->parent->getRootNetwork();
-			n->getCurrentParameterHandler()->setParameter(index, value);
-		}
-		
 		parameterToControl->data.setProperty(PropertyIds::Value, value, parameterToControl->parent->getUndoManager());
 	}
 
@@ -1518,6 +1650,9 @@ juce::String ParameterSlider::getTextFromValue(double value)
 {
 	if (parameterToControl == nullptr)
 		return "Empty";
+
+	if(vtc.active)
+		return vtc.getTextForValue(value);
 
 	if (parameterToControl->valueNames.isEmpty())
 	{
@@ -1539,6 +1674,9 @@ double ParameterSlider::getValueFromText(const String& text)
 	if (parameterToControl == nullptr)
 		return 0.0;
 
+	if(vtc.active)
+		return vtc.getValueForText(text);
+
 	if (parameterToControl->valueNames.contains(text))
 		return (double)parameterToControl->valueNames.indexOf(text);
 
@@ -1550,31 +1688,11 @@ double ParameterSlider::getValueToDisplay() const
     double v;
     
 	if (parameterToControl != nullptr)
-	{
-		if (isControllingFrozenNode())
-			v = getValue();
-        else
-            v = parameterToControl->getValue();
-	}
+        v = parameterToControl->getValue();
 	else
-	{
 		v = getValue();
-	}
 	
     return v;
-}
-
-bool ParameterSlider::isControllingFrozenNode() const
-{
-	if (parameterToControl != nullptr)
-	{
-		auto n = parameterToControl->parent->getRootNetwork();
-
-		return n->getRootNode() == parameterToControl->parent &&
-			n->isFrozen();
-	}
-	
-	return false;
 }
 
 void ParameterSlider::repaintParentGraph()
@@ -1632,6 +1750,10 @@ void ParameterKnobLookAndFeel::drawRotarySlider(Graphics& g, int , int , int wid
 		return;
 
     auto modValue = ps->getValueToDisplay();
+
+	if(ps->externalModulationIndex != -1)
+		modValue = ps->getValue();
+
     const double normalisedModValue = (modValue - s.getMinimum()) / (s.getMaximum() - s.getMinimum());
 	float modProportion = jlimit<float>(0.0f, 1.0f, pow((float)normalisedModValue, (float)s.getSkewFactor()));
 
@@ -1642,9 +1764,15 @@ void ParameterKnobLookAndFeel::drawRotarySlider(Graphics& g, int , int , int wid
 	b = b.removeFromTop(48);
 	b = b.withSizeKeepingCentre(48, 48).translated(0.0f, 3.0f);
 
-    
-    
-	drawVectorRotaryKnob(g, b.toFloat(), modProportion, isBipolar, s.isMouseOverOrDragging(true) || ps->parameterToControl->isModulated(), s.isMouseButtonDown(), s.isEnabled(), modProportion);
+	ModulationDisplayValue mv;
+	mv.normalisedValue = modProportion;
+
+	if(ps->externalModulationIndex != -1)
+	{
+		mv = ModulationDisplayValue::fromComponent(s, modProportion);
+	}
+
+	drawVectorRotaryKnob(g, b.toFloat(), isBipolar, s.isMouseOverOrDragging(true) || ps->parameterToControl->isModulated(), s.isMouseButtonDown(), s.isEnabled(), mv);
 }
 
 void MacroParameterSlider::Dragger::mouseUp(const MouseEvent& e)
@@ -1675,7 +1803,8 @@ MacroParameterSlider::MacroParameterSlider(NodeBase* node, int index) :
 	slider(node, index),
 	dragger(*this),
     warningButton("warning", nullptr, *this),
-	deleteButton("delete", nullptr, *this) 
+	deleteButton("delete", nullptr, *this),
+	sticker(node->getRootNetwork(), index, this)
 {
 	warningButton.setTooltip("Range mismatch. Click to resolve");
 	deleteButton.setTooltip("Remove this parameter");
@@ -1686,8 +1815,6 @@ MacroParameterSlider::MacroParameterSlider(NodeBase* node, int index) :
 	setWantsKeyboardFocus(true);
 
     addAndMakeVisible(warningButton);
-    
-    
     
     rangeWatcher.setCallback(
         node->getRootNetwork()->getValueTree(),
@@ -1705,6 +1832,15 @@ MacroParameterSlider::MacroParameterSlider(NodeBase* node, int index) :
         slider.pTree.getChildWithName(PropertyIds::Connections),
         valuetree::AsyncMode::Asynchronously,
         BIND_MEMBER_FUNCTION_2(MacroParameterSlider::updateWarningOnConnectionChange));
+
+	externalModulationWatcher.setCallback(
+	    slider.pTree.getParent(),
+		{ PropertyIds::ExternalModulation },
+		valuetree::AsyncMode::Asynchronously,
+		BIND_MEMBER_FUNCTION_2(MacroParameterSlider::updateExternalModulation));
+
+	// call it manually because the recursive propertyListener doesn't initial
+	updateExternalModulation(slider.pTree, PropertyIds::ExternalModulation);
 
 	deleteButton.onClick = [this, node]()
 	{
@@ -1738,6 +1874,9 @@ MacroParameterSlider::MacroParameterSlider(NodeBase* node, int index) :
                 if(PresetHandler::showYesNoWindow("Range mismatch", m))
                 {
                     RangeHelpers::storeDoubleRange(slider.pTree, nr, node->getUndoManager());
+
+					auto targetConverter = targetParameter->data[PropertyIds::TextToValueConverter].toString();
+					slider.pTree.setProperty(PropertyIds::TextToValueConverter, targetConverter, node->getUndoManager());
                 }
             }
         }
@@ -1754,7 +1893,14 @@ MacroParameterSlider::MacroParameterSlider(NodeBase* node, int index) :
 void MacroParameterSlider::checkAllParametersForWarning(const Identifier& , const var& )
 {
     auto nTree = slider.pTree.getParent().getParent().getChildWithName(PropertyIds::Nodes);
- 
+
+	if(slider.pTree.getChildWithName(PropertyIds::Connections).getNumChildren() == 0)
+	{
+		warningButton.setVisible(false);
+		return;
+	}
+		
+
     jassert(nTree.isValid());
     
     ScriptingApi::Content::Helpers::callRecursive(nTree, [&](ValueTree& v)
@@ -1766,6 +1912,17 @@ void MacroParameterSlider::checkAllParametersForWarning(const Identifier& , cons
 
         return true;
     });
+}
+
+void MacroParameterSlider::updateExternalModulation(const ValueTree& v, const Identifier& id)
+{
+	auto newValue = v[id];
+	auto mi = sticker.update();
+
+	if(v == slider.pTree)
+		slider.setExternalModulationIndex(mi);
+
+	repaint();
 }
 
 void MacroParameterSlider::updateWarningOnConnectionChange(const ValueTree& v, bool wasAdded)
@@ -1828,7 +1985,7 @@ Path MacroParameterSlider::createPath(const String& url) const
     Path p;
     
 	LOAD_EPATH_IF_URL("warning", EditorIcons::warningIcon);
-    LOAD_PATH_IF_URL("drag", ColumnIcons::targetIcon);
+    LOAD_EPATH_IF_URL("drag", ColumnIcons::targetIcon);
 	LOAD_EPATH_IF_URL("delete", SampleMapIcons::deleteSamples);
     return p;
 }
@@ -1865,6 +2022,7 @@ void MacroParameterSlider::mouseUp(const MouseEvent& e)
 
 void MacroParameterSlider::mouseEnter(const MouseEvent& e)
 {
+	sticker.updateIfActive();
 	slider.repaintParentGraph();
 }
 
@@ -1877,6 +2035,8 @@ WeakReference<NodeBase::Parameter> MacroParameterSlider::getParameter()
 {
 	return slider.parameterToControl;
 }
+
+
 
 void MacroParameterSlider::paintOverChildren(Graphics& g)
 {
@@ -1893,6 +2053,9 @@ void MacroParameterSlider::paintOverChildren(Graphics& g)
 			g.drawRoundedRectangle(b, 3, 1.0f);
 		}
 	}
+
+	
+	sticker.draw(g, getLocalBounds().toFloat().reduced(7).removeFromBottom(10));
 }
 
 void MacroParameterSlider::setEditEnabled(bool shouldBeEnabled)
@@ -1997,8 +2160,13 @@ void ParameterKnobLookAndFeel::SliderLabel::updateText()
 
 	if (parent->isMouseOverOrDragging(true))
 	{
+		auto ps = dynamic_cast<ParameterSlider*>(parent.getComponent());
+
+		if(ps->externalModulationIndex != -1)
+			return;
+
 		auto value = parent->getValue();
-		auto p = dynamic_cast<ParameterSlider*>(parent.getComponent())->parameterToControl;
+		auto p = ps->parameterToControl;
 
 		if(p != nullptr && p->getValue() != value)
 		{

@@ -178,7 +178,96 @@ struct gain2db
         return hmath::gain2db(input);
     }
 };
+
+struct dynamic
+{
+	enum class Mode
+	{
+		Ms2Freq,
+		Freq2Ms,
+		Freq2Samples,
+		Ms2Samples,
+		Samples2Ms,
+		Ms2BPM,
+		Pitch2St,
+		St2Pitch,
+		Pitch2Cent,
+		Cent2Pitch,
+		Midi2Freq,
+		Freq2Norm,
+		Gain2dB,
+		dB2Gain,
+		numModes
+	};
+
+	dynamic() :
+		mode(PropertyIds::Mode, getConverterNames()[0])
+	{
+
+	}
+
+	static StringArray getConverterNames()
+	{
+		return { "Ms2Freq", "Freq2Ms", "Freq2Samples", "Ms2Samples", "Samples2Ms", "Ms2BPM",
+				 "Pitch2St", "St2Pitch", "Pitch2Cent", "Cent2Pitch", "Midi2Freq", "Freq2Norm", "Gain2dB", "db2Gain" };
+	}
+
+	void initialise(ObjectWithValueTree* n)
+	{
+		mode.initialise(n);
+		mode.setAdditionalCallback(BIND_MEMBER_FUNCTION_2(dynamic::setMode), true);
+	}
+
+	void prepare(PrepareSpecs ps)
+	{
+		m.prepare(ps);
+		s.prepare(ps);
+		fs.prepare(ps);
+	}
+
+	double getValue(double input)
+	{
+		switch (currentMode)
+		{
+		case Mode::Ms2Freq:    return ms2freq().getValue(input);
+		case Mode::Freq2Ms:    return freq2ms().getValue(input);
+		case Mode::Ms2Samples: return m.getValue(input);
+		case Mode::Samples2Ms: return s.getValue(input);
+		case Mode::Freq2Samples: return fs.getValue(input);
+		case Mode::Ms2BPM:     return ms2bpm().getValue(input);
+		case Mode::Pitch2St:   return pitch2st().getValue(input);
+		case Mode::St2Pitch:   return st2pitch().getValue(input);
+		case Mode::Pitch2Cent: return pitch2cent().getValue(input);
+		case Mode::Cent2Pitch: return cent2pitch().getValue(input);
+		case Mode::Midi2Freq:  return midi2freq().getValue(input);
+		case Mode::Freq2Norm:  return freq2norm().getValue(input);
+		case Mode::Gain2dB:    return gain2db().getValue(input);
+		case Mode::dB2Gain:    return db2gain().getValue(input);
+		default: return input;
+		}
+	}
+
+	void setMode(Identifier id, var newValue)
+	{
+		currentMode = (Mode)getConverterNames().indexOf(newValue.toString());
+	}
+
+	
+
+
+
+	NodePropertyT<String> mode;
+
+	Mode currentMode = Mode::Ms2Freq;
+
+	conversion_logic::ms2samples m;
+	conversion_logic::samples2ms s;
+	conversion_logic::freq2samples fs;
+
+	JUCE_DECLARE_WEAK_REFERENCEABLE(dynamic);
 };
+
+}; // conversion_logic
 
 
 /** Contains all different MIDI processing units. */
@@ -561,7 +650,7 @@ struct switcher
 {
     SN_EMPTY_INITIALISE;
 
-    template <int Index> double getFadeValue(int numElements, double normalisedInput)
+    template <int Index> double getFadeValue(int numElements, double normalisedInput) const
     {
         auto numParameters = (double)(numElements);
         auto indexToActivate = jmin(numElements - 1, (int)(normalisedInput * numParameters));
@@ -574,7 +663,7 @@ struct overlap
 {
     SN_EMPTY_INITIALISE;
 
-    template <int Index> double getFadeValue(int numElements, double normalisedInput)
+    template <int Index> double getFadeValue(int numElements, double normalisedInput) const
     {
         if (isPositiveAndBelow(Index, numElements))
         {
@@ -621,7 +710,7 @@ struct harmonics
 {
     SN_EMPTY_INITIALISE;
 
-    template <int Index> double getFadeValue(int numElements, double normalisedInput)
+    template <int Index> double getFadeValue(int numElements, double normalisedInput) const
     {
         return normalisedInput * (double)(Index + 1);
     }
@@ -631,7 +720,7 @@ struct threshold
 {
     SN_EMPTY_INITIALISE;
     
-    template <int Index> double getFadeValue(int numElements, double normalisedInput)
+    template <int Index> double getFadeValue(int numElements, double normalisedInput) const
     {
         auto tr = (double)(Index) / (double)(numElements);
         
@@ -643,7 +732,7 @@ struct linear
 {
     SN_EMPTY_INITIALISE;
 
-    template <int Index> double getFadeValue(int numElements, double normalisedInput)
+    template <int Index> double getFadeValue(int numElements, double normalisedInput) const
     {
         if (numElements == 1)
             return 1.0 - normalisedInput;
@@ -663,7 +752,7 @@ struct cosine
 {
     SN_EMPTY_INITIALISE;
     
-    template <int Index> double getFadeValue(int numElements, double normalisedInput)
+    template <int Index> double getFadeValue(int numElements, double normalisedInput) const
     {
         auto lf = linear();
         
@@ -679,7 +768,7 @@ struct cosine_half
 {
     SN_EMPTY_INITIALISE;
     
-    template <int Index> double getFadeValue(int numElements, double normalisedInput)
+    template <int Index> double getFadeValue(int numElements, double normalisedInput) const
     {
         auto lf = linear();
         
@@ -695,7 +784,7 @@ struct squared
 {
     SN_EMPTY_INITIALISE;
 
-    template <int Index> double getFadeValue(int numElements, double normalisedInput)
+    template <int Index> double getFadeValue(int numElements, double normalisedInput) const
     {
         auto v = lf.getFadeValue<Index>(numElements, normalisedInput);
         return v * v;
@@ -708,13 +797,92 @@ struct rms
 {
     SN_EMPTY_INITIALISE;
 
-    template <int Index> double getFadeValue(int numElements, double normalisedInput)
+    template <int Index> double getFadeValue(int numElements, double normalisedInput) const
     {
         auto v = lf.getFadeValue<Index>(numElements, normalisedInput);
         return hmath::sqrt(v);
     }
 
     linear lf;
+};
+
+struct dynamic
+{
+	static constexpr int NumMaxFaders = 8;
+
+	enum FaderMode
+	{
+		Switch,
+		Linear,
+		Overlap,
+		Squared,
+		RMS,
+		Cosine,
+		CosineHalf,
+		Harmonics,
+		Threshold
+	};
+
+	dynamic() :
+		mode(PropertyIds::Mode, "Linear"),
+        numParameters(PropertyIds::NumParameters, 0)
+	{}
+
+	void initialise(ObjectWithValueTree* n)
+	{
+		mode.initialise(n);
+		mode.setAdditionalCallback(VT_BIND_PROPERTY_LISTENER(updateMode), true); 
+
+        numParameters.initialise(n);
+
+		if (n->getValueTree().getChildWithName(PropertyIds::SwitchTargets).getNumChildren() == 0)
+		{
+            numParameters.storeValue(2, n->getUndoManager());
+		}
+	}
+
+	void updateMode(const Identifier& id, const var& newValue)
+	{
+		currentMode = (FaderMode)getFaderModes().indexOf(newValue.toString());
+	}
+
+	static StringArray getFaderModes()
+	{
+		return { "Switch", "Linear", "Overlap", "Squared", "RMS", "Cosine", "Cosine Half", "Harmonics", "Threshold" };
+	}
+
+	template <int Index> double getFadeValue(int numElements, double v) const
+	{
+		switch (currentMode)
+		{
+		case FaderMode::Switch:		return sf.getFadeValue<Index>(numElements, v);
+		case FaderMode::Linear:		return lf.getFadeValue<Index>(numElements, v);
+		case FaderMode::Overlap:	return of.getFadeValue<Index>(numElements, v);
+		case FaderMode::Squared:	return qf.getFadeValue<Index>(numElements, v);
+		case FaderMode::RMS:		return rf.getFadeValue<Index>(numElements, v);
+		case FaderMode::Harmonics:  return hf.getFadeValue<Index>(numElements, v);
+		case FaderMode::Threshold:  return tr.getFadeValue<Index>(numElements, v);
+		case FaderMode::Cosine:     return cs.getFadeValue<Index>(numElements, v);
+		case FaderMode::CosineHalf: return ch.getFadeValue<Index>(numElements, v);
+		}
+
+		return 0.0;
+	}
+
+	NodePropertyT<String> mode;
+    NodePropertyT<int> numParameters;
+
+	FaderMode currentMode = FaderMode::Linear;
+
+	harmonics hf;
+	switcher sf;
+	linear lf;
+	rms rf;
+	overlap of;
+	squared qf;
+	threshold tr;
+	cosine cs;
+	cosine_half ch;
 };
 
 

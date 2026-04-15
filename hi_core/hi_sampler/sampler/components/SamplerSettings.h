@@ -39,7 +39,7 @@
 class SamplerSettings  : public Component,
                          public Timer,
                          public LabelListener,
-                         public SliderListener
+                         public Slider::Listener
 {
 public:
     //==============================================================================
@@ -93,8 +93,6 @@ private:
 	ModulatorSampler *sampler;
 	int currentChannel;
 	int currentChannelSize;
-
-	ScopedPointer<ModulatorSampler::Documentation> docs;
 
 	int h;
     //[/UserVariables]

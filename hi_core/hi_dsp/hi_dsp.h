@@ -58,6 +58,8 @@ END_JUCE_MODULE_DECLARATION
 */
 
 
+#include "ProcessorMetadata.h"
+#include "ProcessorMetadataRegistry.h"
 #include "Processor.h"
 #include "ProcessorInterfaces.h"
 
@@ -90,6 +92,7 @@ class ProcessorEditor;
 *	Classes related to the modulation architecture of HISE.
 */
 
+#include "modules/ModulationMatrixTools.h"
 #include "modules/Modulators.h"
 #include "modules/ModulatorChain.h"
 

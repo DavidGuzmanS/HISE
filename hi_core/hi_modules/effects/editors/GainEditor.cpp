@@ -36,46 +36,32 @@ GainEditor::GainEditor (ProcessorEditor *p)
     //[/Constructor_pre]
 
     addAndMakeVisible (widthSlider = new HiSlider ("Gain"));
-    widthSlider->setRange (-100, 36, 1);
     widthSlider->setSliderStyle (Slider::RotaryHorizontalVerticalDrag);
     widthSlider->setTextBoxStyle (Slider::TextBoxRight, false, 80, 20);
     widthSlider->addListener (this);
 
     addAndMakeVisible (gainSlider = new HiSlider ("Gain"));
-    gainSlider->setRange (-100, 36, 1);
     gainSlider->setSliderStyle (Slider::RotaryHorizontalVerticalDrag);
     gainSlider->setTextBoxStyle (Slider::TextBoxRight, false, 80, 20);
     gainSlider->addListener (this);
 
     addAndMakeVisible (delaySlider = new HiSlider ("Gain"));
-    delaySlider->setRange (-100, 36, 1);
     delaySlider->setSliderStyle (Slider::RotaryHorizontalVerticalDrag);
     delaySlider->setTextBoxStyle (Slider::TextBoxRight, false, 80, 20);
     delaySlider->addListener (this);
 
     addAndMakeVisible (balanceSlider = new HiSlider ("Balance"));
-    balanceSlider->setRange (-100, 36, 1);
     balanceSlider->setSliderStyle (Slider::RotaryHorizontalVerticalDrag);
     balanceSlider->setTextBoxStyle (Slider::TextBoxRight, false, 80, 20);
     balanceSlider->addListener (this);
 
 
     //[UserPreSize]
-	gainSlider->setup(getProcessor(), GainEffect::Gain, "Gain");
-	gainSlider->setMode(HiSlider::Decibel, -100.0, 36.0, 0.0);
-    gainSlider->setIsUsingModulatedRing(true);
-
-    delaySlider->setup(getProcessor(), GainEffect::Delay, "Delay");
-    delaySlider->setMode(HiSlider::Time, 0, 500, 100);
-    delaySlider->setIsUsingModulatedRing(true);
-
-    widthSlider->setup(getProcessor(), GainEffect::Width, "Width");
-	widthSlider->setMode(HiSlider::Discrete, 0.0, 200.0, 100.0);
-    widthSlider->setIsUsingModulatedRing(true);
-
-	balanceSlider->setup(getProcessor(), GainEffect::Balance, "Balance");
-	balanceSlider->setMode(HiSlider::Pan);
-	balanceSlider->setIsUsingModulatedRing(true);
+	auto md = getProcessor()->getMetadata();
+	md.setup(*gainSlider, getProcessor(), GainEffect::Gain);
+	md.setup(*delaySlider, getProcessor(), GainEffect::Delay);
+	md.setup(*widthSlider, getProcessor(), GainEffect::Width);
+	md.setup(*balanceSlider, getProcessor(), GainEffect::Balance);
 
     START_TIMER();
 

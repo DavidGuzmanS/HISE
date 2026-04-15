@@ -88,7 +88,8 @@ class BackendRootWindow : public TopLevelWindowWithOptionalOpenGL,
 						  public ComponentWithHelp::GlobalHandler,
                           public ProjectHandler::Listener,
 						  public GlobalScriptCompileListener,
-						  public MainController::LockFreeDispatcher::PresetLoadListener
+						  public MainController::LockFreeDispatcher::PresetLoadListener,
+						  public RestServer::Listener
 {
 public:
 
@@ -125,6 +126,17 @@ public:
 	void deleteThisSnippetInstance(bool sync);
 
 	void toggleSnippetBrowser();
+	
+	void serverStarted(int port) override 
+	{ 
+		if(javascriptTokens != nullptr)
+			javascriptTokens->setEnabled(false, false); 
+	}
+	void serverStopped() override
+	{ 
+		if(javascriptTokens != nullptr)
+			javascriptTokens->setEnabled(true, false); 
+	}
 
 	ScopedPointer<multipage::library::SnippetBrowser> snippetBrowser;
 
@@ -311,6 +323,8 @@ public:
 
 	SnippetBrowserHelpers::Category currentCategory = SnippetBrowserHelpers::Category::Undefined;
 
+    BackendProcessorEditor* getEditor() { return mainEditor.getComponent(); }
+    
 private:
 
 	mcl::TokenCollection::Ptr javascriptTokens;
@@ -417,13 +431,6 @@ struct BackendPanelHelpers
 	};
 
 	static bool isMainWorkspaceActive(FloatingTile* root);
-
-#if JUCE_LINUX
-    // This might keep the fonts alive and increase the text
-    // rendering performance...
-    hise::LinuxFontHandler::Instance fontHandler;
-#endif
-
 };
 
 } // namespace hise

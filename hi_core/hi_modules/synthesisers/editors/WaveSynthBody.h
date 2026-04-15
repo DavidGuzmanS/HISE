@@ -35,7 +35,7 @@ namespace hise { using namespace juce;
                                                                     //[/Comments]
 */
 class WaveSynthBody  : public ProcessorEditorBody,
-                       public SliderListener,
+                       public Slider::Listener,
                        public ComboBoxListener,
                        public LabelListener,
                        public ButtonListener
@@ -79,7 +79,7 @@ public:
 
 		mixSlider->updateValue();
 
-		mixSlider->setEnabled(getProcessor()->getChildProcessor(WaveSynth::MixModulation)->getNumChildProcessors() == 0);
+		//mixSlider->setEnabled(getProcessor()->getChildProcessor(WaveSynth::MixModulation)->getNumChildProcessors() == 0);
 
 		if (!enableSecond)
 		{

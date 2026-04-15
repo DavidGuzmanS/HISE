@@ -84,6 +84,14 @@
 #include "scripting/engine/JavascriptEngineAdditionalMethods.cpp"
 #include "scripting/engine/JavascriptEngineCyclicReferenceChecks.cpp"
 
+#if HISE_INCLUDE_BX_LICENSER
+#include "scripting/api/bx/bx_wrapper.cpp"
+#endif
+
+#if HISE_INCLUDE_NKS_SDK
+#include "scripting/api/nks/nks_wrapper.cpp"
+#endif
+
 #include "scripting/api/ScriptingApiObjects.cpp"
 #include "scripting/api/ScriptModulationMatrix.cpp"
 #include "scripting/api/ScriptBroadcaster.cpp"
@@ -99,6 +107,11 @@
 
 #include "scripting/api/ScriptingApiWrappers.cpp"
 #include "scripting/api/ScriptingApiContent.cpp"
+
+#include "scripting/api/DynamicComponentContainerIds.cpp"
+#include "scripting/api/DynamicComponentContainer.cpp"
+#include "scripting/api/DynamicComponentContainerTypes.cpp"
+
 
 #include "scripting/api/XmlApi.cpp"
 #include "scripting/engine/DebugHelpers.cpp"

@@ -324,7 +324,7 @@ template <typename DataType, CloneProcessType ProcessType>
 
 	SN_PARAMETER_MEMBER_FUNCTION;
 
-	void initialise(NodeBase* n)
+	void initialise(ObjectWithValueTree* n)
 	{
         if constexpr (prototypes::check::initialise<typename DataType::ObjectType>::value)
         {
@@ -403,7 +403,7 @@ template <typename DataType, CloneProcessType ProcessType>
                 case CloneProcessType::Copy:
                 {
                     FrameDataType original = frameData;
-                    frameData = {};
+                    frameData = 0.0f;
                     
                     for(auto& obj: ActiveIterator(cloneData))
                     {

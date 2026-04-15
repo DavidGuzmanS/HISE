@@ -123,18 +123,335 @@ namespace hise { using namespace juce;
 		};
 	}
 
-	BackendProcessor::BackendProcessor(AudioDeviceManager *deviceManager_/*=nullptr*/, AudioProcessorPlayer *callback_/*=nullptr*/) :
-MainController(),
-AudioProcessorDriver(deviceManager_, callback_),
-scriptUnlocker(this)
+bool PluginParameterRamp::processBlock(AudioSampleBuffer& buffer, MidiBuffer& midiMessages,
+	const ProcessCallback& f)
 {
-	//printData();
-    
+	PluginParameterSimulatorInfo thisInfo, thisGesture;
+
+	{
+		SimpleReadWriteLock::ScopedReadLock sl(lock);
+		thisInfo = currentInfo;
+		thisGesture = gestureInfo;
+	}
+
+	auto threadMatches = thisInfo.sourceThread == PluginParameterSimulatorInfo::SourceThread::Audio;
+
+	if(gestureInfo && gestureAtNextCallback && gestureInfo.sourceThread == PluginParameterSimulatorInfo::SourceThread::Audio)
+	{
+		thisGesture.performGesture();
+		gestureAtNextCallback = false;
+
+		if(thisGesture.eventType == PluginParameterSimulatorInfo::EventType::EndGesture)
+		{
+			currentInfo = {};
+			return false;
+		}
+	}
+
+	if(!thisInfo || !threadMatches)
+		return false;
+
+	
+
+	if(!thisInfo.useRamp)
+	{
+		thisInfo.performChange();
+
+		SimpleReadWriteLock::ScopedWriteLock sl(lock);
+		currentInfo = {};
+		return false;
+	}
+
+	auto numSamples = thisInfo.bufferSize != -1 ? thisInfo.bufferSize : buffer.getNumSamples();
+	auto rampTime =  (double)numSamples / getMainController()->getMainSynthChain()->getSampleRate() * 1000.0;
+
+	if(thisInfo.bufferSize == -1)
+	{
+		bump(thisInfo, rampTime);
+		currentInfo.currentValue = thisInfo.currentValue;
+		return false;
+	}
+	else
+	{
+		int numTodo = buffer.getNumSamples();
+		int pos = 0;
+
+		while (numTodo > 0)
+		{
+			bump(thisInfo, rampTime);
+			float* channels[HISE_NUM_PLUGIN_CHANNELS];
+			f(channels, buffer, midiMessages, pos, thisInfo.bufferSize);
+
+			numTodo -= thisInfo.bufferSize;
+			pos += thisInfo.bufferSize;
+		}
+	}
+
+	currentInfo.currentValue = thisInfo.currentValue;
+	return true;
+}
+
+void PluginParameterRamp::setCurrentInfo(const PluginParameterSimulatorInfo& newInfo)
+{
+	auto rampWasActive = gestureInfo.useRamp;
+	auto prevValue = currentInfo.currentValue;
+
+	auto gestureWasActive = gestureInfo.isActiveGesture();
+
+	{
+		SimpleReadWriteLock::ScopedWriteLock sl(lock);
+
+		if(newInfo.isGestureEvent())
+			gestureInfo = newInfo;
+		else
+			currentInfo = newInfo;
+	}
+
+	if(!newInfo)
+		return;
+
+	if(rampWasActive)
+		currentInfo.currentValue = prevValue;
+
+	auto gestureShouldBeActive = gestureInfo.isActiveGesture();
+
+	if(gestureWasActive != gestureShouldBeActive)
+	{
+		if(gestureInfo.sourceThread != PluginParameterSimulatorInfo::SourceThread::UI)
+		{
+			gestureAtNextCallback = true;
+		}
+		else
+		{
+			gestureInfo.performGesture();
+		}
+	}
+
+	auto useTimer = gestureInfo.useRamp && newInfo.sourceThread == PluginParameterSimulatorInfo::SourceThread::UI;
+	auto useThread = (gestureInfo.useRamp || gestureShouldBeActive || gestureWasActive) && newInfo.sourceThread == PluginParameterSimulatorInfo::SourceThread::Custom;
+
+	if(useTimer)
+		start();
+	else
+		stop();
+
+	if(useThread)
+		ThreadStarters::startHigh(this);
+	else
+		stopThread(1000);
+
+	if(currentInfo.sourceThread == PluginParameterSimulatorInfo::SourceThread::UI && !currentInfo.useRamp)
+	{
+		currentInfo.performChange();
+		currentInfo = {};
+	}
+}
+
+void PluginParameterRamp::bump(PluginParameterSimulatorInfo& info, double milliSeconds)
+{
+	auto delta = (float)milliSeconds * 0.001f;
+
+	if(!sign)
+		delta *= -1.0f;
+
+	auto nv = info.currentValue + delta;
+
+	if(nv >= 1.0f)
+		sign = false;
+	if(nv <= 0.0f)
+		sign = true;
+
+	
+
+	info.currentValue = jlimit(0.0f, 1.0f, nv);
+	info.performChange();
+}
+
+int BackendProcessor::commandLineServerPort = 0;
+
+RestServer::Response BackendProcessor::onAsyncRequest(RestServer::AsyncRequest::Ptr req)
+{
+	debugToConsole(getMainSynthChain(), "\tincoming HTTP request: " + req->getRequest().url.toString(true));
+
+	// Attach console handler to request (lifetime tied to request, not stack frame)
+	req->setConsoleCapture(std::make_unique<RestHelpers::ScopedConsoleHandler>(this, req));
+
+	auto subURL = req->getRequest().url.getSubPath(false);
+	auto route = RestHelpers::findRoute(subURL);
+
+	switch (route)
+	{
+		case RestHelpers::ApiRoute::ListMethods:
+			return RestHelpers::handleListMethods(this, req);
+			
+		case RestHelpers::ApiRoute::Status:
+			return RestHelpers::handleStatus(this, req);
+			
+		case RestHelpers::ApiRoute::GetScript:
+			return RestHelpers::handleGetScript(this, req);
+			
+		case RestHelpers::ApiRoute::SetScript:
+			return RestHelpers::handleSetScript(this, req);
+			
+		case RestHelpers::ApiRoute::Recompile:
+			return RestHelpers::handleRecompile(this, req);
+			
+		case RestHelpers::ApiRoute::ListComponents:
+			return RestHelpers::handleListComponents(this, req);
+
+		case RestHelpers::ApiRoute::EvaluateREPL:
+			return RestHelpers::handleEvaluateREPL(this, req);
+			
+		case RestHelpers::ApiRoute::GetComponentProperties:
+			return RestHelpers::handleGetComponentProperties(this, req);
+			
+		case RestHelpers::ApiRoute::GetComponentValue:
+			return RestHelpers::handleGetComponentValue(this, req);
+			
+		case RestHelpers::ApiRoute::SetComponentValue:
+			return RestHelpers::handleSetComponentValue(this, req);
+			
+		case RestHelpers::ApiRoute::SetComponentProperties:
+			return RestHelpers::handleSetComponentProperties(this, req);
+			
+		case RestHelpers::ApiRoute::Screenshot:
+			return RestHelpers::handleScreenshot(this, req);
+			
+		case RestHelpers::ApiRoute::GetSelectedComponents:
+			return RestHelpers::handleGetSelectedComponents(this, req);
+			
+		case RestHelpers::ApiRoute::SimulateInteractions:
+			return RestHelpers::handleSimulateInteractions(this, req);
+			
+		case RestHelpers::ApiRoute::DiagnoseScript:
+			return RestHelpers::handleDiagnoseScript(this, req);
+			
+		case RestHelpers::ApiRoute::GetIncludedFiles:
+			return RestHelpers::handleGetIncludedFiles(this, req);
+			
+		case RestHelpers::ApiRoute::StartProfiling:
+			return RestHelpers::handleStartProfiling(this, req);
+			
+		case RestHelpers::ApiRoute::ParseCSS:
+			return RestHelpers::handleParseCSS(this, req);
+			
+	case RestHelpers::ApiRoute::Shutdown:
+		return RestHelpers::handleShutdown(this, req);
+	
+	case RestHelpers::ApiRoute::BuilderTree:
+		return RestHelpers::handleBuilderTree(this, req);
+	
+	case RestHelpers::ApiRoute::BuilderApply:
+		return RestHelpers::handleBuilderApply(this, req);
+
+	case RestHelpers::ApiRoute::BuilderReset:
+		return RestHelpers::handleBuilderReset(this, req);
+
+	case RestHelpers::ApiRoute::UndoPushGroup:
+		return RestHelpers::handleUndoPushGroup(this, req);
+	
+	case RestHelpers::ApiRoute::UndoPopGroup:
+		return RestHelpers::handleUndoPopGroup(this, req);
+	
+	case RestHelpers::ApiRoute::UndoBack:
+		return RestHelpers::handleUndoBack(this, req);
+	
+	case RestHelpers::ApiRoute::UndoForward:
+		return RestHelpers::handleUndoForward(this, req);
+	
+	case RestHelpers::ApiRoute::UndoDiff:
+		return RestHelpers::handleUndoDiff(this, req);
+	
+	case RestHelpers::ApiRoute::UndoHistory:
+		return RestHelpers::handleUndoHistory(this, req);
+	
+	case RestHelpers::ApiRoute::UndoClear:
+		return RestHelpers::handleUndoClear(this, req);
+
+	case RestHelpers::ApiRoute::WizardInitialise:
+		return RestHelpers::handleWizardInitialise(this, req);
+
+	case RestHelpers::ApiRoute::WizardExecute:
+		return RestHelpers::handleWizardExecute(this, req);
+
+	case RestHelpers::ApiRoute::WizardStatus:
+		return RestHelpers::handleWizardStatus(this, req);
+
+	case RestHelpers::ApiRoute::UITree:
+		return RestHelpers::handleUITree(this, req);
+
+	case RestHelpers::ApiRoute::UIApply:
+		return RestHelpers::handleUIApply(this, req);
+
+	default:
+		return req->fail(404, "Unknown API endpoint: " + subURL);
+	}
+}
+
+void BackendProcessor::serverStarted(int port)
+{
+	debugToConsole(getMainSynthChain(), "REST API Server started on port " + String(port));
+	
+	// Create interaction tester when server starts
+	interactionTester = std::make_unique<InteractionTester>(this);
+}
+
+void BackendProcessor::serverStopped()
+{
+	debugToConsole(getMainSynthChain(), "REST API Server stopped");
+	
+	// Destroy interaction tester when server stops
+	interactionTester = nullptr;
+}
+
+void BackendProcessor::requestReceived(const String& method, const String& path)
+{
+	// Request details are already logged in onAsyncRequest via debugToConsole
+	ignoreUnused(method, path);
+}
+
+void BackendProcessor::serverError(const String& message)
+{
+	debugToConsole(getMainSynthChain(), "REST API Server error: " + message);
+}
+
+
+BackendProcessor::BackendProcessor(AudioDeviceManager *deviceManager_/*=nullptr*/, AudioProcessorPlayer *callback_/*=nullptr*/) :
+  MainController(),
+  AudioProcessorDriver(deviceManager_, callback_),
+  scriptUnlocker(this),
+  autosaver(this),
+  replServer(*this),
+  pluginParameterRamp(this)
+{
+	// Register all REST API routes from the centralized metadata
+	const auto& routes = RestHelpers::getRouteMetadata();
+	for (const auto& route : routes)
+	{
+		auto routeUrl = restServer.getBaseURL().getChildURL(route.path);
+		
+		// Add query parameters with their default values
+		for (const auto& param : route.queryParameters)
+			routeUrl = routeUrl.withParameter(param.name.toString(), param.defaultValue);
+		
+		restServer.addAsyncRoute(route.method, routeUrl,
+			BIND_MEMBER_FUNCTION_1(BackendProcessor::onAsyncRequest));
+	}
+
+	restServer.addListener(this);
+
 	ExtendedApiDocumentation::init();
 
     synthChain = new ModulatorSynthChain(this, "Master Chain", NUM_POLYPHONIC_VOICES);
     
 	synthChain->addProcessorsWhenEmpty();
+
+#if HISE_INCLUDE_PROFILING_TOOLKIT
+	getDebugSession().syncRecordingBroadcaster.addListener(*synthChain, [](ModulatorSynthChain& c, bool isEnabled)
+	{
+		c.setEnableProfiling(isEnabled, &c.getMainController()->getDebugSession(), 0);
+	}, false);
+#endif
 
 	getSampleManager().getModulatorSamplerSoundPool()->setDebugProcessor(synthChain);
 	getMacroManager().setMacroChain(synthChain);
@@ -147,7 +464,24 @@ scriptUnlocker(this)
 		restoreGlobalSettings(this);
 	}
 
-	GET_PROJECT_HANDLER(synthChain).restoreWorkingProjects();
+	if (CompileExporter::isUsingWorkingDirectoryAsProjectFolder())
+	{
+		try
+		{
+			GET_PROJECT_HANDLER(synthChain).setWorkingProject(CompileExporter::getCurrentWorkDirectory());
+		}
+		catch (Result& r)
+		{
+			GET_PROJECT_HANDLER(synthChain).restoreWorkingProjects();
+			jassertfalse;
+		}
+		
+	}
+	else
+	{
+		GET_PROJECT_HANDLER(synthChain).restoreWorkingProjects();
+	}
+	
 
 	initData(this);
 
@@ -163,9 +497,20 @@ scriptUnlocker(this)
 	//getExpansionHandler().createAvailableExpansions();
 
 
-	if (!inUnitTestMode())
+if (!inUnitTestMode())
 	{
-		getAutoSaver().updateAutosaving();
+		getAutoSaver().initialise();
+
+		if (BackendProcessor::isUsingCommandLineServerMode())
+		{
+			restServer.start(commandLineServerPort);
+		}
+		else if (getSettingsObject().getSetting(HiseSettings::Scripting::AutoStartRestServer).toString() == "Yes")
+		{
+			// Auto-start REST API server if enabled in settings
+			int port = (int)getSettingsObject().getSetting(HiseSettings::Scripting::RestApiPort);
+			restServer.start(port);
+		}
 	}
 	
 	clearPreset(dontSendNotification);
@@ -230,12 +575,33 @@ scriptUnlocker(this)
     }
 
 #endif
-    
+
+	AudioProcessor::addListener(&getUserPresetHandler());
+
 }
 
 
 BackendProcessor::~BackendProcessor()
 {
+	restServer.removeListener(this);
+	restServer.stop();
+
+	interactionTester = nullptr;
+
+#if IS_STANDALONE_APP
+	for(auto p: getParameters())
+    {
+        if(auto typed = dynamic_cast<HisePluginParameterBase*>(p))
+            typed->cleanup();
+    }
+
+	setParameterTree({});
+#endif
+
+	AudioProcessor::removeListener(&getUserPresetHandler());
+
+	getRootDispatcher().setState(dispatch::HashedPath(dispatch::CharPtr::Type::Wildcard), dispatch::State::Shutdown);
+
 	docWindow = nullptr;
 	docProcessor = nullptr;
 	getDatabase().clear();
@@ -259,15 +625,31 @@ BackendProcessor::~BackendProcessor()
 
 	synthChain = nullptr;
 
+	dllManager->unloadDll();
+
 	handleEditorData(true);
 }
 
+InteractionTester* BackendProcessor::getInteractionTester()
+{
+	return interactionTester.get();
+}
 
+void BackendProcessor::showInteractionTestWindow()
+{
+	// Create tester if it doesn't exist (independent of REST server)
+	if (interactionTester == nullptr)
+		interactionTester = std::make_unique<InteractionTester>(this);
+	
+	interactionTester->ensureWindowOpen();
+}
 
 void BackendProcessor::projectChanged(const File& /*newRootDirectory*/)
 {
 	getExpansionHandler().setCurrentExpansion("");
-	
+
+	clearExtraDefinitionCache();
+
 	auto tmp = getCurrentSampleMapPool();
 	auto tmp2 = getCurrentMidiFilePool();
 
@@ -301,19 +683,25 @@ void BackendProcessor::refreshExpansionType()
 	}
 	else if (expType == "Full")
 	{
-		auto key = dynamic_cast<GlobalSettingManager*>(this)->getSettingsObject().getSetting(HiseSettings::Project::EncryptionKey).toString();
-
-		if (key.isNotEmpty())
+		if(HISE_GET_PREPROCESSOR(this, HISE_USE_UNLOCKER_FOR_EXPANSIONS))
 		{
-			getExpansionHandler().setEncryptionKey(key);
 			getExpansionHandler().setExpansionType<FullInstrumentExpansion>();
 		}
-			
 		else
 		{
-			PresetHandler::showMessageWindow("Can't initialise full expansions", "You need to specify the encryption key in the Project settings in order to use **Full** expansions", PresetHandler::IconType::Error);
+			auto key = dynamic_cast<GlobalSettingManager*>(this)->getSettingsObject().getSetting(HiseSettings::Project::EncryptionKey).toString();
 
-			getExpansionHandler().setExpansionType<ExpansionHandler::Disabled>();
+			if (key.isNotEmpty())
+			{
+				getExpansionHandler().setEncryptionKey(key);
+				getExpansionHandler().setExpansionType<FullInstrumentExpansion>();
+			}
+
+			else
+			{
+				PresetHandler::showMessageWindow("Can't initialise full expansions", "You need to specify the encryption key in the Project settings in order to use **Full** expansions", PresetHandler::IconType::Error);
+				getExpansionHandler().setExpansionType<ExpansionHandler::Disabled>();
+			}
 		}
 	}
 	else if (expType == "Encrypted")
@@ -352,19 +740,62 @@ void BackendProcessor::handleEditorData(bool save)
 
 void BackendProcessor::processBlock(AudioSampleBuffer& buffer, MidiBuffer& midiMessages)
 {
-    TRACE_DSP();
+    
+
+#if HISE_INCLUDE_PROFILING_TOOLKIT
+	if(getDebugSession().isMidiTriggerEnabled())
+	{
+		if(!midiMessages.isEmpty())
+		{
+			MidiBuffer::Iterator iter(midiMessages);
+
+			MidiMessage m;
+			int pos;
+
+			auto before = numPressedKeys;
+
+			while(iter.getNextEvent(m, pos))
+			{
+				if(m.isNoteOn())
+					++numPressedKeys;
+
+				if(m.isNoteOff())
+					numPressedKeys = jmax(0, numPressedKeys - 1);
+			}
+
+			if(before == 0 && numPressedKeys > 0)
+			{
+				// I know what I'm doing here...
+				MainController::ScopedBadBabysitter sbs(this);
+
+				// Cause the recording to start synchronously, let's live with the CPU peak
+				MessageManagerLock mm;
+				
+
+				getDebugSession().startRecording(-1.0, &getDebugSession());
+			}
+			else if (before != 0 && numPressedKeys == 0)
+			{
+				getDebugSession().stopRecording();
+			}
+		}
+	}
+#endif
+
+	TRACE_DSP();
 
 	if(externalClockSim.bypassed)
 	{
 		processBlockBypassed(buffer, midiMessages);
 		return;
 	}
-
-	
 	
 #if !HISE_BACKEND_AS_FX
 	buffer.clear();
 #endif
+
+
+	handleLatencyCheck(buffer);
 
     auto processChunk = [this](float** channels, AudioSampleBuffer& original, MidiBuffer& mb, int offset, int numThisTime)
     {
@@ -452,7 +883,13 @@ void BackendProcessor::processBlock(AudioSampleBuffer& buffer, MidiBuffer& midiM
 
 		ScopedAnalyser sa(this, nullptr, buffer, buffer.getNumSamples());
 
+#if IS_STANDALONE_APP
+		if(!pluginParameterRamp.processBlock(buffer, midiMessages, processChunk))
+			getDelayedRenderer().processWrapped(buffer, midiMessages);
+#else
 		getDelayedRenderer().processWrapped(buffer, midiMessages);
+#endif
+			
 		
 #if IS_STANDALONE_APP
 		externalClockSim.addPostTimelineData(buffer, midiMessages);
@@ -462,6 +899,8 @@ void BackendProcessor::processBlock(AudioSampleBuffer& buffer, MidiBuffer& midiM
 #if IS_STANDALONE_APP
     externalClockSim.process(buffer.getNumSamples());
 #endif
+
+	handlePostLatencyCheck(buffer);
 };
 
 void BackendProcessor::processBlockBypassed(AudioSampleBuffer& buffer, MidiBuffer& midiMessages)
@@ -485,24 +924,122 @@ void BackendProcessor::prepareToPlay(double newSampleRate, int samplesPerBlock)
 	handleLatencyInPrepareToPlay(newSampleRate);
 
 	getDelayedRenderer().prepareToPlayWrapped(newSampleRate, samplesPerBlock);
+}
+
+void BackendProcessor::releaseResources()
+{
+		
 };
+
+void BackendProcessor::checkLatency()
+{
+	getKillStateHandler().killVoicesAndCall(getMainSynthChain(), [](Processor* p)
+	{
+		auto bp = dynamic_cast<BackendProcessor*>(p->getMainController());
+
+		bp->latencyCheckState = LatencyCheckState::WaitingForKillCounter;
+		bp->killCounter = (int)bp->getMainSynthChain()->getSampleRate() * 0.5;
+
+		return SafeFunctionCall::OK;
+	}, KillStateHandler::TargetThread::SampleLoadingThread);
+}
 
 void BackendProcessor::getStateInformation(MemoryBlock &destData)
 {
-	MemoryOutputStream output(destData, false);
-
-	ValueTree v = synthChain->exportAsValueTree();
-
-	v.setProperty("ProjectRootFolder", GET_PROJECT_HANDLER(synthChain).getWorkDirectory().getFullPathName(), nullptr);
-
-	if (auto root = dynamic_cast<BackendRootWindow*>(getActiveEditor()))
+	if(forceSaveAsPluginState)
 	{
-		root->saveInterfaceData();
+		MainController::savePluginState(destData, 0);
+	}
+	else
+	{
+		MemoryOutputStream output(destData, false);
+
+		ValueTree v = synthChain->exportAsValueTree();
+
+		v.setProperty("ProjectRootFolder", GET_PROJECT_HANDLER(synthChain).getWorkDirectory().getFullPathName(), nullptr);
+
+		if (auto root = dynamic_cast<BackendRootWindow*>(getActiveEditor()))
+			root->saveInterfaceData();
+
+		v.setProperty("InterfaceData", JSON::toString(editorInformation, true, DOUBLE_TO_STRING_DIGITS), nullptr);
+		v.writeToStream(output);
+	}
+}
+
+void BackendProcessor::handleLatencyCheck(AudioSampleBuffer& buffer)
+{
+	if(latencyCheckState == LatencyCheckState::WaitingForKillCounter)
+	{
+		killCounter -= buffer.getNumSamples();
+
+		if(killCounter < 0)
+		{
+			killCounter = 0;
+			latencyCheckState = LatencyCheckState::WaitingForProcessBlock;
+		}
 	}
 
-	v.setProperty("InterfaceData", JSON::toString(editorInformation, true, DOUBLE_TO_STRING_DIGITS), nullptr);
+	if(latencyCheckState == LatencyCheckState::WaitingForProcessBlock)
+	{
+		reportedLatency = 0.0;
+		buffer.setSample(0, 0, 1.0f);
+		buffer.setSample(0, 1, 1.0f);
+	}
+}
 
-	v.writeToStream(output);
+void BackendProcessor::handlePostLatencyCheck(AudioSampleBuffer& buffer)
+{
+	if(latencyCheckState == LatencyCheckState::WaitingForProcessBlock)
+	{
+		latencyCheckState = LatencyCheckState::WaitingForImpulse;
+		reportedLatency = 0.0;
+	}
+
+	if(latencyCheckState == LatencyCheckState::WaitingForImpulse)
+	{
+		if(buffer.getMagnitude(0, 0, buffer.getNumSamples()) > 0.01f)
+		{
+			float maxPeak = 0.0f;
+			float indexOfPeak = 0.0f;
+
+			for(int i = 0; i < buffer.getNumSamples(); i++)
+			{
+				auto value = buffer.getSample(0, i);
+				if(value > maxPeak)
+				{
+					maxPeak = value;
+					indexOfPeak = i;
+				}
+			}
+
+			reportedLatency += (double)indexOfPeak;
+
+			latencyCheckState = LatencyCheckState::Done;
+
+			MessageManager::callAsync([this]()
+			{
+				PresetHandler::showMessageWindow("Latency detected", "The latency of the processing chain is:  \n>`" + String((int)reportedLatency) + "` samples.", PresetHandler::IconType::Info);
+				latencyCheckState = LatencyCheckState::Idle;
+				reportedLatency = 0;
+			});
+		}
+		else
+		{
+			reportedLatency += buffer.getNumSamples();
+		}
+
+		buffer.clear();
+	}
+}
+
+void BackendProcessor::logMessage(const String& message, bool isCritical)
+{
+	if (isCritical)
+	{
+		debugError(getMainSynthChain(), message);
+	}
+	else
+		debugToConsole(getMainSynthChain(), message);
 }
 
 void BackendProcessor::setStateInformation(const void *data, int sizeInBytes)
@@ -562,6 +1099,8 @@ AudioProcessorEditor* BackendProcessor::createEditor()
 
 
 
+
+
 juce::File BackendProcessor::getDatabaseRootDirectory() const
 {
 	if (databaseRoot.isDirectory())
@@ -598,7 +1137,7 @@ juce::Component* BackendProcessor::getRootComponent()
 	return dynamic_cast<Component*>(getDocWindow());
 }
 
-hise::JavascriptProcessor* BackendProcessor::createInterface(int width, int height)
+hise::JavascriptProcessor* BackendProcessor::createInterface(int width, int height, bool compile)
 {
 	auto midiChain = dynamic_cast<MidiProcessorChain*>(getMainSynthChain()->getChildProcessor(ModulatorSynthChain::MidiProcessor));
 	auto s = getMainSynthChain()->getMainController()->createProcessor(midiChain->getFactoryType(), "ScriptProcessor", "Interface");
@@ -606,8 +1145,13 @@ hise::JavascriptProcessor* BackendProcessor::createInterface(int width, int heig
 
 	String code = "Content.makeFrontInterface(" + String(width) + ", " + String(width) + ");";
 
-	jsp->getSnippet(0)->replaceContentAsync(code);
-	jsp->compileScript();
+	jsp->getSnippet(0)->replaceContentAsync(code, false);
+
+	if (compile)
+	{
+		jsp->compileScript();
+	}
+	
 
 	midiChain->getHandler()->add(s, nullptr);
 
@@ -638,7 +1182,7 @@ void BackendProcessor::pushToAnalyserBuffer(AnalyserInfo::Ptr info, bool post, c
 		{
 			if(!post)
 			{
-				for(int i = 0; i < 127; i++)
+				for(int i = 0; i < 128; i++)
 				{
 					if(getKeyboardState().isNoteOn(1, i))
 					{

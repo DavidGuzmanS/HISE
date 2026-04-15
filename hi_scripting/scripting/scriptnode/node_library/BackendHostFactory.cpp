@@ -106,6 +106,38 @@ int BackendDllManager::getDllHash(int index)
 	return 0;
 }
 
+std::pair<Array<Identifier>, int> BackendDllManager::initialiseThirdPartyProperties(MainController* mc)
+{
+	std::pair<Array<Identifier>, int> rv;
+
+	rv.second = 0;
+
+	auto propFile = BackendDllManager::getSubFolder(mc, BackendDllManager::FolderSubType::ThirdParty).getChildFile("node_properties.json");
+
+	NamespacedIdentifier rootId("project");
+
+	auto thirdPartyList = JSON::parse(propFile.loadFileAsString());
+
+	if(auto obj = thirdPartyList.getDynamicObject())
+	{
+		for(const auto& nv: obj->getProperties())
+		{
+			rv.second++;
+			rv.first.add(nv.name);
+
+			if(nv.value.isArray())
+			{
+				for(const auto& v: *nv.value.getArray())
+				{
+					cppgen::CustomNodeProperties::addNodeIdManually(nv.name, v.toString());
+				}
+			}
+		}
+	}
+
+	return rv;
+}
+
 int BackendDllManager::getHashForNetworkFile(MainController* mc, const String& id)
 {
 	auto fileList = getNetworkFiles(mc, false);
@@ -134,11 +166,6 @@ int BackendDllManager::getHashForNetworkFile(MainController* mc, const String& i
 
 bool BackendDllManager::unloadDll()
 {
-	if (auto fh = ProcessorHelpers::getFirstProcessorWithType<scriptnode::DspNetwork::Holder>(getMainController()->getMainSynthChain()))
-	{
-		fh->setProjectDll(nullptr);
-	}
-
 	if (projectDll != nullptr)
 	{
 		projectDll = nullptr;
@@ -150,6 +177,8 @@ bool BackendDllManager::unloadDll()
 
 bool BackendDllManager::loadDll(bool forceUnload)
 {
+	scriptnode::dll::ProjectDll::Ptr oldDll = projectDll;
+
 	if (forceUnload)
 		unloadDll();
 
@@ -168,6 +197,13 @@ bool BackendDllManager::loadDll(bool forceUnload)
 		if (dllFile.existsAsFile())
 		{
 			projectDll = new scriptnode::dll::ProjectDll(dllFile);
+
+			if(projectDll != nullptr && (oldDll == nullptr || oldDll->getDllFile() != projectDll->getDllFile()))
+			{
+				reloadBroadcaster.sendMessage(sendNotificationSync, { oldDll.get(), projectDll.get() });
+			}
+
+			oldDll = nullptr;
 
 			return *projectDll;
 		}

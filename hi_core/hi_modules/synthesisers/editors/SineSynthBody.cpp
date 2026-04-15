@@ -35,7 +35,6 @@ SineSynthBody::SineSynthBody (ProcessorEditor *p)
     //[/Constructor_pre]
 
     addAndMakeVisible (octaveSlider = new HiSlider ("Octave"));
-    octaveSlider->setRange (-5, 5, 1);
     octaveSlider->setSliderStyle (Slider::RotaryHorizontalVerticalDrag);
     octaveSlider->setTextBoxStyle (Slider::TextBoxRight, false, 40, 20);
     octaveSlider->addListener (this);
@@ -84,7 +83,6 @@ SineSynthBody::SineSynthBody (ProcessorEditor *p)
 
     addAndMakeVisible (semiToneSlider = new HiSlider ("Semitones"));
     semiToneSlider->setTooltip (TRANS("The semitone detune"));
-    semiToneSlider->setRange (-12, 12, 1);
     semiToneSlider->setSliderStyle (Slider::RotaryHorizontalVerticalDrag);
     semiToneSlider->setTextBoxStyle (Slider::TextBoxRight, false, 40, 20);
     semiToneSlider->addListener (this);
@@ -96,7 +94,6 @@ SineSynthBody::SineSynthBody (ProcessorEditor *p)
 
     addAndMakeVisible (saturationSlider = new HiSlider ("Semitones"));
     saturationSlider->setTooltip (TRANS("The Saturation of the Waveshaper"));
-    saturationSlider->setRange (0, 1, 0.01);
     saturationSlider->setSliderStyle (Slider::RotaryHorizontalVerticalDrag);
     saturationSlider->setTextBoxStyle (Slider::TextBoxRight, false, 40, 20);
     saturationSlider->addListener (this);
@@ -121,18 +118,12 @@ SineSynthBody::SineSynthBody (ProcessorEditor *p)
     voiceAmountEditor->setFont (GLOBAL_FONT());
     fadeTimeEditor->setFont (GLOBAL_FONT());
 
-	octaveSlider->setup(getProcessor(), SineSynth::OctaveTranspose, "Octave");
-	octaveSlider->setMode(HiSlider::Discrete, -5.0, 5.0, 0.0);
+	auto md = getProcessor()->getMetadata();
 
-	musicalRatio->setup(getProcessor(), SineSynth::UseFreqRatio, "Use Freq Ratio");
-
-	
-
-	semiToneSlider->setup(getProcessor(), SineSynth::SemiTones, "Fine Tune");
-	semiToneSlider->setMode(HiSlider::Discrete, -12.0, 12.0, 0.0);
-
-	saturationSlider->setup(getProcessor(), SineSynth::SaturationAmount, "Saturation");
-	saturationSlider->setMode(HiSlider::NormalizedPercentage);
+	md.setup(*octaveSlider, getProcessor(), SineSynth::OctaveTranspose);
+	md.setup(*musicalRatio, getProcessor(), SineSynth::UseFreqRatio);
+	md.setup(*semiToneSlider, getProcessor(), SineSynth::SemiTones);
+	md.setup(*saturationSlider, getProcessor(), SineSynth::SaturationAmount);
 
     //[/UserPreSize]
 
@@ -280,7 +271,7 @@ void SineSynthBody::buttonClicked (Button* buttonThatWasClicked)
 			semiToneSlider->setup(getProcessor(), SineSynth::SemiTones, "Semi Tones");
 
 			octaveSlider->setRange(-5.0, 5.0, 1.0);
-			semiToneSlider->setMode(HiSlider::Discrete, -12.0, 12.0, 0.0);
+			semiToneSlider->setMode(HiSlider::Discrete, NormalisableRange(-12.0, 12.0, 1.0));
 
 		}
 		else
@@ -289,7 +280,7 @@ void SineSynthBody::buttonClicked (Button* buttonThatWasClicked)
 			semiToneSlider->setup(getProcessor(), SineSynth::FineFreqRatio, "Fine Ratio");
 
 			octaveSlider->setRange(-5.0, 16.0, 1.0);
-			semiToneSlider->setMode(HiSlider::Linear, 0.0, 1.0);
+			semiToneSlider->setMode(HiSlider::Linear, NormalisableRange(0.0, 1.0));
 			semiToneSlider->setRange(0.0, 1.0, 0.01);
 
 		}
@@ -316,7 +307,7 @@ void SineSynthBody::updateGui()
 		semiToneSlider->setup(getProcessor(), SineSynth::SemiTones, "Semi Tones");
 
 		octaveSlider->setRange(-5.0, 5.0, 1.0);
-		semiToneSlider->setMode(HiSlider::Discrete, -12.0, 12.0, 0.0);
+		semiToneSlider->setMode(HiSlider::Discrete, NormalisableRange(-12.0, 12.0, 1.0));
 
 	}
 	else
@@ -325,8 +316,7 @@ void SineSynthBody::updateGui()
 		semiToneSlider->setup(getProcessor(), SineSynth::FineFreqRatio, "Fine Ratio");
 
 		octaveSlider->setRange(-5.0, 16.0, 1.0);
-		semiToneSlider->setMode(HiSlider::Linear, 0.0, 1.0);
-		semiToneSlider->setRange(0.0, 1.0, 0.01);
+        semiToneSlider->setMode(HiSlider::Linear, {0.0, 1.0});
 
 	}
 

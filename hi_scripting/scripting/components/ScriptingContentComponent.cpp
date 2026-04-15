@@ -54,6 +54,7 @@ ScriptContentComponent::ScriptContentComponent(ProcessorWithScriptingContent *p_
 	processor(p_),
 	p(dynamic_cast<Processor*>(p_))
 {
+	setName("Content");
 	css.setUseIsolatedCollections(true);
 
 	processor->getScriptingContent()->addRebuildListener(this);
@@ -71,6 +72,8 @@ ScriptContentComponent::ScriptContentComponent(ProcessorWithScriptingContent *p_
 	p->getMainController()->addScriptListener(this, true);
 
 	addChildComponent(modalOverlay);
+
+	PROFILE_ONLY(p->getMainController()->getDebugSession().syncRecordingBroadcaster.addListener(*this, onProfileRecordChange, true));
 }
 
 ScriptContentComponent::~ScriptContentComponent()
@@ -227,9 +230,8 @@ void ScriptContentComponent::valueTreeChildAdded(ValueTree& /*parent*/, ValueTre
 
 void ScriptContentComponent::updateComponent(int i)
 {
-    if(componentWrappers[i]->getComponent() == nullptr)
+    if(!isPositiveAndBelow(i, componentWrappers.size()) || componentWrappers[i]->getComponent() == nullptr)
     {
-        jassertfalse;
         return;
     }
     
@@ -250,7 +252,8 @@ void ScriptContentComponent::updateContent(ScriptingApi::Content::ScriptComponen
 	if (componentToUpdate == nullptr)
 	{
 
-		jassert(contentData->components.size() == componentWrappers.size());
+        if(contentData->components.size() != componentWrappers.size())
+            return;
 
 		for (int i = 0; i < contentData->components.size(); i++)
 		{
@@ -402,6 +405,16 @@ bool ScriptContentComponent::onDragAction(DragAction a, ScriptComponent* source,
 		{
 			currentDragInfo = new ComponentDragInfo(this, source, data);
 
+			auto matrixIndex = MatrixIds::Helpers::getModulationSourceDragIndex(data);
+
+			if(matrixIndex != -1)
+			{
+				SafeAsyncCall::callAsyncIfNotOnMessageThread<ScriptContentComponent>(*this, [data](ScriptContentComponent& c)
+				{
+					MatrixIds::Helpers::repaintMatrixSlidersOnDrag(&c, data, MatrixIds::Helpers::DragTargetType::Dragging);
+				});
+			}
+
 			for (auto cw : componentWrappers)
 			{
 				if (cw->getScriptComponent() == source)
@@ -458,7 +471,84 @@ void ScriptContentComponent::dragOperationEnded(const DragAndDropTarget::SourceD
 	if (currentDragInfo != nullptr && !currentDragInfo->stopped)
 		currentDragInfo->stop();
 
+	if(MatrixIds::Helpers::getModulationSourceDragIndex(dragData.description) != -1)
+		MatrixIds::Helpers::repaintMatrixSlidersOnDrag(this, dragData.description, MatrixIds::Helpers::DragTargetType::Inactive);
+
 	currentDragInfo = nullptr;
+}
+
+void ScriptContentComponent::setHeatmap(DebugInformationBase::Ptr p, const std::map<int, double>* map)
+{
+#if HISE_INCLUDE_PROFILING_TOOLKIT
+	heatmap.clear();
+
+	if(map != nullptr)
+	{
+		Array<ProfiledComponent*> allChildren;
+
+		callRecursive<ProfiledComponent>(this, [&](ProfiledComponent* c)
+		{
+			allChildren.add(c);
+			return false;
+		});
+
+		for(auto nc: allChildren)
+		{
+			auto idx = nc->getHeatmapIndex();
+			auto ex = map->find(idx);
+
+			if(ex != map->end())
+			{
+				auto alpha = (float)ex->second;
+
+				FloatSanitizers::sanitizeFloatNumber(alpha);
+				alpha = jlimit(0.0f, 1.0f, alpha);
+
+				if(alpha > 0.01f)
+				{
+					auto b = getLocalArea(nc->asComponent(), nc->asComponent()->getLocalBounds());
+					heatmap.push_back({ b, alpha });
+				}
+			}
+		}
+	}
+#endif
+}
+
+struct ControlledDataProvider: public simple_css::StyleSheet::Collection::DataProvider,
+						 public ControlledObject
+{
+	ControlledDataProvider(MainController* mc):
+	  ControlledObject(mc)
+	{}
+
+	Font loadFont(const String& fontName, const String& url) override
+	{
+		return getMainController()->getFontFromString(fontName, 16.0f);
+	}
+
+	String importStyleSheet(const String& url) override
+	{
+		jassertfalse;
+		return {};
+	}
+
+	Image loadImage(const String& imageURL) override
+	{
+		PoolReference ref(getMainController(), imageURL, ProjectHandler::Images);
+		auto img = getMainController()->getActiveFileHandler()->pool->getImagePool().loadFromReference(ref, PoolHelpers::LoadingType::DontCreateNewEntry);
+
+		if(img != nullptr && img->data.isValid())
+			return img->data;
+
+		debugError(getMainController()->getMainSynthChain(), "Can't find image reference " + imageURL);
+		return {};
+	}
+};
+
+simple_css::StyleSheet::Collection::DataProvider* ScriptContentComponent::createDataProvider()
+{
+	return new ControlledDataProvider(p->getMainController());
 }
 
 void ScriptContentComponent::scriptWasCompiled(JavascriptProcessor *jp)
@@ -473,34 +563,29 @@ void ScriptContentComponent::makeScreenshot(const File& target, Rectangle<float>
 {
 	WeakReference<ScriptContentComponent> safeThis(this);
 
-	auto f = [safeThis, target, area]()
+	SafeAsyncCall::callAsyncIfNotOnMessageThread<ScriptContentComponent>(*this, [target, area](ScriptContentComponent& st)
 	{
-		if (safeThis != nullptr)
+		ScriptingObjects::ScriptShader::ScopedScreenshotRenderer ssr;
+
+		auto sf = UnblurryGraphics::getScaleFactorForComponent(&st);
+
+		st.repaint();
+
+		auto img = st.createComponentSnapshot(area.toNearestInt(), true, sf);
+
+		juce::PNGImageFormat png;
+
+		target.deleteFile();
+
+		FileOutputStream fos(target);
+
+		auto ok = png.writeImageToStream(img, fos);
+
+		if (ok)
 		{
-			ScriptingObjects::ScriptShader::ScopedScreenshotRenderer ssr;
-
-			auto sf = UnblurryGraphics::getScaleFactorForComponent(safeThis.get());
-
-			safeThis->repaint();
-
-			auto img = safeThis->createComponentSnapshot(area.toNearestInt(), true, sf);
-
-			juce::PNGImageFormat png;
-
-			target.deleteFile();
-
-			FileOutputStream fos(target);
-
-			auto ok = png.writeImageToStream(img, fos);
-
-			if (ok)
-			{
-				debugToConsole(dynamic_cast<Processor*>(safeThis->processor), "Screenshot exported as " + target.getFullPathName());
-			}
+			debugToConsole(dynamic_cast<Processor*>(st.processor), "Screenshot exported as " + target.getFullPathName());
 		}
-	};
-
-	MessageManager::callAsync(f);
+	});
 }
 
 void ScriptContentComponent::visualGuidesChanged()
@@ -570,6 +655,8 @@ void ScriptContentComponent::setNewContent(ScriptingApi::Content *c)
     
 	valuePopupProperties = new ScriptCreatedComponentWrapper::ValuePopup::Properties(p->getMainController(), c->getValuePopupProperties());
 
+	int pluginParameterCount = 0;
+
 	for (int i = 0; i < contentData->components.size(); i++)
 	{
 		auto sc = contentData->components[i].get();
@@ -599,6 +686,11 @@ void ScriptContentComponent::setNewContent(ScriptingApi::Content *c)
 			addChildComponent(newComponent);
 			newComponent->setVisible(sc->isShowing(false));
 		}
+
+		if(sc->getScriptObjectProperty(ScriptComponent::Properties::isPluginParameter))
+		{
+			newComponent->getProperties().set("AAXPluginParameterIndex", pluginParameterCount++);
+		}
 	}
 
 	refreshMacroIndexes();
@@ -608,6 +700,9 @@ void ScriptContentComponent::setNewContent(ScriptingApi::Content *c)
     
     addMouseListenersForComponentWrappers();
 	repaint();
+
+	for (auto& cw : componentWrappers)
+		cw->postInit();
 }
 
 void ScriptContentComponent::addMouseListenersForComponentWrappers()
@@ -618,6 +713,12 @@ void ScriptContentComponent::addMouseListenersForComponentWrappers()
         {
             componentWrappers[i]->getComponent()->addMouseListener(getParentComponent(), true);
         }
+
+		if(contentData != nullptr)
+		{
+			PROFILE_ONLY(ProfiledComponent::setDebugSessionToAllComponents(this, contentData->getScriptProcessor()->getMainController_()->getDebugSession()));
+		}
+		
     }
 }
 
@@ -657,6 +758,21 @@ bool ScriptContentComponent::keyPressed(const KeyPress& k)
 	return false;
 }
 
+Component* ScriptContentComponent::getScriptComponentComponent(Point<int> pos)
+{
+	auto c = getComponentAt(pos.toFloat());
+
+	while (c != nullptr && c != this)
+	{
+		if (getScriptComponentFor(c) != nullptr)
+			return c;
+
+		c = c->getParentComponent();
+	}
+
+	return nullptr;
+}
+
 void ScriptContentComponent::processorDeleted(Processor* /*deletedProcessor*/)
 {
 	contentData->resetContentProperties();
@@ -676,7 +792,11 @@ void ScriptContentComponent::paintOverChildren(Graphics& g)
 
 	if (p.get() == nullptr)
 		return;
-	
+
+#if HISE_INCLUDE_CSS_DEBUG_TOOLS
+	inspectorData.draw(g, getLocalBounds().toFloat(), css);
+#endif
+
 	const auto& guides = processor->getScriptingContent()->guides;
 
 	if (!guides.isEmpty() && !ScriptingObjects::ScriptShader::isRenderingScreenshot())
@@ -703,6 +823,14 @@ void ScriptContentComponent::paintOverChildren(Graphics& g)
 		g.setFont(GLOBAL_BOLD_FONT());
 		g.drawText("Suspended...", 0, 0, getWidth(), getHeight(), Justification::centred, false);
 		return;
+	}
+
+	for(const auto& h: heatmap)
+	{
+		g.setColour(Colour(HISE_WARNING_COLOUR).withAlpha(h.second * 0.3f));
+		g.fillRect(h.first);
+		g.setColour(Colour(HISE_WARNING_COLOUR).withAlpha(h.second));
+		g.drawRect(h.first, 3);
 	}
 
 #endif
@@ -767,6 +895,17 @@ Component* ScriptContentComponent::getComponentFor(ScriptingApi::Content::Script
 				return cw->getComponent();
 			}
 		}
+	}
+
+	return nullptr;
+}
+
+Component* ScriptContentComponent::getComponentForScriptComponentWithId(const Identifier& id)
+{
+	for (auto w : componentWrappers)
+	{
+		if (w->getScriptComponent()->getName() == id)
+			return w->getComponent();
 	}
 
 	return nullptr;
@@ -937,7 +1076,7 @@ ScriptContentComponent::ComponentDragInfo::ComponentDragInfo(ScriptContentCompon
 
 	if (!dragCallback)
 	{
-		debugError(dynamic_cast<Processor*>(sc->getScriptProcessor()), "dragData must have a paintRoutine property");
+		debugError(dynamic_cast<Processor*>(sc->getScriptProcessor()), "dragData must have a dragCallback property");
 		return;
 	}
 
@@ -1002,6 +1141,17 @@ juce::ScaledImage ScriptContentComponent::ComponentDragInfo::getDragImage(bool r
 void ScriptContentComponent::ComponentDragInfo::stop()
 {
 	dummyComponent = nullptr;
+
+	auto matrixIndex = MatrixIds::Helpers::getModulationSourceDragIndex(dragData);
+
+	if(matrixIndex != -1)
+	{
+		stopped = true;
+		currentDragTarget = {};
+		currentTargetComponent = nullptr;
+
+		return;
+	}
 	
 	var args[2];
 	args[0] = isValid(false);
@@ -1124,6 +1274,25 @@ void ScriptContentComponent::ComponentDragInfo::callRepaint()
 {
 	if (paintRoutine)
 	{
+		if(MessageManager::getInstance()->isThisTheMessageThread())
+		{
+			auto t = JavascriptThreadPool::Task::Type::LowPriorityCallbackExecution;
+			auto jp = dynamic_cast<const JavascriptProcessor*>(parent.getScriptProcessor());
+
+			WeakReference<ComponentDragInfo> safeThis(this);
+
+			auto f = [safeThis](JavascriptProcessor* jp)
+			{
+				if(safeThis != nullptr)
+					safeThis->callRepaint();
+
+				return Result::ok();
+			};
+
+			getMainController()->getJavascriptThreadPool().addJob(t, const_cast<JavascriptProcessor*>(jp), f);
+			return;
+		}
+
 		jassert(source != nullptr);
 		jassert(!MessageManager::getInstance()->isThisTheMessageThread());
 		jassert(getMainController()->getKillStateHandler().getCurrentThread() == MainController::KillStateHandler::TargetThread::ScriptingThread);
@@ -1137,7 +1306,7 @@ void ScriptContentComponent::ComponentDragInfo::callRepaint()
 		if (area.isEmpty())
 			thisObj->setProperty("area", sc->getLocalBounds(0));
 		else
-			thisObj->setProperty("area", ApiHelpers::getVarRectangle(area.withPosition({}).toFloat()));
+			thisObj->setProperty("area", ApiHelpers::getVarRectangle(false, area.withPosition({}).toFloat()));
 
 		thisObj->setProperty("source", sc->getId());
 		thisObj->setProperty("target", currentDragTarget);
@@ -1148,7 +1317,7 @@ void ScriptContentComponent::ComponentDragInfo::callRepaint()
 		paintRoutine.callSync(args, 2, nullptr);
 
 		auto handler = &dynamic_cast<ScriptingObjects::GraphicsObject*>(graphicsObject.getObject())->getDrawHandler();
-		handler->flush(0);
+		handler->flush(0, 0);
 	}
 }
 

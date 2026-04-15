@@ -17,8 +17,8 @@
   ==============================================================================
 */
 
-#ifndef __JUCE_HEADER_531DDB149D1700D4__
-#define __JUCE_HEADER_531DDB149D1700D4__
+
+#pragma once
 
 //[Headers]     -- You can add your own extra header files here --
 namespace hise { using namespace juce;
@@ -36,7 +36,7 @@ namespace hise { using namespace juce;
 */
 class MacroControlModulatorEditorBody  : public ProcessorEditorBody,
                                          public ButtonListener,
-                                         public SliderListener,
+                                         public Slider::Listener,
                                          public ComboBoxListener
 {
 public:
@@ -95,4 +95,3 @@ private:
 } // namespace hise
 //[/EndFile]
 
-#endif   // __JUCE_HEADER_531DDB149D1700D4__

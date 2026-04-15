@@ -30,6 +30,7 @@ private:
     {
 #if JUCE_DEBUG
         DBG(message);
+		std::cout << message << std::endl;
 #else
         std::cout << message << std::endl;
 #endif
@@ -93,7 +94,6 @@ private:
 		if(wildcard == "-p:")
 		{
 			throwErrorAndQuit("`" + s + "` is not a valid path");
-			RETURN_IF_NO_THROW(File());
 		}
 
 		return File();
@@ -115,34 +115,37 @@ public:
 		print("");
 		print("export: builds the project using the default settings");
 		print("export_ci: builds the project using customized behaviour for automated builds");
-		print(" - always use VisualStudio 2017 on Windows" );
+		print(" - always use VisualStudio 2026 on Windows" );
 		print(" - don't copy the plugins to the plugin folders" );
 		print(" - use a relative path for the project file" );
 		print(" - ignore the global HISE path and use the HISE repository folder from the");
 		print("   current HISE executable");
-		print("full_exp -p:PATH: exports the project as Full Instrument Expansion (aka HISE Player Library)");
-		print(" - you must supply the absolute path to the .XML file with the '-p:' argument.");
-		print("compress_samples -p:PATH: collects all HLAC files into a hr1 archive");
-		print(" - if an info.hxi file is found in the current work directory, it will embed it into the");
-		print("   archive. You must supply a XML project file with the `-p:` argument that will be");
-		print("   loaded during the export.");
-		print("Arguments: " );
-		print("FILE      The path to the project file (either .xml or .hip you want to export)." );
+		print("Arguments: ");
+		print("FILE      The path to the project file (either .xml or .hip you want to export).");
 		print("          In CI mode, this will be the relative path from the current project folder");
 		print("          In standard mode, it must be an absolute path");
-		print("-h:{TEXT} sets the HISE path. Use this if you don't have compiler settings set." );
-		print("-ipp      enables Intel Performance Primitives for fast convolution." );
+		print("-h:{TEXT} sets the HISE path. Use this if you don't have compiler settings set.");
+		print("-ipp      enables Intel Performance Primitives for fast convolution.");
 		print("-l        This can be used to compile a version that runs on legacy CPU models.");
-		print("-t:{TEXT} sets the project type ('standalone' | 'instrument' | 'effect' | 'midi')" );
-		print("-p:{TEXT} sets the plugin type ('VST'  | 'AU'   | 'VST_AU' | 'AAX' |)" );
+		print("-t:{TEXT} sets the project type ('standalone' | 'instrument' | 'effect' | 'midi')");
+		print("-p:{TEXT} sets the plugin type ('VST'  | 'AU'   | 'VST_AU' | 'AAX' |)");
 		print("                                'ALL'  | 'VST2' | 'VST3'   | 'VST23AU' )");
 		print("          (Leave empty for standalone export). Note that if you use the VST2, VST3,");
 		print("           VST23AU it will override the project settings so you can export both versions).");
 		print("           Note: The VST23AU flag will skip AU on Windows and build only VST2 and VST3.");
-        print("-nolto    deactivates link time optimisation. The resulting binary is not as optimized");
-        print("          but the build time is much shorter");
-        print("-D:NAME=VALUE Adds a temporary preprocessor definition to the extra definitions.");
-        print("              You can use multiple definitions by using this flag multiple times.");
+		print("-nolto    deactivates link time optimisation. The resulting binary is not as optimized");
+		print("          but the build time is much shorter");
+		print("-D:NAME=VALUE Adds a temporary preprocessor definition to the extra definitions.");
+		print("              You can use multiple definitions by using this flag multiple times.");
+		print("");
+		print("full_exp -p:PATH: exports the project as Full Instrument Expansion (aka HISE Player Library)");
+		print(" - you must supply the absolute path to the .XML file with the '-p:' argument.");
+		print("");
+		print("compress_samples -p:PATH: collects all HLAC files into a hr1 archive");
+		print(" - if an info.hxi file is found in the current work directory, it will embed it into the");
+		print("   archive. You must supply a XML project file with the `-p:` argument that will be");
+		print("   loaded during the export.");
+		print("");
 		print("--test [PLUGIN_FILE]" );
 		print("Tests the given plugin" );
 		print("");
@@ -151,6 +154,7 @@ public:
 		print("");
 		print("set_hise_folder -p:PATH");
 		print("Sets the location for the HISE source code folder.");
+		print("");
 		print("get_project_folder" );
 		print("Returns the current project folder." );
 		print("");
@@ -170,17 +174,51 @@ public:
         print("create-docs -p:PATH -h:PATH -s:PATH");
         print("Creates the HISE documentation files from the markdown files in the given directory (-p) to the given di.");
 		print("to the HTML directory specified by -h (and optionally rebuilding the snippet examples from -s)");
-		print("load -p:PATH");
+		print("load -p:PATH [-dump_module_tree] [--verbose]");
 		print("");
 		print("Loads the given file (either .xml file or .hip file) and returns the status code");
 		print("You can call Engine.setCommandLineStatus(1) in the onInit callback to report an error");
+		print("The additional flag -dump_module_tree will print a JSON layout of the HISE module tree to the output");
+		print("(Use the --verbose flag to include all parameter values)");
+		print("");
+		print("compile_script -p:PATH [-screenshot:width,height]");
+		print("Compiles the script file and returns the Console output as JSON-formatted string");
+		print("(one item for each console log).");
+		print("This is useful for running HISE with an AI agent that allows a tight feedback loop of");
+		print("compiling / testing the script creation. It basically creates an empty project with a");
+		print("script processor, inserts include(\"PATH\"); as code and compiles the output, then quits HISE.");
+		print("You can also use the -screenshot flag to create a screenshot of the interface after compilation.");
+		print("The additional flag -dump_module_tree will add a JSON object of the HISE module tree to the JSON output");
+		print("(Use the --verbose flag to include all parameter values)");
 		print("");
 		print("compile_networks -c:CONFIG");
 		print("Compiles the DSP networks in the given project folder. Use the -c flag to specify the build");
 		print("configuration ('Debug' or 'Release')");
 		print("");
+		print("create_module_list");
+		print("Creates a cache file that contains all relevant properties for the Builder AI agent to work.");
+		print("");
+		print("get_build_flags");
+		print("Prints out the build flags that were used when compiling HISE.");
+		print("");
 		print("run_unit_tests");
 		print("Runs the unit tests. In order for this to work, HISE must be built with the CI configuration");
+		print("");
+		print("set_hise_settings [-hisepath:PATH] [vs:20XX] [ipp:X] [-faust:PATH]");
+		print("Changes the HISE compiler settings. All flags are optional and it will only change the provided ones.");
+		print(" -hisepath:PATH - absolute path to the HISE source code repository");
+		print(" -vs:20XX the VisualStudio version (available options: 2022 and 2026). Only used on Windows");
+		print(" -ipp:X - whether IPP should be used globally (either 1 or 0)");
+		print(" -faustpath:PATH - the absolute path to the Faust installation");
+		print("");
+		print("get_update_info");
+		print("outputs (and copies to the clipboard) a string that is used by the HISE install wizard to setup the update procedure");
+		print("Format: <hisepath>|<status:valid|invalid>|<faust|nofaust>|<architecture:arm64|x64><PREV_GIT_HASH>");
+		print("Example: > C:\\HISE,valid,faust,x64|d385f6a01ca50ef673c1ff0021e9d486a06816c7");
+		print("");
+		print("start_server [-port:1900]");
+		print("starts the Rest API server when launching HISE. You can specify the port number, but it defaults to 1900.");
+		print("");
 
 		exit(0);
 	}
@@ -266,80 +304,242 @@ public:
 		}
 		else throwErrorAndQuit(pd.getFullPathName() + " is not a valid folder");
 	}
+
+	static void dumpRecursive(DynamicObject::Ptr obj, Processor* p, bool includeParameters)
+	{
+		
+
+		std::map<String, Identifier> chainIds;
+
+		chainIds["GainModulation"] = "ChainIndexes.Gain";
+		chainIds["PitchModulation"] = "ChainIndexes.Pitch";
+		chainIds["Midi Processor"] = "ChainIndexes.Midi";
+		chainIds["FX"] = "ChainIndexes.FX";
+		chainIds["Global Modulators"] = "ChainIndexes.GlobalMod";
+
+		obj->setProperty("id", p->getId());
+
+		String fullType;
+
+		if (dynamic_cast<ModulatorSynth*>(p) != nullptr)
+			fullType << "SoundGenerators.";
+		if (dynamic_cast<Modulator*>(p) != nullptr)
+			fullType << "Modulators.";
+		if (dynamic_cast<MidiProcessor*>(p) != nullptr)
+			fullType << "MidiProcessors.";
+		if (dynamic_cast<EffectProcessor*>(p) != nullptr)
+			fullType << "Effects.";
+
+		fullType << p->getType().toString();
+
+
+		obj->setProperty("type", fullType);
+
+		if (auto dh = dynamic_cast<DspNetwork::Holder*>(p))
+		{
+			if (auto n = dh->getActiveNetwork())
+				obj->setProperty("network", n->getId());
+		}
+
+		if (auto mm = dynamic_cast<MatrixModulator*>(p))
+		{
+			obj->setProperty("matrixTargetId", mm->getMatrixTargetId());
+		}
+
+		if (includeParameters)
+		{
+			DynamicObject::Ptr specialParameters = new DynamicObject();
+
+			specialParameters->setProperty("Bypassed", p->isBypassed());
+			
+			if (auto mod = dynamic_cast<Modulation*>(p))
+			{
+				specialParameters->setProperty("Intensity", mod->getDisplayIntensity());
+			}
+			if (auto slot = dynamic_cast<HotswappableProcessor*>(p))
+			{
+				specialParameters->setProperty("SlotId", slot->getCurrentEffectId());
+			}
+
+			obj->setProperty("specialParameters", var(specialParameters.get()));
+
+			DynamicObject::Ptr parameters = new DynamicObject();
+
+			for (int i = 0; i < p->getNumAttributes(); i++)
+			{
+				auto id = p->getIdentifierForParameterIndex(i);
+				auto value = p->getAttribute(i);
+				parameters->setProperty(id, value);
+			}
+
+			obj->setProperty("parameters", var(parameters.get()));
+
+			if (auto eh = dynamic_cast<ExternalDataHolder*>(p))
+			{
+				DynamicObject::Ptr cd = new DynamicObject();
+
+				ExternalData::forEachType([&](ExternalData::DataType dt)
+					{
+						auto numThisType = eh->getNumDataObjects(dt);
+
+						if (numThisType > 0)
+						{
+							Array<var> items;
+
+							for (int i = 0; i < numThisType; i++)
+							{
+								auto ed = eh->getData(dt, i);
+
+								if (ed.obj != nullptr)
+									items.add(ed.obj->toBase64String());
+							}
+
+							auto id = ExternalData::getDataTypeName(dt, true);
+							cd->setProperty(id, var(items));
+						}
+					});
+
+				if (!cd->getProperties().isEmpty())
+					obj->setProperty("complex_data", var(cd.get()));
+			}
+		}
+
+		Array<var> children;
+
+		for (int i = 0; i < p->getNumChildProcessors(); i++)
+		{
+			auto c = p->getChildProcessor(i);
+
+			if (dynamic_cast<ModulatorChain*>(c) != nullptr ||
+				dynamic_cast<MidiProcessorChain*>(c) != nullptr ||
+				dynamic_cast<EffectProcessorChain*>(c) != nullptr)
+			{
+				auto id = c->getId();
+
+				Array<var> mods;
+
+				for (int j = 0; j < c->getNumChildProcessors(); j++)
+				{
+					DynamicObject::Ptr cobj = new DynamicObject();
+					dumpRecursive(cobj, c->getChildProcessor(j), includeParameters);
+					mods.add(var(cobj.get()));
+				}
+
+				if (!mods.isEmpty())
+				{
+					auto idToUse = chainIds[id];
+
+					if(idToUse.isNull())
+						obj->setProperty("ChainIndexes." + String(i), var(mods));
+					else
+					{
+						obj->setProperty(idToUse, var(mods));
+					}
+				}
+
+				continue;
+			}
+			
+			if (auto ms = dynamic_cast<ModulatorSynthChain*>(p))
+			{
+				DynamicObject::Ptr cobj = new DynamicObject();
+
+				dumpRecursive(cobj, c, includeParameters);
+
+				children.add(var(cobj.get()));
+			}
+		}
+
+		if (!children.isEmpty())
+		{
+			obj->setProperty("ChainIndexes.Direct", var(children));
+		}
+	}
 	
 	static int loadPresetFile(const String& commandLine, const std::function<Result(BackendProcessor*)>& additionalFunction = {})
 	{
 		auto args = getCommandLineArgs(commandLine);
 
-		CompileExporter::setExportingFromCommandLine();
-		
-		ScopedPointer<StandaloneProcessor> processor = new StandaloneProcessor();
+CompileExporter::setExportingFromCommandLine();
 
-		auto bp = dynamic_cast<BackendProcessor*>(processor->getCurrentProcessor());
+ScopedPointer<StandaloneProcessor> processor = new StandaloneProcessor();
 
-        dynamic_cast<GlobalSettingManager*>(bp)->getSettingsObject().addTemporaryDefinitions(CompileExporter::getTemporaryDefinitions(commandLine));
-        
-		ModulatorSynthChain* mainSynthChain = bp->getMainSynthChain();
-		File currentProjectFolder = GET_PROJECT_HANDLER(mainSynthChain).getWorkDirectory();
+auto bp = dynamic_cast<BackendProcessor*>(processor->getCurrentProcessor());
 
-		File presetFile = getFilePathArgument(args, bp->getActiveFileHandler()->getRootFolder());
+dynamic_cast<GlobalSettingManager*>(bp)->getSettingsObject().addTemporaryDefinitions(CompileExporter::getTemporaryDefinitions(commandLine));
 
-		CompileExporter::setExportUsingCI(false);
+ModulatorSynthChain* mainSynthChain = bp->getMainSynthChain();
+File currentProjectFolder = GET_PROJECT_HANDLER(mainSynthChain).getWorkDirectory();
 
-		File projectDirectory = presetFile.getParentDirectory().getParentDirectory();
+File presetFile = getFilePathArgument(args, bp->getActiveFileHandler()->getRootFolder());
 
-		if (currentProjectFolder != projectDirectory)
+CompileExporter::setExportUsingCI(false);
+
+File projectDirectory = presetFile.getParentDirectory().getParentDirectory();
+
+if (currentProjectFolder != projectDirectory)
+{
+	GET_PROJECT_HANDLER(mainSynthChain).setWorkingProject(projectDirectory);
+}
+
+std::cout << "Loading the preset...";
+
+try
+{
+	if (presetFile.getFileExtension() == ".hip")
+	{
+		bp->loadPresetFromFile(presetFile, nullptr);
+	}
+	else if (presetFile.getFileExtension() == ".xml")
+	{
+		auto xml = XmlDocument::parse(presetFile);
+
+		if (xml != nullptr)
 		{
-			GET_PROJECT_HANDLER(mainSynthChain).setWorkingProject(projectDirectory);
+			XmlBackupFunctions::addContentFromSubdirectory(*xml, presetFile);
+			String newId = xml->getStringAttribute("ID");
+
+			auto v = ValueTree::fromXml(*xml);
+			XmlBackupFunctions::restoreAllScripts(v, mainSynthChain, newId);
+
+			bp->loadPresetFromValueTree(v);
+
+
 		}
+	}
+}
+catch (hise::CommandLineException& c)
+{
+	throwErrorAndQuit(c.r.getErrorMessage());
+	return 1;
+}
 
-		std::cout << "Loading the preset...";
+std::cout << "DONE" << std::endl << std::endl;
 
-		try
-		{
-			if (presetFile.getFileExtension() == ".hip")
-			{
-				bp->loadPresetFromFile(presetFile, nullptr);
-			}
-			else if (presetFile.getFileExtension() == ".xml")
-			{
-				auto xml = XmlDocument::parse(presetFile);
+if (additionalFunction)
+{
+	auto ok = additionalFunction(bp);
 
-				if (xml != nullptr)
-				{
-					XmlBackupFunctions::addContentFromSubdirectory(*xml, presetFile);
-					String newId = xml->getStringAttribute("ID");
-
-					auto v = ValueTree::fromXml(*xml);
-					XmlBackupFunctions::restoreAllScripts(v, mainSynthChain, newId);
-
-					bp->loadPresetFromValueTree(v);
-				}
-			}
-		}
-		catch (hise::CommandLineException& c)
-		{
-			throwErrorAndQuit(c.r.getErrorMessage());
-			return 1;
-		}
-		
-		std::cout << "DONE" << std::endl << std::endl;
-
-		if (additionalFunction)
-		{
-			auto ok = additionalFunction(bp);
-
-			if (ok.failed())
-			{
-				processor = nullptr;
-				throwErrorAndQuit(ok.getErrorMessage());
-				return 1;
-			}
-		}
-
+	if (ok.failed())
+	{
 		processor = nullptr;
-		
-		return 0;
+		throwErrorAndQuit(ok.getErrorMessage());
+		return 1;
+	}
+}
+
+if (args.contains("-dump_module_tree"))
+{
+	DynamicObject::Ptr no = new DynamicObject();
+	dumpRecursive(no, mainSynthChain, false);
+
+	auto p = JSON::toString(var(no.get()), args.contains("--verbose"));
+	print(p);
+}
+
+processor = nullptr;
+
+return 0;
 	}
 
 	static void compileNetworks(const String& commandLine)
@@ -370,7 +570,24 @@ public:
 		exporter.getComboBoxComponent("build")->setText(config, dontSendNotification);
 
 		exporter.run();
+
+		auto r = exporter.getCompilationResult();
+
+		if(r.failed())
+			throwErrorAndQuit(r.getErrorMessage());
+
 		exporter.threadFinished();
+	}
+
+	static void startServer(const String& commandLine)
+	{
+		auto args = getCommandLineArgs(commandLine);
+		auto port = getArgument(args, "-port:").getIntValue();
+
+		if (port == 0)
+			port = 1900;
+
+		BackendProcessor::setUseCommandLineServerMode(port);
 	}
 
 	static void setProjectFolder(const String& commandLine, bool exitOnSuccess=true)
@@ -395,10 +612,475 @@ public:
 			exit(0);
 	}
 
+	struct CLIInstance
+	{
+		CLIInstance()
+		{
+			auto start = Time::getApproximateMillisecondCounter();
+
+			CompileExporter::setSkipAudioDriverInitialisation();
+			CompileExporter::setProjectFolderFromWorkingDirectory();
+
+			sp = new StandaloneProcessor();
+			mc = dynamic_cast<MainController*>(sp->createProcessor());
+			threadSuspender = new MainController::ScopedBadBabysitter(mc);
+
+			auto bp = dynamic_cast<BackendProcessor*>(mc.get());
+
+			{
+				bp->prepareToPlay(44100.0, 512);
+				AudioSampleBuffer ab(2, 512);
+				MidiBuffer mb;
+				bp->processBlock(ab, mb);
+			}
+
+			auto stop = Time::getApproximateMillisecondCounter();
+
+			print("HISE CLI instance with project folder:");
+			print(CompileExporter::getCurrentWorkDirectory(false).getFullPathName());
+			print("Startup time: " + String(stop - start) + "ms");
+		}
+
+		File getProjectRoot() const {
+			return mc->getSampleManager().getProjectHandler().getRootFolder();
+		}
+
+		~CLIInstance()
+		{
+			auto start = Time::getApproximateMillisecondCounter();
+
+			threadSuspender = nullptr;
+			mc = nullptr;
+			sp = nullptr;
+
+			auto stop = Time::getApproximateMillisecondCounter();
+
+			print("Shutdown time: " + String(stop - start) + "ms");
+		}
+
+		ModulatorSynthChain* getMainSynthChain() { return mc->getMainSynthChain(); }
+
+		BackendProcessor* getBackendProcessor() { return dynamic_cast<BackendProcessor*>(mc.get()); }
+
+		ProjectHandler& getProjectHandler() { return mc->getSampleManager().getProjectHandler(); }
+
+	private:
+
+		ScopedPointer<StandaloneProcessor> sp;
+		ScopedPointer<MainController> mc;
+		ScopedPointer<MainController::ScopedBadBabysitter> threadSuspender;
+	};
+
+	static void compileScript(const String& commandLine)
+	{
+		File workDirectory;
+
+		try
+		{
+			workDirectory = CompileExporter::getCurrentWorkDirectory();
+		}
+		catch (Result& fail)
+		{
+			throwErrorAndQuit(fail.getErrorMessage());
+		}
+		
+		auto args = getCommandLineArgs(commandLine);
+
+		auto scriptDirectory = workDirectory.getChildFile("Scripts");
+
+		if (!scriptDirectory.isDirectory())
+			throwErrorAndQuit("Cannot find Scripts subfolder. Are you running this command from the project root?");
+
+		auto sf = scriptDirectory.getChildFile(getArgument(args, "-p:"));
+
+		DynamicObject::Ptr no = new DynamicObject();
+		
+		Array<var> errors;
+
+		no->setProperty("file", sf.getFullPathName());
+
+		if (sf.existsAsFile())
+		{
+			auto fn = sf.getRelativePathFrom(scriptDirectory).replace("\\", "/");
+
+			auto s = getArgument(args, "-screenshot:");
+
+			Rectangle<int> sb;
+
+			if (s.isNotEmpty())
+			{
+				auto w = s.upToFirstOccurrenceOf(",", false, false).getIntValue();
+				auto h = s.fromFirstOccurrenceOf(",", false, false).getIntValue();
+
+				sb = Rectangle<int>(w, h);
+
+				if (sb.isEmpty())
+					throwErrorAndQuit("Invalid screenshot width specified: " + s);
+			}
+
+			String code;
+
+			if (!sb.isEmpty())
+			{
+				code << "Content.makeFrontInterface(" << String(sb.getWidth()) << ", " << String(sb.getHeight()) << ");\n";
+
+				if (sf.loadFileAsString().contains("makeFrontInterface"))
+					throwErrorAndQuit("Your script file already calls makeFrontInterface(), but that interferes with the autogenerated interface size for the screenshot");
+			}
+				
+
+			code << "include(" << fn.quoted() << ");\n";
+
+			StringArray logs;
+
+			CLIInstance instance;
+			
+			auto projectRoot = instance.getProjectRoot();
+
+			if (projectRoot != workDirectory)
+				throwErrorAndQuit("You need to set the current HISE project to work from this directory.\nUse HISE set_project_folder \"-p:" + workDirectory.getFullPathName() + "\"\nand try again");
+
+			{
+				struct CallbackTest: public ReferenceCountedObject
+				{
+					bool ok = false;
+
+					using Ptr = ReferenceCountedObjectPtr<CallbackTest>;
+					using List = ReferenceCountedArray<CallbackTest>;
+
+					int uuid = 0;
+
+					String objectId;
+					String callbackName;
+					StringArray consoleOutput;
+					Array<var> errors;
+					var args;
+
+					String toMessage() const { return "test #" + String(uuid) + ": " + objectId + "." + callbackName; }
+
+					var toJSON() const
+					{
+						DynamicObject::Ptr no = new DynamicObject();
+						no->setProperty("uuid", String("#") + String(uuid));
+						no->setProperty("id", objectId);
+						no->setProperty("callback", callbackName);
+						no->setProperty("args", args);
+						no->setProperty("status", ok ? "ok" : "error");
+						
+
+						Array<var> log;
+						for (auto s : consoleOutput)
+							log.add(var(s));
+
+						no->setProperty("output", var(log));
+						no->setProperty("errors", var(errors));
+
+						return var(no.get());
+					}
+				};
+
+				CallbackTest::List flushedCallbacks;
+				CallbackTest::Ptr currentCallback;
+
+				instance.getBackendProcessor()->getConsoleHandler().setCustomCodeHandler([&](const String& t, int warningLevel, const Processor* p)
+				{
+					if (warningLevel == 0)
+					{
+						if (t.startsWith("BEGIN_CALLBACK_TEST"))
+						{
+							currentCallback = new CallbackTest();
+							currentCallback->uuid = flushedCallbacks.size() + 1;
+
+							auto id = t.fromFirstOccurrenceOf("BEGIN_CALLBACK_TEST", false, false).trim();
+
+							currentCallback->objectId = id.upToFirstOccurrenceOf(".", false, false);
+							currentCallback->callbackName = id.fromFirstOccurrenceOf(".", false, false);
+
+							logs.add(currentCallback->toMessage());
+						}
+						else if (t.startsWith("END_CALLBACK_TEST"))
+						{
+							currentCallback->ok = true;
+							flushedCallbacks.add(currentCallback);
+							currentCallback = nullptr;
+						}
+						else if (t.startsWith("CALLBACK_ARGS"))
+						{
+							if (auto last = flushedCallbacks.getLast())
+								last->args = JSON::parse(t.fromFirstOccurrenceOf(">", false, false));
+						}
+						else if (currentCallback != nullptr)
+							currentCallback->consoleOutput.add(t);
+						else
+							logs.add(t);
+					}
+					else
+					{
+						auto lines = StringArray::fromLines(t);
+
+						DynamicObject::Ptr e = new DynamicObject();
+						e->setProperty("errorMessage", lines[0].upToFirstOccurrenceOf("{{", false, false));
+
+						for (auto& l : lines)
+						{
+							l = l.fromFirstOccurrenceOf(":", false, false).upToFirstOccurrenceOf("{{", false, false).trim();
+
+							
+
+						}
+							
+
+						lines.trim();
+						lines.removeEmptyStrings();
+
+						for (auto& l : lines)
+						{
+							auto lineNumber = l.fromLastOccurrenceOf("(", false, false)
+								.upToFirstOccurrenceOf(")", false, false);
+
+							l = l.upToLastOccurrenceOf("(", false, false).trimEnd()
+								+ " - Line " + String(lineNumber);
+						}
+
+						Array<var> callStack;
+
+						for (auto& l: lines)
+							callStack.add(l);
+
+						e->setProperty("callstack", var(callStack));
+
+						if (currentCallback != nullptr)
+						{
+							currentCallback->errors.add(e.get());
+
+							// cleanup here
+							flushedCallbacks.add(currentCallback);
+							currentCallback = nullptr;
+						}
+						else
+							errors.add(e.get());
+					}
+				});
+
+				auto jsp = JavascriptMidiProcessor::getFirstInterfaceScriptProcessor(instance.getBackendProcessor());
+
+				ScopedPointer<ScriptContentComponent> content;
+
+				if (!sb.isEmpty())
+				{
+					content = new ScriptContentComponent(jsp);
+					content->setSize(sb.getWidth(), sb.getHeight());
+				}
+
+				jsp->getSnippet(0)->replaceAllContent(code);
+
+				auto t = Time::getApproximateMillisecondCounter();
+
+				jsp->compileScript();
+
+				auto now = Time::getApproximateMillisecondCounter();
+
+				Array<var> l;
+
+				for (auto& s : logs)
+					l.add(var(s));
+
+				no->setProperty("status", errors.isEmpty() ? "ok" : "error");
+				no->setProperty("compileTimeMs", now - t);
+
+
+				if (content != nullptr && errors.isEmpty())
+				{
+					auto screenshotFile = sf.withFileExtension(".png");
+					content->setNewContent(jsp->getScriptingContent());
+					content->makeScreenshot(screenshotFile, sb.toFloat());
+					no->setProperty("screenshot", screenshotFile.getFullPathName());
+				}
+				else
+					no->setProperty("screenshot", var());
+
+				if (!flushedCallbacks.isEmpty())
+				{
+					Array<var> list;
+
+					for (auto obj : flushedCallbacks)
+						list.add(obj->toJSON());
+
+					no->setProperty("callback_tests", var(list));
+				}
+
+				no->setProperty("output", var(l));
+
+				if (args.contains("-dump_module_tree"))
+				{
+					DynamicObject::Ptr obj = new DynamicObject();
+					dumpRecursive(obj, instance.getMainSynthChain(), args.contains("--verbose"));
+					no->setProperty("module_tree", var(obj.get()));
+				}
+
+				instance.getBackendProcessor()->getConsoleHandler().setCustomCodeHandler({});
+
+				content = nullptr;
+			}
+			
+			auto outputPath = getArgument(args, "-o:");
+
+			if (outputPath.contains(".hip"))
+			{
+				auto outputFile = instance.getProjectHandler().getSubDirectory(FileHandlerBase::Presets).getChildFile(outputPath);
+
+				instance.getMainSynthChain()->setId(outputFile.getFileNameWithoutExtension());
+				PresetHandler::saveProcessorAsPreset(instance.getMainSynthChain());
+				print("Wrote file " + outputFile.getFullPathName());
+			}
+		}
+		else
+		{
+			no->setProperty("status", "no file");
+			
+		}
+
+		no->setProperty("errors", errors);
+		
+		
+
+		print(JSON::toString(var(no.get()), false));
+	}
+
 	static void getProjectFolder(const String& /*commandLine*/)
 	{
 		print("Current project folder:\n" + getCurrentProjectFolder().getFullPathName());
-		exit(0);
+	}
+
+	static void createBuilderCache(const String& commandLine)
+	{
+#if 0
+		scriptnode::NodeDatabase db;
+
+		auto processNodes = db.getNodeIds(false);
+		auto signalNodes = db.getNodeIds(true);
+		
+		auto desc = db.getDescriptions();
+		
+
+		DynamicObject::Ptr obj = new DynamicObject();
+
+		auto createMetadata = [&](const ValueTree& n)
+		{
+			auto path = n[PropertyIds::FactoryPath].toString();
+			auto pp = db.getProperties(path);
+
+			ProcessorMetadata md(n[PropertyIds::ID].toString());
+			md.type = pp->getProperty(PropertyIds::IsPolyphonic) ? "polyphonic" : "monophonic";
+			md.description = desc[path];
+			md.hasChildren = n.getChildWithName(PropertyIds::Nodes).isValid();
+			md.hasFX = pp->getProperty(PropertyIds::IsControlNode);
+
+			for (auto cn : n.getChildWithName(PropertyIds::ComplexData))
+			{
+				auto dt = ExternalData::getDataTypeForId(cn.getType(), true);
+
+				for (auto d : cn)
+					md = md.withComplexDataInterface(dt);
+			}
+
+			int idx = 0;
+
+			for (auto p : n.getChildWithName(PropertyIds::Parameters))
+			{
+				ProcessorMetadata::ParameterMetadata pd(idx);
+
+				pd.id = p[PropertyIds::ID].toString();
+
+				pd = pd.withRange(RangeHelpers::getDoubleRange(p));
+				pd.vtc = ValueToTextConverter::fromString(p[PropertyIds::TextToValueConverter].toString());
+				pd.parameterIndex = idx++;
+
+				md = md.withParameter(pd);
+			}
+
+			if (n.getChildWithName(PropertyIds::ModulationTargets).isValid())
+			{
+				ProcessorMetadata::ModulationMetadata mod(0);
+
+				mod.id = "Mod Output";
+
+
+				if (pp->getProperty(PropertyIds::UseUnnormalisedModulation))
+					mod.constrainerWildcard = "Unnormalised";
+				else
+					mod.constrainerWildcard = "Normalised";
+
+				md = md.withModulation(mod);
+			}
+
+			idx = 0;
+
+			for (auto sw : n.getChildWithName(PropertyIds::SwitchTargets))
+			{
+				ProcessorMetadata::ModulationMetadata mod(idx++);
+
+				mod.id = "Mod Output " + String(idx);
+
+				if (pp->getProperty(PropertyIds::UseUnnormalisedModulation))
+					mod.description = "Unnormalised";
+				else
+					mod.description = "Normalised";
+
+				md = md.withModulation(mod);
+			}
+
+			return md;
+		};
+
+		auto cleanupJSON = [&](const ValueTree& n, DynamicObject* f, const String& pn)
+		{
+			auto pp = db.getProperties(pn);
+
+			f->removeProperty("builderPath");
+			f->removeProperty("prettyName");
+			f->removeProperty("subType");
+			f->removeProperty("fxConstrainer");
+
+			DynamicObject::Ptr properties = new DynamicObject();
+
+			for (auto prop : n.getChildWithName(PropertyIds::Properties))
+			{
+				properties->setProperty(prop[PropertyIds::ID].toString(), prop[PropertyIds::Value]);
+			}
+
+			f->setProperty("hasMidi", pp->getProperty(PropertyIds::IsProcessingHiseEvent) ? true : false);
+			f->setProperty("properties", var(properties.get()));
+		};
+
+		for (auto pn : processNodes)
+		{
+			auto n = db.getValueTree(pn);
+			auto md = createMetadata(n);
+			auto f = md.toJSON();
+			cleanupJSON(n, f.getDynamicObject(), pn);
+			
+			obj->setProperty(pn, f);
+		}
+
+		for (auto pn : signalNodes)
+		{
+			auto n = db.getValueTree(pn);
+			auto md = createMetadata(n);
+			auto f = md.toJSON();
+			cleanupJSON(n, f.getDynamicObject(), pn);
+			obj->setProperty(pn, f);
+
+		}
+
+		auto nf = File::getSpecialLocation(File::userDesktopDirectory).getChildFile("scriptnodeList2.json");
+		nf.replaceWithText(JSON::toString(var(obj.get())));
+#endif
+
+		hise::ProcessorMetadataRegistry r;
+		print("Building module list...");
+		auto tf = File::getSpecialLocation(File::userDesktopDirectory).getChildFile("moduleList.json");
+		tf.replaceWithText(JSON::toString(r.toJSON()));
 	}
 
 	static void cleanBuildFolder(const String& commandLine)
@@ -554,73 +1236,253 @@ public:
 			double progress;
 			Logger l;
 
+			print("Copying image files");
+
+			auto imgSrc = docRoot.getChildFile("images");
+			auto imgTarget = htmlDir.getChildFile("images");
+
+			imgSrc.copyDirectoryTo(imgTarget);
+
 			DatabaseCrawler::createImagesInHtmlFolder(htmlDir, *bp, &l, &progress);
 			DatabaseCrawler::createHtmlFilesInHtmlFolder(htmlDir, *bp, &l, &progress);
 		}
     }
     
+	static void getBuildFlags(const String& /*commandLine*/)
+	{
+		print("");
+		print("HISE Build Flags");
+		print("----------------");
+		print("");
+
+		// Version information
+		print("HISE Version: " + String(ProjectInfo::versionString));
+		print("JUCE Version: " + String(JUCE_MAJOR_VERSION) + "." + String(JUCE_MINOR_VERSION) + "." + String(JUCE_BUILDNUMBER));
+		print("");
+
+		// Build configuration
+#if JUCE_DEBUG
+		print("Build Configuration: Debug");
+#else
+		print("Build Configuration: Release");
+#endif
+
+		// Feature flags
+#if HISE_INCLUDE_FAUST
+		print("Faust Support: Enabled");
+#else
+		print("Faust Support: Disabled");
+#endif
+
+#if USE_IPP
+		print("IPP Support: Enabled");
+#else
+		print("IPP Support: Disabled");
+#endif
+
+#if HISE_INCLUDE_RLOTTIE
+		print("Rlottie Support: Enabled");
+#else
+		print("Rlottie Support: Disabled");
+#endif
+
+#if HISE_INCLUDE_LORIS
+		print("Loris Support: Enabled");
+#else
+		print("Loris Support: Disabled");
+#endif
+
+#if HISE_INCLUDE_RT_NEURAL
+		print("RT Neural Support: Enabled");
+#else
+		print("RT Neural Support: Disabled");
+#endif
+
+		print("");
+		print("Git Commit: " + String(PREVIOUS_HISE_COMMIT));
+		print("");
+
+		exit(0);
+	}
+
 	static void setHiseFolder(const String& commandLine)
 	{
 		auto args = getCommandLineArgs(commandLine);
 		auto hisePath = getFilePathArgument(args);
 
-		if (!hisePath.isDirectory())
-			throwErrorAndQuit(hisePath.getFullPathName() + " is not a valid directory");
+		setHiseSettingsInternal(hisePath);
+	}
 
-		if (!hisePath.getChildFile("hi_core/").isDirectory())
+	static void setHiseSettings(const String& commandLine)
+	{
+		auto args = getCommandLineArgs(commandLine);
+
+		auto hp = getArgument(args, "-hisepath:").unquoted();
+
+		auto ipp = getArgument(args, "-ipp:");
+		auto vs = getArgument(args, "-vs:").getIntValue();
+		auto fp = getArgument(args, "-faustpath:").unquoted();
+
+		setHiseSettingsInternal(File(hp),
+			{ ipp.isNotEmpty(), (bool)ipp.getIntValue() },
+			{ vs != 0, vs == 2026 },
+			{ fp.isNotEmpty(), File(fp) });
+	}
+
+	static void getUpdateInfo(const String& commandLine)
+	{
+		auto compilerSettings = NativeFileHandler::getAppDataDirectory(nullptr).getChildFile("compilerSettings.xml");
+
+		ValueTree v;
+
+		if (compilerSettings.existsAsFile())
+		{
+			ScopedPointer<XmlElement> xml = XmlDocument::parse(compilerSettings).release();
+			v = ValueTree::fromXml(*xml);
+
+			auto hisePath = v.getChildWithName("HisePath")["value"].toString();
+			auto fp = v.getChildWithName("FaustPath")["value"].toString();
+			
+			String output;
+
+			if (hisePath.isNotEmpty())
+			{
+				output << hisePath.unquoted();
+
+				if (File(hisePath).getChildFile(".git").isDirectory())
+					output << "|valid";
+				else
+					output << "|invalid";
+			}
+			else
+			{
+				throwErrorAndQuit("HISE path must be set");
+			}
+
+#if HISE_INCLUDE_FAUST
+			output << "|faust";
+#else
+			output << "|nofaust";
+#endif
+
+#if JUCE_MAC
+#if JUCE_ARM
+			output << "|arm64";
+#else
+			output << "|x64";
+#endif
+#else
+			output << "|x64";
+#endif
+
+			SystemClipboard::copyTextToClipboard(output);
+
+			print("Copied to clipboard: " + output);
+		}
+		else
+		{
+			throwErrorAndQuit("Can't find HISE settings");
+		}
+	}
+
+	static void setHiseSettingsInternal(const File& hisePath, 
+		std::pair<bool, bool> useIpp =    { false, true }, 
+		std::pair<bool, bool> useVS26 =   { false, true }, 
+		std::pair<bool, File> faustPath = { false, File() })
+	{
+
+
+		if (!hisePath.isDirectory())
+		{
+			if (!useIpp.first && !useVS26.first && !faustPath.first)
+			{
+				// user wants to set HISE path, fail hard...
+				throwErrorAndQuit(hisePath.getFullPathName() + " is not a valid directory");
+			}
+			else
+				print("HISE path not provided, set other settings");
+		}
+		
+		// check only if the path is provided
+		if (hisePath.isDirectory() && !hisePath.getChildFile("hi_core/").isDirectory())
 		{
 			throwErrorAndQuit(hisePath.getFullPathName() + " is not HISE source folder");
 		}
 
 		auto compilerSettings = NativeFileHandler::getAppDataDirectory(nullptr).getChildFile("compilerSettings.xml");
 
-		ScopedPointer<XmlElement> xml;
-
+		ValueTree v;
+		
 		if (compilerSettings.existsAsFile())
 		{
-			xml = XmlDocument::parse(compilerSettings).release();
-		}
-		else
-		{
-			xml = new XmlElement("CompilerSettings");
-			
-			auto c1 = new XmlElement("HisePath");
-			c1->setAttribute("value", hisePath.getFullPathName());
-			c1->setAttribute("type", "FILE");
-			c1->setAttribute("description", "Path to HISE modules");
-			xml->addChildElement(c1);
+			ScopedPointer<XmlElement> xml = XmlDocument::parse(compilerSettings).release();
+			v = ValueTree::fromXml(*xml);
 
-			auto c2 = new XmlElement("VisualStudioVersion");
-			c2->setAttribute("value", "Visual Studio 2017");
-			c2->setAttribute("type", "LIST");
-			c2->setAttribute("description", "Installed VisualStudio version");
-			c2->setAttribute("options", "Visual Studio 2013&#10;Visual Studio 2015");
-			xml->addChildElement(c2);
+			print("Current HISE compiler settings: ");
 
-			auto c3 = new XmlElement("UseIPP");
-			c3->setAttribute("value", "Yes");
-			c3->setAttribute("type", "LIST");
-			c3->setAttribute("description", "Use IPP");
-			c3->setAttribute("options", "Yes&#10;No");
-			xml->addChildElement(c3);
-		}
-
-		if (xml == nullptr)
-		{
-			throwErrorAndQuit("Compiler Settings can't be loaded");
-		}
-		else
-		{
-			if (auto child = xml->getChildByName("HisePath"))
+			for (auto c : v)
 			{
-				child->setAttribute("value", hisePath.getFullPathName());
-				compilerSettings.replaceWithText(xml->createDocument(""));
-
-				print("HISE SDK path set to " + hisePath.getFullPathName());
-				exit(0);
+				String key = c.getType().toString();
+				String value = c["value"].toString();
+				print(key + ": " + value);
 			}
-			else throwErrorAndQuit("Invalid XML");
+
+			print("------------------------------------");
 		}
+		else
+		{
+			v = ValueTree("CompilerSettings");
+			
+		}
+
+		v.getOrCreateChildWithName("HisePath", nullptr).setProperty("value", hisePath.getFullPathName(), nullptr);
+
+		if (useVS26.first)
+		{
+			auto value = useVS26.second ? "Visual Studio 2026" : "Visual Studio 2022";
+			v.getOrCreateChildWithName("VisualStudioVersion", nullptr).setProperty("value", value, nullptr);
+		}
+
+		if (useIpp.first)
+		{
+#if !USE_IPP
+			if (useIpp.second)
+			{
+				throwErrorAndQuit("Error at setting UseIPP: IPP is not enabled in this HISE build. Recompile HISE with the IPP flag");
+			}
+#endif
+
+			auto value = useIpp.second ? "Yes" : "No";
+			v.getOrCreateChildWithName("UseIPP", nullptr).setProperty("value", value, nullptr);
+		}
+
+		if (faustPath.first)
+		{
+#if !HISE_INCLUDE_FAUST
+			throwErrorAndQuit("Error at setting FaustPath: HISE was not build with Faust enabled. Rebuild HISE with Faust");
+#endif
+
+			if (!faustPath.second.isDirectory())
+				throwErrorAndQuit("Faust path is not a valid directory");
+
+			if (!faustPath.second.getChildFile("lib").isDirectory())
+				throwErrorAndQuit("Faust path is not the Faust install location (/lib subfolder is missing)");
+
+			auto value = faustPath.second.getFullPathName();
+			v.getOrCreateChildWithName("FaustPath", nullptr).setProperty("value", value, nullptr);
+		}
+
+		print("New HISE compiler settings: ");
+
+		for (auto c: v)
+		{
+			String key = c.getType().toString();
+			String value = c["value"].toString();
+			print(key + ": " + value);
+		}
+
+		auto xml = v.createXml();
+		compilerSettings.replaceWithText(xml->createDocument(""));
 	}
 };
 
@@ -736,18 +1598,26 @@ public:
 			quit();
 			return;
 		}
+		else if (commandLine.startsWith("compile_script"))
+		{
+			CommandLineActions::compileScript(commandLine);
+			quit();
+			return;
+		}
 		else if (commandLine.startsWith("run_unit_tests"))
 		{
 #if HI_RUN_UNIT_TESTS
 			UnitTestRunner runner;
-			runner.setAssertOnFailure(true);
+			//runner.setAssertOnFailure(false);
             
-            // If you're working on a unit test, just add the "Current" category
-            // and then uncomment this line.
-            if(UnitTest::getTestsInCategory("Current").isEmpty())
+			// If you're working on a unit test, just set this to the "Current" category
+			const String category = "";
+
+            if(UnitTest::getTestsInCategory(category).isEmpty())
                 runner.runAllTests();
             else
-                runner.runTestsInCategory("Current");
+               
+				runner.runTestsInCategory(category);
 
 			for (int i = 0; i < runner.getNumResults(); i++)
 			{
@@ -777,6 +1647,18 @@ public:
 		else if (commandLine.startsWith("set_hise_folder"))
 		{
 			CommandLineActions::setHiseFolder(commandLine);
+			quit();
+			return;
+		}
+		else if (commandLine.startsWith("get_update_info"))
+		{
+			CommandLineActions::getUpdateInfo(commandLine);
+			quit();
+			return;
+		}
+		else if (commandLine.startsWith("set_hise_settings"))
+		{
+			CommandLineActions::setHiseSettings(commandLine);
 			quit();
 			return;
 		}
@@ -820,6 +1702,12 @@ public:
 			quit();
 			return;
 		}
+		else if (commandLine.startsWith("create_module_list"))
+		{
+			CommandLineActions::createBuilderCache(commandLine);
+			quit();
+			return;
+		}
 		else if (commandLine.startsWith("compile_networks"))
 		{
 			CommandLineActions::compileNetworks(commandLine);
@@ -827,20 +1715,47 @@ public:
 			quit();
 			return;
 		}
+		else if (commandLine.startsWith("get_build_flags"))
+		{
+			CommandLineActions::getBuildFlags(commandLine);
+			quit();
+			return;
+		}
 		else
 		{
+			if (commandLine.startsWith("start_server"))
+			{
+				CommandLineActions::startServer(commandLine);
+			}
+
 			mainWindow = new MainWindow(commandLine);
 			mainWindow->setUsingNativeTitleBar(true);
 			mainWindow->toFront(true);
+
+			if (commandLine.startsWith("start_server"))
+			{
+				BackendRootWindow* brw = nullptr;
+
+				Component::callRecursive<BackendRootWindow>(mainWindow, [&](BackendRootWindow* brw_)
+				{
+					brw = brw_;
+					return true;
+				});
+
+				jassert(brw != nullptr);
+
+				brw->getBackendProcessor()->getReplServer().start(false);
+			}
 		}
     }
 
-    void shutdown() override
-    {
-        // Add your application's shutdown code here..
-
-        mainWindow = nullptr; // (deletes our window)
-    }
+	void shutdown() override
+	{
+		// ReplServer::stop() is called automatically by the BackendProcessor
+		// destructor when mainWindow is deleted, but we could also stop it
+		// explicitly here if needed for ordering guarantees.
+		mainWindow = nullptr; // (deletes our window)
+	}
 
     //==============================================================================
     void systemRequestedQuit() override
@@ -885,7 +1800,8 @@ public:
 				}
 			}
 
-            setContentOwned (new MainContentComponent(commandLine), true);
+			auto mc = new MainContentComponent(commandLine);
+            setContentOwned (mc, true);
 
 #if JUCE_IOS
             
@@ -899,9 +1815,10 @@ public:
 
 			setUsingNativeTitleBar(true);
 
-
-            
-            centreWithSize (getWidth(), getHeight() - 28);
+			if(mc->makeFullscreenOnLaunch)
+				setFullScreen(true);
+			else
+				centreWithSize (getWidth(), getHeight() - 28);
             
 #endif
             
@@ -968,7 +1885,7 @@ MainContentComponent::MainContentComponent(const String &commandLine)
 
     setSize(editor->getWidth(), editor->getHeight());
 
-    
+    makeFullscreenOnLaunch = (bool)editor->getProperties()["FullScreen"];
 
     handleCommandLineArguments(commandLine);
 }

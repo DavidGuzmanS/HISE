@@ -228,7 +228,20 @@ public:
 	*/
 	void registerCallback(Processor* p, int parameterIndex, const Callback& f, ExecutionType executionType = Synchronously);
 
-	Identifier getIdentifierForParameterIndex(int parameterIndex) const override;
+	ProcessorMetadata getMetadata() const override
+	{
+		ProcessorMetadata md("RawInterface");
+
+		md = md.withStandardMetadata<MainProcessor>();
+
+		int idx = 0;
+		for (auto p : parameters)
+		{
+			md = md.withParameter(p->createParameterMetadata(idx++));
+		}
+
+		return md;
+	}
 
 	void setInternalAttribute(int parameterIndex, float newValue) override;
 
@@ -316,6 +329,13 @@ private:
 		/** Returns the current value. */
 		float getCurrentValue() const { return currentValue; }
 
+		ProcessorMetadata::ParameterMetadata createParameterMetadata(int index) const
+		{
+			ProcessorMetadata::ParameterMetadata pd(index);
+			pd = pd.withId(getId().toString());
+			return pd;
+		}
+
 	private:
 
 		struct CallbackWithProcessor;
@@ -337,6 +357,8 @@ private:
 		Parameter(MainProcessor* parent, const Identifier& id_) :
 			ParameterBase(parent, id_)
 		{}
+
+		
 
 		~Parameter() {}
 	};

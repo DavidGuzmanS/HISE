@@ -113,7 +113,7 @@ ProcessorEditorHeader::ProcessorEditorHeader(ProcessorEditor *p) :
 
 	addAndMakeVisible(workspaceButton = new ShapeButton("Workspace", drawColour, drawColour, drawColour));
     Path workspacePath;
-    workspacePath.loadPathFromData(ColumnIcons::openWorkspaceIcon, sizeof(ColumnIcons::openWorkspaceIcon));
+    workspacePath.loadPathFromData(ColumnIcons::openWorkspaceIcon, ColumnIcons::openWorkspaceIcon_Size);
 	workspaceButton->setShape(workspacePath, true, true, true);
 	workspaceButton->addListener(this);
 	workspaceButton->setToggleState(true, dontSendNotification);
@@ -187,7 +187,7 @@ ProcessorEditorHeader::ProcessorEditorHeader(ProcessorEditor *p) :
 
 	balanceSlider->addListener(this);
 
-	this->idLabel->setText(getProcessor()->getId(), dontSendNotification);
+	this->idLabel->setText(ProcessorHelpers::getDisplayName(getProcessor()), dontSendNotification);
 	this->typeLabel->setText(getProcessor()->getName(), dontSendNotification);
 	
 	
@@ -354,6 +354,7 @@ void ProcessorEditorHeader::updateModulationMode(ProcessorEditorHeader& h, int m
         h.bipolarModButton->setVisible(false);
         h.intensitySlider->setTextValueSuffix("");
         h.intensitySlider->setRange (0, 1, 0.01);
+		h.bipolarModButton->setVisible(false);
     }
     else if(m == Modulation::PitchMode)
     {
@@ -362,7 +363,15 @@ void ProcessorEditorHeader::updateModulationMode(ProcessorEditorHeader& h, int m
         h.intensitySlider->setTextBoxIsEditable(true);
         h.bipolarModButton->setVisible(!h.isHeaderOfChain());
         h.bipolarModButton->addListener(&h);
+		h.bipolarModButton->setToggleState(dynamic_cast<Modulation*>(h.getProcessor())->isBipolar(), dontSendNotification);
     }
+	else if (m == Modulation::OffsetMode)
+	{
+		h.intensitySlider->setRange(-1.0, 1.0, 0.01);
+		h.bipolarModButton->setVisible(!h.isHeaderOfChain());
+        h.bipolarModButton->addListener(&h);
+		h.bipolarModButton->setToggleState(dynamic_cast<Modulation*>(h.getProcessor())->isBipolar(), dontSendNotification);
+	}
     else if (m == Modulation::PanMode)
     {
         h.intensitySlider->setRange(-100.0, 100.0, 1);
@@ -370,11 +379,13 @@ void ProcessorEditorHeader::updateModulationMode(ProcessorEditorHeader& h, int m
         h.intensitySlider->setTextBoxIsEditable(true);
         h.bipolarModButton->setVisible(!h.isHeaderOfChain());
         h.bipolarModButton->addListener(&h);
+		h.bipolarModButton->setToggleState(dynamic_cast<Modulation*>(h.getProcessor())->isBipolar(), dontSendNotification);
     }
     else if (m == Modulation::GlobalMode)
     {
         h.bipolarModButton->setVisible(!h.isHeaderOfChain());
         h.bipolarModButton->addListener(&h);
+		h.bipolarModButton->setToggleState(dynamic_cast<Modulation*>(h.getProcessor())->isBipolar(), dontSendNotification);
     }
     
     const double intensity = dynamic_cast<Modulation*>(h.getProcessor())->getDisplayIntensity();
@@ -503,7 +514,8 @@ void ProcessorEditorHeader::paintOverChildren(Graphics& g)
 
 		if(mc != nullptr)
 		{
-			float outputValue = mod->getValueForTextConverter(mod->getOutputValue());
+			auto outputValue = mod->getOutputValue();
+			outputValue = mod->getValueForTextConverter(outputValue);
 			auto v = mc->getTableValueConverter()(outputValue);
 
 			g.setColour(Colours::white.withAlpha(0.35f));
@@ -816,7 +828,7 @@ void ProcessorEditorHeader::buttonClicked (Button* buttonThatWasClicked)
     }
 	else if (buttonThatWasClicked == bipolarModButton)
 	{
-		bool shouldBeBipolar = toggleButton(bipolarModButton);
+		bool shouldBeBipolar = !toggleButton(bipolarModButton);
 
 		dynamic_cast<Modulation*>(getProcessor())->setIsBipolar(shouldBeBipolar);
 		updateBipolarIcon(shouldBeBipolar);
@@ -987,7 +999,8 @@ void ProcessorEditorHeader::createProcessorFromPopup(Processor *insertBeforeSibl
 
 void ProcessorEditorHeader::updateIdAndColour(dispatch::library::Processor* p)
 {
-	NEW_PROCESSOR_DISPATCH(idLabel->setText(p->getOwner<hise::Processor>().getId(), dontSendNotification));
+	auto n = ProcessorHelpers::getDisplayName(&p->getOwner<hise::Processor>());
+	NEW_PROCESSOR_DISPATCH(idLabel->setText(n, dontSendNotification));
 	repaint();
 	// skip colour, it's a icon colour (ideally the modulator synth should be a listener that updates the icon colour itself)
 };
@@ -1018,29 +1031,14 @@ void ProcessorEditorHeader::timerCallback()
 	{
 		if (isHeaderOfModulator())
 		{
-			const float outputValue = getProcessor()->getOutputValue();
+			float outputValue = getProcessor()->getOutputValue();
 
 			Modulation* m = dynamic_cast<Modulation*>(getProcessor());
 
 			if (m->getMode() == Modulation::PitchMode)
-			{
-				const float intensity = m->getIntensity();
+				outputValue = Modulation::PitchConverters::pitchFactorToOutputValue(outputValue);
 
-				if (m->isBipolar())
-				{
-					const float value = 0.5f + (outputValue-0.5f) * intensity;
-					valueMeter->setPeak(value, -1.0f);
-				}
-				else
-				{
-					const float value = 0.5f + 0.5f * (outputValue * intensity);
-					valueMeter->setPeak(value, -1.0f);
-				}
-			}
-			else
-			{
-				valueMeter->setPeak(outputValue, -1.0f);
-			}
+			valueMeter->setPeak(outputValue, -1.0f);
 		}
 		else
 		{
@@ -1154,8 +1152,8 @@ void ProcessorEditorHeader::labelTextChanged(Label *l)
 {
 	if (l == idLabel)
 	{
-		getEditor()->getProcessor()->setId(l->getText(), sendNotification);
-        
+		ProcessorHelpers::changeDisplayName(getEditor()->getProcessor(), l->getText());
+		
 		auto root = GET_BACKEND_ROOT_WINDOW(this);
 
 		if(auto keyboard = root->getKeyboard())

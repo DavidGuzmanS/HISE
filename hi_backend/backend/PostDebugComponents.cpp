@@ -30,6 +30,14 @@ Component* FloatingPanelTemplates::createCodeEditorPanel(FloatingTile* root)
 	ib.setDynamic(navTabs, false);
 
 	const int broadcasterMap = ib.addChild<ScriptingObjects::ScriptBroadcasterPanel>(navTabs);
+
+	const int profileRoot = ib.addChild<HorizontalTile>(navTabs);
+	ib.addChild<ProfilerManager>(profileRoot);
+	ib.addChild<ProfilerViewer>(profileRoot);
+	ib.addChild<ProfilerStatistics>(profileRoot);
+	ib.setDynamic(profileRoot, false);
+	ib.getPanel(profileRoot)->setForceShowTitle(false);
+
 	const int consoleId = ib.addChild<ConsolePanel>(codeEditor);
 
     ib.getPanel(broadcasterMap)->getLayoutData().setKeyPress(false, FloatingTileKeyPressIds::fold_map);
@@ -42,7 +50,8 @@ Component* FloatingPanelTemplates::createCodeEditorPanel(FloatingTile* root)
 	ib.setSizes(codeEditor, { -0.7, -0.3 });
 	ib.setSizes(codeVertical, { -0.8, -0.2 });
 
-
+	
+	ib.setFoldable(profileRoot, false, {false, true, true});
 
 	ib.getContent<FloatingTileContent>(variableWatch)->setStyleProperty("showConnectionBar", false);
 	ib.getContent<FloatingTileContent>(broadcasterMap)->setStyleProperty("showConnectionBar", false);
@@ -133,16 +142,28 @@ Component* FloatingPanelTemplates::createScriptingWorkspace(FloatingTile* rootTi
 
 		ib.setDynamic(interfaceHorizontal, false);
 		const int interfacePanel = ib.addChild<ScriptContentPanel>(interfaceHorizontal);
-		
-		const int propertyEditor = ib.addChild<ScriptComponentEditPanel::Panel>(interfaceDesigner);
 
-		ib.getPanel(propertyEditor)->getLayoutData().setKeyPress(false, FloatingTileKeyPressIds::fold_properties);
+		const int rightPanel = ib.addChild<HorizontalTile>(interfaceDesigner);
+		ib.setDynamic(rightPanel, false);
+
+
+		const int propertyEditor = ib.addChild<ScriptComponentEditPanel::Panel>(rightPanel);
+
+		const int cssDebugger = ib.addChild<ScriptComponentCSSDebugger>(rightPanel);
+		ib.setCustomName(rightPanel, "Properties");
+		ib.setCustomName(cssDebugger, "CSS Debugger");
+
+		ib.setFoldable(rightPanel, true, { true, true});
+		ib.setFolded(rightPanel, { false, true});
+		ib.setSizes(rightPanel, { -0.7, -0.3 });
+
+		ib.getPanel(rightPanel)->getLayoutData().setKeyPress(false, FloatingTileKeyPressIds::fold_properties);
 
 		ib.setSizes(interfaceHorizontal, { -0.5 });
 		ib.setCustomName(interfaceHorizontal, "", { "Canvas"});
 
 		ib.setCustomName(interfaceDesigner, "Interface Designer");
-		ib.setCustomName(propertyEditor, "Property Editor");
+		ib.setCustomName(propertyEditor, "Component Properties");
 		ib.setCustomName(componentList, "Component List");
 
 		ib.getPanel(interfacePanel)->getLayoutData().setKeyPress(true, FloatingTileKeyPressIds::focus_interface);
@@ -163,6 +184,7 @@ Component* FloatingPanelTemplates::createScriptingWorkspace(FloatingTile* rootTi
 		ib.getContent<FloatingTileContent>(interfacePanel)->setStyleProperty("showConnectionBar", false);
 		ib.getContent<FloatingTileContent>(componentList)->setStyleProperty("showConnectionBar", false);
 		ib.getContent<FloatingTileContent>(propertyEditor)->setStyleProperty("showConnectionBar", false);
+		ib.getContent<FloatingTileContent>(cssDebugger)->setStyleProperty("showConnectionBar", false);
 	}
 	
 	return ib.getPanel(mainVertical);
@@ -442,13 +464,15 @@ Component* FloatingPanelTemplates::createSamplerWorkspace(FloatingTile* rootTile
     
     ib.getContent(sampleVertical)->setPanelColour(FloatingTileContent::PanelColourId::itemColour1, Colour(0xFF404040));
     
-    
+
+	const int groupManager = ib.addChild<ComplexGroupManagerFloatingTile>(sampleVertical);
 	const int sampleMapEditor = ib.addChild<SampleMapEditorPanel>(sampleVertical);
+	
 	const int samplerTable = ib.addChild<SamplerTablePanel>(sampleVertical);
 
-    ib.setSizes(sampleVertical, {-0.7, -0.3});
+    ib.setSizes(sampleVertical, {-0.2, -0.5, -0.3});
     
-    ib.setFoldable(sampleVertical, false, {true, true});
+    ib.setFoldable(sampleVertical, false, {true, true, true});
     
 	ib.setSizes(samplePanel, { -0.5 });
 	ib.getPanel(sampleHorizontal)->setCustomIcon((int)FloatingTileContent::Factory::PopupMenuOptions::SampleEditor);
@@ -456,10 +480,12 @@ Component* FloatingPanelTemplates::createSamplerWorkspace(FloatingTile* rootTile
 	ib.setId(sampleEditor, "MainSampleEditor");
 	ib.setId(sampleMapEditor, "MainSampleMapEditor");
 	ib.setId(samplerTable, "MainSamplerTable");
+	ib.setId(groupManager, "MainSamplerGroupEditor");
 	
 	ib.getContent<FloatingTileContent>(sampleEditor)->setStyleProperty("showConnectionBar", false);
 	ib.getContent<FloatingTileContent>(sampleMapEditor)->setStyleProperty("showConnectionBar", false);
 	ib.getContent<FloatingTileContent>(samplerTable)->setStyleProperty("showConnectionBar", false);
+	ib.getContent<FloatingTileContent>(groupManager)->setStyleProperty("showConnectionBar", false);
 #endif
 
 	ignoreUnused(rootTile);
@@ -492,7 +518,12 @@ void FloatingTileContent::Factory::registerBackendPanelTypes()
 	registerType<scriptnode::NodePropertyPanel>(PopupMenuOptions::DspNodeParameterEditor);
     registerType<scriptnode::FaustEditorPanel>(PopupMenuOptions::DspFaustEditorPanel);
 
+	registerType<PluginParameterSimulator>(PopupMenuOptions::PluginParameterSimulator);
 	registerType<ScriptingObjects::ScriptBroadcasterPanel>(PopupMenuOptions::ScriptBroadcasterMap);
+
+	registerType<ProfilerViewer>(PopupMenuOptions::ProfilerViewer);
+	registerType<ProfilerManager>(PopupMenuOptions::ProfilerManager);
+	registerType<ProfilerStatistics>(PopupMenuOptions::ProfilerStatistics);
 
 	registerType<GenericPanel<PerfettoWebviewer>>(PopupMenuOptions::PerfettoViewer);
 
@@ -502,6 +533,7 @@ void FloatingTileContent::Factory::registerBackendPanelTypes()
 	registerType<ScriptContentPanel>(PopupMenuOptions::ScriptContent);
 	registerType<OSCLogger>(PopupMenuOptions::OSCLogger);
 	registerType<ScriptComponentEditPanel::Panel>(PopupMenuOptions::ScriptComponentEditPanel);
+	registerType<ScriptComponentCSSDebugger>(PopupMenuOptions::ScriptComponentCSSDebugger);
 	registerType<ApplicationCommandButtonPanel>(PopupMenuOptions::MenuCommandOffset);
 }
 
@@ -511,6 +543,7 @@ bool FloatingTileContent::Factory::handleBackendMenu(PopupMenuOptions r, Floatin
 	{
 	case PopupMenuOptions::ScriptComponentList: parent->setNewContent(GET_PANEL_NAME(ScriptComponentList::Panel)); return true;
 	case PopupMenuOptions::ScriptComponentEditPanel: parent->setNewContent(GET_PANEL_NAME(ScriptComponentEditPanel::Panel)); return true;
+	case PopupMenuOptions::ScriptComponentCSSDebugger: parent->setNewContent(GET_PANEL_NAME(ScriptComponentCSSDebugger)); return true;
 	case PopupMenuOptions::DspNodeList:			parent->setNewContent(GET_PANEL_NAME(scriptnode::DspNodeList::Panel)); return true;
 	case PopupMenuOptions::ApiCollection:		parent->setNewContent(GET_PANEL_NAME(GenericPanel<ApiCollection>)); return true;
 	case PopupMenuOptions::PatchBrowser:		parent->setNewContent(GET_PANEL_NAME(GenericPanel<PatchBrowser>)); return true;

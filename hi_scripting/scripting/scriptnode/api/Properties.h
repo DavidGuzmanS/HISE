@@ -43,7 +43,8 @@ struct PropertyHelpers
 {
 	static Colour getColour(ValueTree data);
 
-	static Colour getColourFromVar(const var& value);;
+	static Colour getColourFromVar(const var& value);
+	static void addMissingIdsForEditor(ValueTree& data, UndoManager* undoManager);;
 
 	static PropertyComponent* createPropertyComponent(ProcessorWithScriptingContent* p, ValueTree& d, const Identifier& id, UndoManager* um);
 };
@@ -57,17 +58,6 @@ template <int P> static void setParameter(void* obj, double v) { static_cast<Cla
 void initialise(scriptnode::NodeBase* n) {} \
 snex::hmath Math;
 
-namespace UIValues
-{
-static constexpr int HeaderHeight = 24;
-static constexpr int ParameterHeight = 48 + 18 + 20;
-static constexpr int MacroDragHeight = 20;	
-static constexpr int NodeWidth = 128;
-static constexpr int NodeHeight = 48;
-static constexpr int NodeMargin = 10;
-static constexpr int ZoomOffset = 60;	
-static constexpr int DuplicateSize = 128;
-static constexpr int PinHeight = 24;
-}
+
 
 }

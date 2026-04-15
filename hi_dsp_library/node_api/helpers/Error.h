@@ -84,6 +84,7 @@ struct Error: public ErrorC
         IllegalPolyphony,
         IllegalMonophony,
         IllegalBypassConnection,
+        IllegalNoCompilation,
         IllegalCompilation,
         IllegalFaustNode,
         IllegalFaustChannelCount,
@@ -93,6 +94,8 @@ struct Error: public ErrorC
         UnscaledModRangeMismatch,
         UncompiledThirdPartyNode,
         NoGlobalManager,
+        NoGlobalCable,
+        NoNeuralNetwork,
         numErrorCodes
     };
     

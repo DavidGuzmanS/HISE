@@ -57,6 +57,16 @@ END_JUCE_MODULE_DECLARATION
 #include "../JUCE/modules/juce_dsp/juce_dsp.h"
 
 
+/** Config: HISE_INCLUDE_SCRIPTNODE_DATABASE
+
+Set this to 1 to include the big base 64 database dump. 
+*/
+#ifndef HISE_INCLUDE_SCRIPTNODE_DATABASE
+#define HISE_INCLUDE_SCRIPTNODE_DATABASE 0
+#endif
+
+
+
 /** Config: HI_EXPORT_AS_PROJECT_DLL
 
 	Set this to 1 if you compile the project's networks as dll.
@@ -71,6 +81,18 @@ Set this to 0 if you want to load libraries created with this module.
 */
 #ifndef HI_EXPORT_DSP_LIBRARY
 #define HI_EXPORT_DSP_LIBRARY 1
+#endif
+
+/** Config: HISE_UPDATE_CONVOLUTION_DAMPING_ASYNC
+ *
+ *  If enabled, it will update the convolution damping asynchronously.
+ *	This allows a knob / slider to continously update the damping while dragging
+ *	so it won't clog the UI thread. However there are a few cases where this changes
+ *	the execution order when switching the IR / setting the sample range (which is always
+ *	synchronously executed) so if you group these actions together disable this.
+ */
+#ifndef HISE_UPDATE_CONVOLUTION_DAMPING_ASYNC
+#define HISE_UPDATE_CONVOLUTION_DAMPING_ASYNC 1
 #endif
 
 /** Config: IS_STATIC_DSP_LIBRARY
@@ -104,17 +126,28 @@ Set this to 1 if you want to embed the libraries created with this module into y
 #endif
 
 
-
+#if !HISE_NO_GUI_TOOLS
+#define HISE_INCLUDE_SCRIPTNODE_UI 1
+#else
+#define HISE_INCLUDE_SCRIPTNODE_UI 0
+#endif
 
 
 
 // Include the basic structures from SNEX
 
+#if HISE_INCLUDE_SCRIPTNODE_DATABASE
+#include "dsp_library/ScriptnodeDataBase.h"
+#endif
 
 #include "node_api/helpers/node_macros.h"
 
+#include "node_api/helpers/node_ids.h"
+
 
 #include "snex_basics/snex_Types.h"
+
+#include "node_api/helpers/NodeProperty.h"
 
 #include "snex_basics/snex_TypeHelpers.h"
 
@@ -143,6 +176,9 @@ Set this to 1 if you want to embed the libraries created with this module into y
 #include "dsp_library/BaseFactory.h"
 #include "dsp_library/DspFactory.h"
 
+#include "node_api/helpers/Error.h"
+
+#include "node_api/helpers/ParameterData.h"
 
 #include "dsp_basics/chunkware_simple_dynamics/chunkware_simple_dynamics.h"
 #include "dsp_basics/AllpassDelay.h"
@@ -161,9 +197,8 @@ Set this to 1 if you want to embed the libraries created with this module into y
 #include "fft_convolver/TwoStageFFTConvolver.h"
 #include "dsp_basics/ConvolutionBase.h"
 
-#include "node_api/helpers/Error.h"
-#include "node_api/helpers/node_ids.h"
-#include "node_api/helpers/ParameterData.h"
+
+#include "node_api/helpers/modulation.h"
 
 #include "node_api/helpers/range.h"
 #include "node_api/helpers/range_impl.h"
@@ -182,6 +217,7 @@ Set this to 1 if you want to embed the libraries created with this module into y
 #include "node_api/nodes/container_base.h"
 #include "node_api/nodes/container_base_impl.h"
 #include "node_api/nodes/Containers.h"
+
 #include "node_api/nodes/Container_Chain.h"
 #include "node_api/nodes/Container_Split.h"
 #include "node_api/nodes/Container_Multi.h"
@@ -194,6 +230,7 @@ Set this to 1 if you want to embed the libraries created with this module into y
 
 #include "dsp_nodes/CableNodeBaseClasses.h"
 #include "dsp_nodes/CableNodes.h"
+#include "dsp_nodes/ModulationNodes.h"
 #include "dsp_nodes/RoutingNodes.h"
 #include "dsp_nodes/JuceNodes.h"
 #include "dsp_nodes/DelayNode.h"
@@ -223,6 +260,13 @@ Set this to 1 if you want to embed the libraries created with this module into y
 
 #if HI_EXPORT_AS_PROJECT_DLL
 #include "dsp_library/HiseLibraryHeader.h"
+#endif
+
+
+#include "node_api/helpers/UIUpdater.h"
+
+#if HISE_INCLUDE_SCRIPTNODE_UI
+#include "node_ui/node_ui.h"
 #endif
 
 namespace hise {

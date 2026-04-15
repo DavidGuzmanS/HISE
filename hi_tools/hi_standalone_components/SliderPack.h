@@ -189,6 +189,7 @@ private:
 	This class is driven by the SliderPackData class, which acts as data container.
 */
 class SliderPack : public Component,
+				   public ProfiledComponent,
 				   public Slider::Listener,
 				   public SliderPackData::Listener,
 				   public Timer,
@@ -197,6 +198,7 @@ class SliderPack : public Component,
 {
 public:
 
+	using ComplexDataType = hise::SliderPackData;
 	using Listener = SliderPackData::Listener;
 
 	struct LookAndFeelMethods
@@ -257,6 +259,8 @@ public:
 	void updateSliderRange();
 
 	void updateSliders();
+
+	paintAndProfileChildren(g);
 
 #if 0
 	void changeListenerCallback(SafeChangeBroadcaster *b) override;

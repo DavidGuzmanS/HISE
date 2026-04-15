@@ -50,6 +50,7 @@ namespace hise { using namespace juce;
 		auto tc = c->findColour(trackColour);
 		auto pc = c->findColour(peakColour);
 		auto mc = c->findColour(maxPeakColour);
+		auto oc = c->findColour(overPeakColour);
             
 		RectangleList<float> onSegments, offSegments, maxSegments;
             
@@ -75,7 +76,14 @@ namespace hise { using namespace juce;
 				{
 					auto maxPos = fullSize * maxPeaks[i];
                         
-					g.setColour(mc);
+					if (maxPeaks[i] >= 0.99f && oc.getAlpha() > 0)
+					{
+						g.setColour(oc);
+					}
+					else
+					{
+						g.setColour(mc);
+					}
                         
 					auto c = isVertical ? maxCopy.removeFromBottom(maxPos).withHeight(2.0f) :
 						         maxCopy.removeFromLeft(maxPos).removeFromRight(2.0f);
@@ -373,6 +381,7 @@ namespace hise { using namespace juce;
 			ni->setColour(peakColour, findPanelColour(PanelColourId::itemColour1));
 			ni->setColour(trackColour, findPanelColour(PanelColourId::itemColour2));
 			ni->setColour(maxPeakColour, findPanelColour(PanelColourId::textColour));
+			ni->setColour(overPeakColour, findPanelColour(PanelColourId::itemColour3));
             
 			if(ni->findColour(bgColour).isOpaque())
 				ni->setOpaque(true);
@@ -912,6 +921,44 @@ void TooltipPanel::fromDynamicObject(const var& object)
 	tooltipBar->setColour(TooltipBar::textColour, findPanelColour(PanelColourId::textColour));
 
 	tooltipBar->setFont(getFont());
+
+	useFade = getPropertyWithDefault(object, SpecialPanelIds::Fade);
+	tooltipBar->setUseFade(useFade);
+
+	showIcon = getPropertyWithDefault(object, SpecialPanelIds::ShowIcon);
+	tooltipBar->setShowInfoIcon(showIcon);
+}
+
+var TooltipPanel::toDynamicObject() const
+{
+	var obj = FloatingTileContent::toDynamicObject();
+	storePropertyInObject(obj, SpecialPanelIds::Fade, useFade);
+	storePropertyInObject(obj, SpecialPanelIds::ShowIcon, showIcon);
+	return obj;
+}
+
+Identifier TooltipPanel::getDefaultablePropertyId(int index) const
+{
+	if (index < (int)PanelPropertyId::numPropertyIds)
+		return FloatingTileContent::getDefaultablePropertyId(index);
+
+	RETURN_DEFAULT_PROPERTY_ID(index, SpecialPanelIds::Fade, "Fade");
+	RETURN_DEFAULT_PROPERTY_ID(index, SpecialPanelIds::ShowIcon, "ShowIcon");
+
+	jassertfalse;
+	return{};
+}
+
+var TooltipPanel::getDefaultProperty(int index) const
+{
+	if (index < (int)PanelPropertyId::numPropertyIds)
+		return FloatingTileContent::getDefaultProperty(index);
+
+	RETURN_DEFAULT_PROPERTY(index, SpecialPanelIds::Fade, true);
+	RETURN_DEFAULT_PROPERTY(index, SpecialPanelIds::ShowIcon, true);
+
+	jassertfalse;
+	return{};
 }
 
 void TooltipPanel::resized()
@@ -928,6 +975,8 @@ PresetBrowserPanel::PresetBrowserPanel(FloatingTile* parent) :
 
 	addAndMakeVisible(presetBrowser = new PresetBrowser(getMainController()));
 	
+	simple_css::FlexboxComponent::Helpers::setIsOpaqueWrapper(*this, true);
+
 	if (parent->getMainController()->getCurrentScriptLookAndFeel() != nullptr)
 	{
 		scriptlaf = HiseColourScheme::createAlertWindowLookAndFeel(parent->getMainController());
@@ -955,6 +1004,7 @@ var PresetBrowserPanel::toDynamicObject() const
 	storePropertyInObject(obj, SpecialPanelIds::ShowRenameButton, options.showRenameButton);
 	storePropertyInObject(obj, SpecialPanelIds::ShowDeleteButton, options.showDeleteButton);
 	storePropertyInObject(obj, SpecialPanelIds::ShowSearchBar, options.showSearchBar);
+	storePropertyInObject(obj, SpecialPanelIds::FavoriteIconOffset, options.favoriteIconOffset);
 	storePropertyInObject(obj, SpecialPanelIds::ShowFavoriteIcon, options.showFavoriteIcons);
 	storePropertyInObject(obj, SpecialPanelIds::FullPathFavorites, options.fullPathFavorites);
 	storePropertyInObject(obj, SpecialPanelIds::ButtonsInsideBorder, options.buttonsInsideBorder);
@@ -982,6 +1032,7 @@ void PresetBrowserPanel::fromDynamicObject(const var& object)
 	options.showRenameButton = getPropertyWithDefault(object, SpecialPanelIds::ShowRenameButton);
 	options.showDeleteButton = getPropertyWithDefault(object, SpecialPanelIds::ShowDeleteButton);
 	options.showSearchBar = getPropertyWithDefault(object, SpecialPanelIds::ShowSearchBar);
+	options.favoriteIconOffset = getPropertyWithDefault(object, SpecialPanelIds::FavoriteIconOffset);
 	options.fullPathFavorites = getPropertyWithDefault(object, SpecialPanelIds::FullPathFavorites);
 	options.buttonsInsideBorder = getPropertyWithDefault(object, SpecialPanelIds::ButtonsInsideBorder);
 	options.editButtonOffset = getPropertyWithDefault(object, SpecialPanelIds::EditButtonOffset);
@@ -1084,6 +1135,7 @@ juce::Identifier PresetBrowserPanel::getDefaultablePropertyId(int index) const
 	RETURN_DEFAULT_PROPERTY_ID(index, SpecialPanelIds::ColumnWidthRatio, "ColumnWidthRatio");
 	RETURN_DEFAULT_PROPERTY_ID(index, SpecialPanelIds::ShowExpansionsAsColumn, "ShowExpansionsAsColumn");
 	RETURN_DEFAULT_PROPERTY_ID(index, SpecialPanelIds::ShowFavoriteIcon, "ShowFavoriteIcon");
+	RETURN_DEFAULT_PROPERTY_ID(index, SpecialPanelIds::FavoriteIconOffset, "FavoriteIconOffset");
 
 	return Identifier();
 }
@@ -1105,6 +1157,7 @@ var PresetBrowserPanel::getDefaultProperty(int index) const
 	RETURN_DEFAULT_PROPERTY(index, SpecialPanelIds::ShowAddButton, true);
 	RETURN_DEFAULT_PROPERTY(index, SpecialPanelIds::ShowRenameButton, true);
 	RETURN_DEFAULT_PROPERTY(index, SpecialPanelIds::FullPathFavorites, false);
+	RETURN_DEFAULT_PROPERTY(index, SpecialPanelIds::FavoriteIconOffset, 0);
 	RETURN_DEFAULT_PROPERTY(index, SpecialPanelIds::ShowDeleteButton, true);
 	RETURN_DEFAULT_PROPERTY(index, SpecialPanelIds::ShowSearchBar, true);
 	RETURN_DEFAULT_PROPERTY(index, SpecialPanelIds::ButtonsInsideBorder, false);
@@ -1335,7 +1388,9 @@ void FrontendMacroPanel::macroConnectionChanged(int macroIndex, Processor* p, in
 
 hise::MacroControlBroadcaster::MacroControlData* FrontendMacroPanel::getData(MacroControlBroadcaster::MacroControlledParameterData* pd)
 {
-	for (int i = 0; i < HISE_NUM_MACROS; i++)
+	auto numMacros = HISE_GET_PREPROCESSOR(getMainController(), HISE_NUM_MACROS);
+
+	for (int i = 0; i < numMacros; i++)
 	{
         auto m = macroChain->getMacroControlData(i);
         
@@ -1348,7 +1403,9 @@ hise::MacroControlBroadcaster::MacroControlData* FrontendMacroPanel::getData(Mac
 
 const hise::MacroControlBroadcaster::MacroControlData* FrontendMacroPanel::getData(MacroControlBroadcaster::MacroControlledParameterData* pd) const
 {
-	for (int i = 0; i < HISE_NUM_MACROS; i++)
+	auto numMacros = HISE_GET_PREPROCESSOR(getMainController(), HISE_NUM_MACROS);
+
+	for (int i = 0; i < numMacros; i++)
 	{
         auto m = macroChain->getMacroControlData(i);
         
@@ -1491,7 +1548,9 @@ MidiLearnPanel::MidiLearnPanel(FloatingTile* parent) :
 {
 	handler.addChangeListener(this);
 	setName("MIDI Control List");
-	initTable();
+
+	auto addChannel = HISE_GET_PREPROCESSOR(parent->getMainController(), HISE_USE_MIDI_CHANNELS_FOR_AUTOMATION);
+	initTable(addChannel);
 }
 
 MidiLearnPanel::~MidiLearnPanel()
@@ -1580,7 +1639,9 @@ juce::String MidiLearnPanel::getCellText(int rowNumber, int columnId) const
 	if (columnId == ColumnId::ParameterName)
 		return ProcessorHelpers::getPrettyNameForAutomatedParameter(data.processor, data.attribute);
 	else if (columnId == ColumnId::CCNumber)
-		return String(data.ccNumber);
+		return String(data.k.ccNumber);
+	else if (columnId == ColumnId::Channel)
+		return data.k.channel == -1 ? String("Omni") : String("Channel ") + String(data.k.channel + 1);
 	else
 		return "";
 }
@@ -1676,7 +1737,7 @@ TableFloatingTileBase::TableFloatingTileBase(FloatingTile* parent) :
 
 }
 
-void TableFloatingTileBase::initTable()
+void TableFloatingTileBase::initTable(bool addChannelColumn)
 {
 	// Create our table component and add it to this component..
 	addAndMakeVisible(table);
@@ -1710,6 +1771,10 @@ void TableFloatingTileBase::initTable()
 	auto fWidth = (int)font.getStringWidthFloat(first) + 20;
 
 	table.getHeader().addColumn(getIndexName(), CCNumber, fWidth, 30, -1, TableHeaderComponent::visible);
+
+	if(addChannelColumn)
+		table.getHeader().addColumn("Channel", Channel, fWidth, 30, -1, TableHeaderComponent::visible);
+
 	table.getHeader().addColumn("Parameter", ParameterName, 70, 30, -1);
 	table.getHeader().addColumn("Inverted", Inverted, 70, 70, 70);
 	table.getHeader().addColumn("Min", Minimum, 70, 70, 70);
@@ -1742,39 +1807,40 @@ void TableFloatingTileBase::paintRowBackground(Graphics& g, int rowNumber, int w
 {
 	using namespace simple_css;
 
-	auto& rootDialog = *CSSRootComponent::find(*this);
-
-	if(auto ss = rootDialog.css.getWithAllStates(this, (Selector(ElementType::TableRow))))
+	if(auto rootDialog = CSSRootComponent::find(*this))
 	{
-		Renderer r(nullptr, rootDialog.stateWatcher);
-
-		auto point = table.getMouseXYRelative();
-		auto hoverRow = table.getRowContainingPosition(point.getX(), point.getY());
-
-		int flags = 0;
-
-		if(rowNumber == hoverRow)
+		if(auto ss = rootDialog->css.getWithAllStates(this, (Selector(ElementType::TableRow))))
 		{
-			flags |= (int)PseudoClassType::Hover;
+			Renderer r(nullptr, rootDialog->stateWatcher);
 
-			if(isMouseButtonDownAnywhere())
+			auto point = table.getMouseXYRelative();
+			auto hoverRow = table.getRowContainingPosition(point.getX(), point.getY());
+
+			int flags = 0;
+
+			if(rowNumber == hoverRow)
 			{
-				flags |= (int)PseudoClassType::Active;
+				flags |= (int)PseudoClassType::Hover;
+
+				if(isMouseButtonDownAnywhere())
+				{
+					flags |= (int)PseudoClassType::Active;
+				}
 			}
+
+			if(rowIsSelected)
+				flags |= (int)PseudoClassType::Focus;
+
+			r.setPseudoClassState(flags);
+			r.drawBackground(g, {0.0f, 0.0f, (float)width, (float)height}, ss);
+
+			return;
 		}
-
-		if(rowIsSelected)
-			flags |= (int)PseudoClassType::Focus;
-
-		r.setPseudoClassState(flags);
-		r.drawBackground(g, {0.0f, 0.0f, (float)width, (float)height}, ss);
 	}
-	else
+
+	if (rowIsSelected)
 	{
-		if (rowIsSelected)
-		{
-			g.fillAll(Colours::white.withAlpha(0.2f));
-		}
+		g.fillAll(Colours::white.withAlpha(0.2f));
 	}
 	
 }
@@ -1785,6 +1851,19 @@ void TableFloatingTileBase::resized()
 
 	if(auto root = CSSRootComponent::find(*this))
 	{
+		// CSS LAF is set in refreshComponentForCell(),
+		// but that isn't called when there are no rows in the table.
+		// Initialising here for consistent styling for the empty state.
+		if (css_laf == nullptr)
+		{
+			css_laf = new simple_css::StyleSheetLookAndFeel(*root);
+
+			if (root->css.getWithAllStates(this, simple_css::Selector("th")) != nullptr)
+				table.getHeader().setLookAndFeel(css_laf);
+			else
+				table.getHeader().setLookAndFeel(laf);
+		}
+
 		int firstWidth = 0;
 
 		if(auto ss = root->css.getWithAllStates(this, Selector(ElementType::TableHeader)))
@@ -1957,14 +2036,15 @@ Component* TableFloatingTileBase::refreshComponentForCell(int rowNumber, int col
 		{
 			slider = new ValueSliderColumn(*this);
 
-			auto& root = *simple_css::CSSRootComponent::find(*this);
-
-			if(auto ss = root.css.getWithAllStates(this, simple_css::Selector(".range-slider")))
+			if(auto root = simple_css::CSSRootComponent::find(*this))
 			{
-				simple_css::FlexboxComponent::Helpers::writeClassSelectors(*slider->slider, { simple_css::Selector(".range-slider")}, true);
-				slider->slider->setLookAndFeel(css_laf.get());
-				slider->slider->setColour(Slider::textBoxOutlineColourId, Colours::transparentBlack);
-				slider->slider->setTextBoxStyle(Slider::NoTextBox, false, 0, 0);
+				if(auto ss = root->css.getWithAllStates(this, simple_css::Selector(".range-slider")))
+				{
+					simple_css::FlexboxComponent::Helpers::writeClassSelectors(*slider->slider, { simple_css::Selector(".range-slider")}, true);
+					slider->slider->setLookAndFeel(css_laf.get());
+					slider->slider->setColour(Slider::textBoxOutlineColourId, Colours::transparentBlack);
+					slider->slider->setTextBoxStyle(Slider::NoTextBox, false, 0, 0);
+				}
 			}
 		}
 		
@@ -1996,11 +2076,12 @@ Component* TableFloatingTileBase::refreshComponentForCell(int rowNumber, int col
 		if (b == nullptr)
 			b = new InvertedButton(*this);
 
-		auto& root = *simple_css::CSSRootComponent::find(*this);
-
-		if(css_laf != nullptr && root.css.getWithAllStates(this, simple_css::Selector("button")))
+		if(auto root = simple_css::CSSRootComponent::find(*this))
 		{
-			b->t->setLookAndFeel(css_laf.get());
+			if(css_laf != nullptr && root->css.getWithAllStates(this, simple_css::Selector("button")))
+			{
+				b->t->setLookAndFeel(css_laf.get());
+			}
 		}
 		
 		b->t->setColour(TextButton::buttonOnColourId, itemColour1);
@@ -2024,29 +2105,31 @@ void TableFloatingTileBase::paintCell(Graphics& g, int rowNumber, int columnId, 
 {
 	using namespace simple_css;
 
-	auto& rootDialog = *CSSRootComponent::find(*this);
 	auto text = getCellText(rowNumber, columnId);
 
-	if(auto ss = rootDialog.css.getWithAllStates(this, Selector(ElementType::TableCell)))
+	if(auto rootDialog = CSSRootComponent::find(*this))
 	{
-		Renderer r(nullptr, rootDialog.stateWatcher);
-		auto state = r.getPseudoClassFromComponent(this);
+		if(auto ss = rootDialog->css.getWithAllStates(this, Selector(ElementType::TableCell)))
+		{
+			Renderer r(nullptr, rootDialog->stateWatcher);
+			auto state = r.getPseudoClassFromComponent(this);
                 
-		if(rowIsSelected)
-			state |= (int)PseudoClassType::Focus;
+			if(rowIsSelected)
+				state |= (int)PseudoClassType::Focus;
 
-		Rectangle<float> b(0.0, 0.0, (float)width, (float)height);
+			Rectangle<float> b(0.0, 0.0, (float)width, (float)height);
 
-		r.setPseudoClassState(state);
-		r.drawBackground(g, b, ss);
-		r.renderText(g, b, text, ss);
+			r.setPseudoClassState(state);
+			r.drawBackground(g, b, ss);
+			r.renderText(g, b, text, ss);
+
+			return;
+		}
 	}
-	else
-	{
-		g.setColour(textColour);
-		g.setFont(font);
-		g.drawText(text, 2, 0, width - 4, height, Justification::centredLeft, true);
-	}
+
+	g.setColour(textColour);
+	g.setFont(font);
+	g.drawText(text, 2, 0, width - 4, height, Justification::centredLeft, true);
 }
 
 } // namespace hise

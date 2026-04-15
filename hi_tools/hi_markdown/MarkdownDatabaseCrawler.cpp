@@ -273,8 +273,11 @@ void DatabaseCrawler::createContentTree()
 
 	totalLinks = db.getFlatList().size();
 
-	contentTree = db.rootItem.createValueTree();
+	contentTree = db.rootItem->createValueTree();
 	addContentToValueTree(contentTree);
+
+	for(auto r: linkResolvers)
+		r->dumpRAGFile();
 
 	logMessage("Resolved URLs: " + String(numResolved));
 	logMessage("unresolved URLs: " + String(numUnresolved));
@@ -406,7 +409,7 @@ void DatabaseCrawler::addImagesInternal(ValueTree cTree, float maxWidth)
 		addImagesInternal(c, maxWidth);
 }
 
-void DatabaseCrawler::createHtmlInternal(ValueTree v)
+void DatabaseCrawler::createHtmlInternal(ValueTree v, bool isRootElement)
 {
 	if (progressCounter != nullptr)
 		*progressCounter = (double)currentLink++ / (double)totalLinks;
@@ -414,6 +417,9 @@ void DatabaseCrawler::createHtmlInternal(ValueTree v)
 
 	MarkdownDataBase::Item item;
 	item.loadFromValueTree(v);
+
+	if(isRootElement)
+		currentRootTitle = item.tocString;
 
 	if (!item)
 		return;
@@ -454,13 +460,13 @@ void DatabaseCrawler::createHtmlInternal(ValueTree v)
 		logMessage("ERROR: " + f.getFullPathName() + " : " + s);
 	}
 	
-
+	p.setRootTitle(currentRootTitle);
 	p.setHeaderFile(templateDirectory.getChildFile("template/header.html"));
 	p.setFooterFile(templateDirectory.getChildFile("template/footer.html"));
 	p.writeToFile(f, item.url.toString(MarkdownLink::Everything));
 
 	for (auto c : v)
-		createHtmlInternal(c);
+		createHtmlInternal(c, false);
 }
 
 void DatabaseCrawler::createHtmlFilesInternal(File htmlTemplateDirectoy, Markdown2HtmlConverter::LinkMode m, const String& linkBase)
@@ -475,7 +481,7 @@ void DatabaseCrawler::createHtmlFilesInternal(File htmlTemplateDirectoy, Markdow
 	logMessage("Create HTML files");
 
 	for (auto c : contentTree)
-		createHtmlInternal(c);
+		createHtmlInternal(c, true);
 }
 
 void DatabaseCrawler::addPathResolver()
@@ -606,10 +612,109 @@ void DatabaseCrawler::loadDataFiles(File root)
 	imageProviders.add(new Provider(root, nullptr));
 }
 
+struct TocCleaner
+{
+	TocCleaner(const var& fullObject_):
+	  fullObject(fullObject_),
+	  anchors(new DynamicObject())
+	{
+		forEach(fullObject, [&](var& obj)
+		{
+			auto url = splitAnchor(obj);
+
+			if(url.second.isNotEmpty())
+			{
+				auto key1 = Identifier(url.first);
+
+				if(!anchors->hasProperty(key1))
+					anchors->setProperty(key1, new DynamicObject());
+
+				auto a = anchors->getProperty(key1).getDynamicObject();
+
+				auto title = obj["Title"].toString();
+
+				if(title.isNotEmpty())
+					a->setProperty(Identifier(url.second), title);
+
+				obj.getDynamicObject()->setProperty("DELETE", true);
+			}
+
+			return false;
+		});
+
+		forEach(fullObject, [&](var& obj)
+		{
+			if (auto list = obj["Children"].getArray())
+			{
+				for(int i = 0; i < list->size(); i++)
+				{
+					if(list->getReference(i)["DELETE"])
+						list->remove(i--);
+				}
+			}
+
+			return false;
+		});
+
+		forEach(fullObject, [&](var& obj)
+		{
+			if(obj["Children"].size() == 0)
+			{
+				obj.getDynamicObject()->removeProperty("Children");
+				obj.getDynamicObject()->removeProperty("Colour");
+			}
+
+			return false;
+		});
+	}
+
+	static std::pair<String, String> splitAnchor(const var& v)
+	{
+		auto url = v["URL"].toString();
+
+		auto u = url.upToLastOccurrenceOf("#", false, false);
+		auto a = url.fromFirstOccurrenceOf("#", false, false);
+
+		return { u, a };
+	}
+
+	static bool forEach(var& obj_, const std::function<bool(var&)>& f)
+	{
+		if(f(obj_))
+			return true;
+
+		if(auto d = obj_["Children"].getArray())
+		{
+			for(auto& v: *d)
+			{
+				if(forEach(v, f))
+					return true;
+			}
+		}
+
+		return false;
+	}
+
+	var getToc() const { return fullObject; }
+	var getAnchors() const { return var(anchors.get()); }
+
+	var fullObject;
+	DynamicObject::Ptr anchors;
+};
+
 void DatabaseCrawler::writeJSONTocFile(File htmlDirectory)
 {
 	auto tocVar = getHolder().getDatabase().getJSONObjectForToc();
-	auto s = "var rootDb = " + JSON::toString(tocVar) + ";\n";
+
+	TocCleaner tc(tocVar);
+
+	
+	String s;
+	
+	s << "var anchors = " << JSON::toString(tc.getAnchors()) << ";\n\n";
+
+	s << "var rootDb = " << JSON::toString(tc.getToc()) << ";\n";
+
 	auto f = htmlDirectory.getChildFile("template/scripts/toc.json");
 	f.create();
 

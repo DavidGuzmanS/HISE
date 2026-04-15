@@ -52,7 +52,7 @@ struct dynamic_base : public base,
 
 	virtual ~dynamic_base();;
 
-	void initialise(NodeBase* p) override;
+	void initialise(ObjectWithValueTree* p) override;
 
 	void onComplexDataEvent(ComplexDataUIUpdaterBase::EventType d, var data) override;
 
@@ -160,15 +160,11 @@ using filter = data::pimpl::dynamicT<hise::FilterDataObject>;
 */
 struct sliderpack : public data::pimpl::dynamicT<hise::SliderPackData>
 {
-	sliderpack(data::base& t, int index=0) :
-		dynamicT<hise::SliderPackData>(t, index)
-	{
-		this->internalData->setNumSliders(16);
-	}
+	sliderpack(data::base& t, int index=0);
 
 	virtual ~sliderpack() {};
 
-	void initialise(NodeBase* p) override;
+	void initialise(ObjectWithValueTree* p) override;
 
 	void updateNumParameters(Identifier id, var newValue);
 
@@ -198,7 +194,7 @@ struct audiofile : public data::pimpl::dynamicT<hise::MultiChannelAudioBuffer>,
 
 	void onComplexDataEvent(ComplexDataUIUpdaterBase::EventType d, var data) override;
 
-	void initialise(NodeBase* n);
+	void initialise(ObjectWithValueTree* n);
 	
 	void sourceHasChanged(ComplexDataUIBase* oldSource, ComplexDataUIBase* newSource) override;
 
@@ -212,7 +208,7 @@ struct displaybuffer : public data::pimpl::dynamicT<hise::SimpleRingBuffer>
 {
 	displaybuffer(data::base& t, int index = 0);
 
-	void initialise(NodeBase* n) override;
+	void initialise(ObjectWithValueTree* n) override;
 
 	SimpleRingBuffer* getCurrentRingBuffer()
 	{
@@ -323,56 +319,6 @@ struct RingBufferPropertyEditor: public Component
 	OwnedArray<Component> items;
 };
 
-struct complex_ui_laf : public ScriptnodeComboBoxLookAndFeel,
-						public TableEditor::LookAndFeelMethods,
-						public SliderPack::LookAndFeelMethods,
-						public HiseAudioThumbnail::LookAndFeelMethods,
-						public FilterGraph::LookAndFeelMethods,
-						public RingBufferComponentBase::LookAndFeelMethods,
-						public AhdsrGraph::LookAndFeelMethods
-{
-	complex_ui_laf() = default;
-
-	void drawTableBackground(Graphics& g, TableEditor& te, Rectangle<float> area, double rulerPosition) override;
-	void drawTablePath(Graphics& g, TableEditor& te, Path& p, Rectangle<float> area, float lineThickness) override;
-	void drawTablePoint(Graphics& g, TableEditor& te, Rectangle<float> tablePoint, bool isEdge, bool isHover, bool isDragged) override;
-	void drawTableRuler(Graphics& g, TableEditor& te, Rectangle<float> area, float lineThickness, double rulerPosition) override;
-	void drawTableValueLabel(Graphics& g, TableEditor& te, Font f, const String& text, Rectangle<int> textBox) override;
-
-	void drawFilterBackground(Graphics &g, FilterGraph& fg) override;
-	void drawFilterGridLines(Graphics &g, FilterGraph& fg, const Path& gridPath) override;
-	void drawFilterPath(Graphics& g, FilterGraph& fg, const Path& p) override;
-
-	bool shouldClosePath() const override { return false; }
-
-	void drawLinearSlider(Graphics&, int x, int y, int width, int height, float sliderPos, float minSliderPos, float maxSliderPos, const Slider::SliderStyle, Slider&) override;
-
-	void drawSliderPackBackground(Graphics& g, SliderPack& s) override;
-	void drawSliderPackFlashOverlay(Graphics& g, SliderPack& s, int sliderIndex, Rectangle<int> sliderBounds, float intensity) override;
-
-	void drawHiseThumbnailBackground(Graphics& g, HiseAudioThumbnail& th, bool areaIsEnabled, Rectangle<int> area) override;
-	void drawHiseThumbnailPath(Graphics& g, HiseAudioThumbnail& th, bool areaIsEnabled, const Path& path) override;
-	void drawTextOverlay(Graphics& g, HiseAudioThumbnail& th, const String& text, Rectangle<float> area) override;
-
-	void drawButtonBackground(Graphics&, Button&, const Colour& backgroundColour, bool shouldDrawButtonAsHighlighted, bool shouldDrawButtonAsDown) override;
-
-	void drawButtonText(Graphics&, TextButton&, bool shouldDrawButtonAsHighlighted, bool shouldDrawButtonAsDown) override;
-
-	Colour getNodeColour(Component* c);
-
-	void drawOscilloscopeBackground(Graphics& g, RingBufferComponentBase& ac, Rectangle<float> area) override;
-	void drawOscilloscopePath(Graphics& g, RingBufferComponentBase& ac, const Path& p) override;
-	void drawGonioMeterDots(Graphics& g, RingBufferComponentBase& ac, const RectangleList<float>& dots, int index) override;
-	void drawAnalyserGrid(Graphics& g, RingBufferComponentBase& ac, const Path& p) override;
-
-	void drawAhdsrBackground(Graphics& g, AhdsrGraph& graph) override;
-	void drawAhdsrPathSection(Graphics& g, AhdsrGraph& graph, const Path& s, bool isActive) override;
-	void drawAhdsrBallPosition(Graphics& g, AhdsrGraph& graph, Point<float> p) override;
-
-	Colour nodeColour;
-
-	JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(complex_ui_laf);
-};
 
 
 
@@ -392,12 +338,6 @@ template <class DynamicDataType, class DataType, class ComponentType, bool AddDr
 		addAndMakeVisible(externalButton);
 
 		rebuildSelectorItems();
-
-		
-
-		
-
-		//setSize(w, h + 41);
 
 		newSource = b->currentlyUsedData;
 		sourceChangedAsync();
